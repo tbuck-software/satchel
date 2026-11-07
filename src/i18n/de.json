@@ -422,6 +422,9 @@
       "restoreSearchIndexInvalid": "Der Suchindex der Sicherung passt nicht zu ihren Nachrichten. Lege lieber eine frische Sicherung an, statt diese zurückzuspielen.",
       "restoreStagingChanged": "Die vorgemerkte Sicherung ist unvollständig oder wurde verändert. Merke die Sicherung erneut vor.",
       "revealTargetBlocked": "Dieses Ziel kann nicht im Dateimanager geöffnet werden.",
+      "rules": {
+        "actionsInvalid": "Ordner oder Weiterleitungsadresse dieser Regel sind nicht erlaubt."
+      },
       "scheduledTimeInvalid": "Wähle einen gültigen Sendezeitpunkt in der Zukunft.",
       "senderAddressMissing": "Dieses Konto hat keine Absenderadresse. Trage sie unter Einstellungen → Konten ein und sende erneut.",
       "senderAddressNotOwned": "\"{address}\" ist weder die Adresse dieses Kontos noch einer seiner Aliase. Wähle einen anderen Absender.",
@@ -3079,6 +3082,46 @@
       "provider": "Provider: {provider}",
       "refreshed": "{count} Labels/Kategorien aktualisiert.",
       "title": "Provider-Features"
+    },
+    "ruleActions": {
+      "account": "Konto",
+      "accountHint": "Eine Regel, die E-Mails verschiebt, gehört zu dem Konto, in dessen Ordner sie verschiebt.",
+      "accountMissing": "Konto entfernt: Die Regel läuft nicht mehr",
+      "actionLocal": "Nur lokal",
+      "actionPending": "Noch nicht auf dem Server",
+      "actionServer": "Server",
+      "actionServerTitle": "Diese Aktion läuft auch auf dem Server.",
+      "addressInvalid": "Gib eine einzelne E-Mail-Adresse ohne Namen ein.",
+      "addressLabel": "Weiterleitungsadresse",
+      "addressOwn": "Das ist eine deiner eigenen Adressen: Die E-Mail käme sofort zurück.",
+      "addressPlaceholder": "name{'@'}example.com",
+      "allAccounts": "Alle Konten",
+      "chooseAccountFirst": "Wähle oben ein Konto, um einen seiner Ordner auszuwählen.",
+      "folderLabel": "Ordner",
+      "folderMissing": "Ordner fehlt: Das Verschieben bewirkt nichts",
+      "folderPlaceholder": "Ordner wählen",
+      "forwardHint": "Neue E-Mails werden einmal weitergeleitet, mit dem Original im Anhang; Regeln auf vorhandene E-Mails anzuwenden, leitet nichts weiter. Automatische Antworten und Mails von Verteilerlisten werden nicht weitergeleitet.",
+      "forwardPaused": "Weiterleiten pausiert: Diese Regel hat innerhalb einer Stunde mehr als {count} Nachrichten weitergeleitet. Prüfe die Regel und setze das Weiterleiten dann fort. Speichern lässt es pausiert.",
+      "forwardResume": "Weiterleiten fortsetzen",
+      "forwardResumed": "Weiterleiten fortgesetzt.",
+      "forwardSummary": "Weiterleiten an {address}",
+      "keepCopy": "Kopie auf dem Server behalten",
+      "keepCopyHint": "Ohne Kopie leitet der Server die Nachricht weiter und behält keine: Scheitert die Weiterleitung (die Adresse weist sie zurück), ist die Nachricht aus deinem Postfach verschwunden. Leitet Satchel sie weiter, bleibt das Original in jedem Fall erhalten.",
+      "kinds": {
+        "forward": "Weiterleiten an",
+        "moveToFolder": "In Ordner verschieben",
+        "star": "Anheften"
+      },
+      "moveSummary": "Verschieben nach {folder}",
+      "moveSummaryMissing": "In einen Ordner verschieben, den es nicht mehr gibt",
+      "noCopyConfirm": "Auf dem Server werden Nachrichten, die diese Regel weiterleitet, nicht in deinem Postfach gespeichert. Scheitert die Weiterleitung, sind sie verloren.",
+      "noCopyConfirmAction": "Ohne Kopie weiterleiten",
+      "noCopyConfirmTitle": "Ohne Kopie weiterleiten?",
+      "noFolders": "Dieses Konto hat keinen Ordner zum Verschieben.",
+      "oneMoveHint": "Eine Nachricht wird einmal verschoben: Die erste passende Regel bestimmt den Ordner.",
+      "onePerRule": "Eine Regel verschiebt in einen Ordner und leitet an eine Adresse weiter. Entferne die zusätzliche Aktion, um zu speichern.",
+      "reasonFolder": "Der Server kennt diesen Ordner nicht.",
+      "serverSkips": "Eine Weiterleitung blieb dem Server überlassen, der diese Regel beim Eintreffen ausgeführt hat. | {count} Weiterleitungen blieben dem Server überlassen, der diese Regel beim Eintreffen ausgeführt hat."
     },
     "rules": {
       "actions": {

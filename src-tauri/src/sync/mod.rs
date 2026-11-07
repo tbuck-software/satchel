@@ -19,4 +19,5 @@ pub mod outbox;
 pub mod outlook_migration;
 pub mod queue_worker;
 pub mod repairs;
+pub mod rule_forward;
 pub mod workflow_executor;

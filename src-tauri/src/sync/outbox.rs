@@ -149,7 +149,7 @@ pub async fn execute_send_action(
         )
     })
     .unwrap_or(false);
-    if request_rr {
+    if asks_for_read_receipt(request_rr, &payload.input) {
         let rr_addr = outgoing
             .reply_to
             .clone()
@@ -300,6 +300,13 @@ fn sent_copy_source(outgoing: &OutgoingMessage) -> SentCopy {
     }
 }
 
+/// Whether a send asks for a read receipt: when the setting is on, and never
+/// for mail Satchel sends on its own (a rule's forward), which nobody wrote
+/// and whose recipient owes no one a receipt.
+fn asks_for_read_receipt(setting_on: bool, input: &OutgoingMessageInput) -> bool {
+    setting_on && input.auto_submitted.is_none()
+}
+
 async fn build_outgoing_message(
     pool: &SqlitePool,
     input: &OutgoingMessageInput,
@@ -366,6 +373,7 @@ async fn build_outgoing_message(
         pgp_sign_with_key_id: input.pgp_sign_with_key_id.clone(),
         pgp_encrypt_to_recipients: input.pgp_encrypt_to_recipients,
         priority: input.priority.clone(),
+        auto_submitted: input.auto_submitted.clone(),
     })
 }
 
@@ -675,6 +683,15 @@ mod tests {
             ),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn an_automatic_forward_never_asks_for_a_read_receipt() {
+        let mut input = OutgoingMessageInput::default();
+        assert!(super::asks_for_read_receipt(true, &input));
+        assert!(!super::asks_for_read_receipt(false, &input));
+        input.auto_submitted = Some("auto-generated".into());
+        assert!(!super::asks_for_read_receipt(true, &input));
     }
 
     #[test]

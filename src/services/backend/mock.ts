@@ -2972,7 +2972,20 @@ const handlers: Record<string, Handler> = {
     return { method: target.startsWith('mailto:') ? 'mailto' : 'http-one-click', target };
   },
   list_blocked_senders: () => [],
-  list_rules: () => [],
+  list_rules: () => mockRules.map((rule) => ({ ...rule, actions: [...rule.actions] })),
+  upsert_rule: ({ input: raw }) => mockUpsertRule(raw as MockRuleInput),
+  delete_rule: ({ ruleId }) => {
+    const index = mockRules.findIndex((rule) => rule.id === String(ruleId));
+    if (index < 0) throw new Error('rule not found');
+    mockRules.splice(index, 1);
+    return null;
+  },
+  resume_rule_forwarding: ({ ruleId }) => {
+    const rule = mockRules.find((entry) => entry.id === String(ruleId));
+    if (!rule) throw new Error('rule not found');
+    rule.forward_paused_at = null;
+    return null;
+  },
   get_server_rules_overview: () => mockServerRulesOverview(),
   detect_server_rules: ({ accountId }) => {
     const sieve = mockSieve(String(accountId));
@@ -3080,6 +3093,66 @@ function mockSieve(accountId: string): MockSieveAccount {
   return mockSieveAccounts[accountId]!;
 }
 
+interface MockRule {
+  id: string; name: string; description: string | null; trigger_type: string;
+  trigger_config: Record<string, unknown>; actions: string[]; is_active: boolean; priority: number;
+  account_id: string | null;
+  forward_paused_at: string | null;
+  server_forward_skips: number;
+}
+type MockRuleInput = Omit<MockRule, 'id' | 'forward_paused_at' | 'server_forward_skips'> & { id?: string | null };
+/** Rules saved in this session; the mock starts with none. */
+const mockRules: MockRule[] = [];
+
+/** The checks of `upsert_rule` that the editor can run into. */
+function mockUpsertRule(input: MockRuleInput): MockRule {
+  const moves = input.actions.filter((action) => action.startsWith('move_to_folder:'));
+  if (moves.length > 1) throw new Error('backend.errors.rules.actionsInvalid');
+  if (input.actions.filter((action) => /^forward(_no_copy)?:/.test(action)).length > 1) {
+    throw new Error('backend.errors.rules.actionsInvalid');
+  }
+  if (moves.length > 0 && !input.account_id) throw new Error('backend.errors.rules.actionsInvalid');
+  const own = new Set(accounts.map((account) => account.email.toLowerCase()));
+  for (const action of input.actions) {
+    const address = /^forward(?:_no_copy)?:(.*)$/.exec(action)?.[1]?.trim().toLowerCase();
+    if (address && own.has(address)) throw new Error('backend.errors.rules.actionsInvalid');
+  }
+  const rule: MockRule = {
+    ...input,
+    id: input.id ?? `rule-${mockRules.length + 1}-${Date.now()}`,
+    description: input.description ?? null,
+    account_id: input.account_id ?? null,
+    actions: [...input.actions],
+    // Saving keeps a paused forward paused, as the backend does.
+    forward_paused_at: mockRules.find((entry) => entry.id === input.id)?.forward_paused_at ?? null,
+    server_forward_skips: mockRules.find((entry) => entry.id === input.id)?.server_forward_skips ?? 0,
+  };
+  const index = mockRules.findIndex((entry) => entry.id === rule.id);
+  if (index >= 0) mockRules.splice(index, 1, rule);
+  else mockRules.push(rule);
+  mockRules.sort((a, b) => b.priority - a.priority);
+  return rule;
+}
+
+/**
+ * Why one action of a rule could not run on a server with `extensions`, or
+ * null — the same requirements the Sieve compiler has.
+ */
+function mockActionPlacement(action: string, extensions: string[]): { kind: string; detail: string | null } | null {
+  const kind = action.split(':')[0] ?? action;
+  const needs: Record<string, string[]> = {
+    mark_read: ['imap4flags'],
+    star: ['imap4flags'],
+    move_to_folder: ['fileinto', 'imap4flags'],
+    forward: ['imap4flags', 'copy'],
+    forward_no_copy: ['imap4flags'],
+  };
+  const required = needs[kind];
+  if (!required) return { kind: 'action', detail: kind };
+  const missing = required.find((extension) => !extensions.includes(extension));
+  return missing ? { kind: 'extension', detail: missing } : null;
+}
+
 function mockServerRulesOverview() {
   const imapAccounts = accounts.filter((account) => account.provider === 'imap');
   return {
@@ -3119,8 +3192,28 @@ function mockServerRulesOverview() {
         last_error: null,
       };
     }),
-    // The mock keeps no rules (`list_rules` is empty), so none has a placement.
-    rules: [],
+    // Nothing is pushed in the mock: a rule the server could run is pending.
+    rules: mockRules.filter((rule) => rule.is_active).map((rule) => {
+      const enabled = imapAccounts
+        .filter((account) => mockSieve(account.id).enabled)
+        .filter((account) => !rule.account_id || rule.account_id === account.id);
+      const extensions = enabled[0] ? mockSieve(enabled[0].id).server.extensions : [];
+      const reasons = enabled.length > 0
+        ? rule.actions.map((action) => mockActionPlacement(action, extensions))
+        : [];
+      const local = reasons.find((reason) => reason !== null) ?? null;
+      return {
+        rule_id: rule.id,
+        server_account_ids: [],
+        local_reason: local,
+        pending: enabled.length > 0 && local === null,
+        // A rule stays local whole; nothing is pushed, so the rest is pending.
+        actions: reasons.map((reason) => ({
+          state: reason || local ? 'local' : 'pending',
+          reason: reason ?? local,
+        })),
+      };
+    }),
   };
 }
 

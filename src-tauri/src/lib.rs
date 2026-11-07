@@ -785,6 +785,7 @@ pub fn run() {
             commands::rules::delete_rule,
             commands::rules::run_rules_for_thread,
             commands::rules::run_rules_for_threads,
+            commands::rules::resume_rule_forwarding,
             commands::sources::get_source_capabilities,
             commands::sources::list_sources,
             commands::sources::create_source,

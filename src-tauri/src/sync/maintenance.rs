@@ -335,6 +335,16 @@ async fn run_once(
             );
         }
         purge_orphan_attachments(pool, app).await.ok();
+        match satchel_core::rules::prune_forward_records(pool, chrono::Utc::now()).await {
+            Ok(removed) if removed > 0 => info!(
+                target: "satchel::maintenance",
+                removed, "dropped aged rule forward records"
+            ),
+            Ok(_) => {}
+            Err(err) => {
+                warn!(target: "satchel::maintenance", %err, "rule forward records not pruned")
+            }
+        }
         // Topic links have no FK on item_id (polymorphic); sweep the ones
         // whose thread/message has been deleted meanwhile. The timeline
         // already hides them, this keeps the table from growing stale.

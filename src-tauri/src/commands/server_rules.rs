@@ -64,7 +64,7 @@ pub struct ServerRulesAccountDto {
     ts(export, export_to = "app/commands/server_rules/")
 )]
 pub struct LocalReasonDto {
-    /// `trigger`, `action`, `condition`, `extension` or `invalid`.
+    /// `trigger`, `action`, `condition`, `extension`, `folder` or `invalid`.
     pub kind: String,
     pub detail: Option<String>,
 }
@@ -81,6 +81,23 @@ pub struct RulePlacementDto {
     pub local_reason: Option<LocalReasonDto>,
     /// Compilable, but the server does not run this version yet.
     pub pending: bool,
+    /// Per action, in the rule's order. Empty when no account the rule
+    /// applies to has server rules on.
+    pub actions: Vec<ActionPlacementDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ipc-types",
+    ts(export, export_to = "app/commands/server_rules/")
+)]
+pub struct ActionPlacementDto {
+    /// `server`: runs on the server of every account the rule applies to.
+    /// `pending`: could, but this version is not verified there yet.
+    /// `local`: runs in Satchel only, for `reason`.
+    pub state: String,
+    pub reason: Option<LocalReasonDto>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -184,6 +201,7 @@ fn reason_dto(reason: LocalReason) -> LocalReasonDto {
         LocalReason::Action(detail) => ("action", Some(detail)),
         LocalReason::Condition(detail) => ("condition", Some(detail)),
         LocalReason::Extension(detail) => ("extension", Some(detail)),
+        LocalReason::Folder => ("folder", None),
         LocalReason::Invalid => ("invalid", None),
     };
     LocalReasonDto {
@@ -223,13 +241,40 @@ pub async fn overview(pool: &SqlitePool) -> Result<ServerRulesOverviewDto, Comma
         })
         .collect();
     let rules = service::load_rules(pool).await.map_err(db_error)?;
-    let placements = service::placements(&rules, &states)
+    let mut folders = std::collections::BTreeMap::new();
+    for state in states.iter().filter(|state| state.enabled) {
+        folders.insert(
+            state.account_id.clone(),
+            service::load_folders(pool, &state.account_id)
+                .await
+                .map_err(db_error)?,
+        );
+    }
+    let placements = service::placements(&rules, &states, &folders)
         .into_iter()
         .map(|placement| RulePlacementDto {
             rule_id: placement.rule_id,
             server_account_ids: placement.server_account_ids,
             local_reason: placement.local_reason.map(reason_dto),
             pending: placement.pending,
+            actions: placement
+                .actions
+                .into_iter()
+                .map(|action| match action {
+                    service::ActionPlacement::Server => ActionPlacementDto {
+                        state: "server".into(),
+                        reason: None,
+                    },
+                    service::ActionPlacement::Pending => ActionPlacementDto {
+                        state: "pending".into(),
+                        reason: None,
+                    },
+                    service::ActionPlacement::Local(reason) => ActionPlacementDto {
+                        state: "local".into(),
+                        reason: Some(reason_dto(reason)),
+                    },
+                })
+                .collect(),
         })
         .collect();
     Ok(ServerRulesOverviewDto {

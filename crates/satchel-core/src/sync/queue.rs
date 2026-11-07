@@ -7,6 +7,12 @@ use sqlx::{FromRow, Sqlite, SqlitePool, Transaction};
 pub const ACTION_SEND_MESSAGE: &str = "send_message";
 /// Draft uploads share the durable queue and the manual retry for sync actions.
 pub const ACTION_SYNC_DRAFT: &str = "sync_draft";
+/// A rule's forward of one message: fetch the original, check it may be
+/// forwarded, queue the send. Scheduled like a send, ahead of the account's
+/// other mutations: it reads the message where it is, before a rule's move
+/// queued after it changes its folder-scoped UID; and while it waits for a
+/// retry it does not hold up the account's other actions.
+pub const ACTION_RULE_FORWARD: &str = "rule_forward";
 
 /// The states an outgoing message may be discarded from. Anything else means
 /// the worker already owns the row: `sending` is mid-submission, and a row that
@@ -157,7 +163,7 @@ impl SyncQueue {
             "WITH heads AS (
                 SELECT *, ROW_NUMBER() OVER (
                     PARTITION BY account_id ORDER BY
-                    CASE action_type WHEN 'send_message' THEN 0 ELSE 1 END,
+                    CASE action_type WHEN 'send_message' THEN 0 WHEN 'rule_forward' THEN 0 ELSE 1 END,
                     rowid
                 ) AS position
                 FROM sync_queue
@@ -165,7 +171,7 @@ impl SyncQueue {
                   AND (id NOT LIKE 'notification:%' OR COALESCE(updated_at_ms, 0) <= ?)
                   AND NOT EXISTS (SELECT 1 FROM accounts WHERE accounts.id = sync_queue.account_id AND is_active = 0)
                   AND NOT EXISTS (SELECT 1 FROM sync_queue_dependencies d JOIN sync_queue predecessor ON predecessor.id = d.depends_on WHERE d.action_id = sync_queue.id)
-                  AND (action_type <> 'send_message' OR
+                  AND (action_type NOT IN ('send_message', 'rule_forward') OR
                        (next_retry_at IS NULL OR next_retry_at <= ?)
                        AND (scheduled_for IS NULL OR scheduled_for <= ?))
              ) SELECT id, account_id, action_type, payload, status, retry_count,
@@ -174,7 +180,7 @@ impl SyncQueue {
                FROM heads WHERE position = 1
                  AND (next_retry_at IS NULL OR next_retry_at <= ?)
                  AND (scheduled_for IS NULL OR scheduled_for <= ?)
-               ORDER BY CASE action_type WHEN 'send_message' THEN 0 ELSE 1 END, created_at",
+               ORDER BY CASE action_type WHEN 'send_message' THEN 0 WHEN 'rule_forward' THEN 0 ELSE 1 END, created_at",
         )
         .bind(notification_lease_cutoff_ms())
         .bind(&now)
@@ -337,7 +343,7 @@ impl SyncQueue {
                AND (next_retry_at IS NULL OR next_retry_at <= ?)
                AND (scheduled_for IS NULL OR scheduled_for <= ?)
              ORDER BY
-               CASE action_type WHEN 'send_message' THEN 0 ELSE 1 END,
+               CASE action_type WHEN 'send_message' THEN 0 WHEN 'rule_forward' THEN 0 ELSE 1 END,
                COALESCE(next_retry_at, scheduled_for, created_at) ASC
              LIMIT 1",
         )

@@ -567,10 +567,58 @@ async fn move_threads_with_receipt(
         .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(|e| e.to_string())?;
-    ensure_no_pending_move(&mut tx, ids).await?;
+    let result =
+        move_threads_tx(&mut tx, queue, ids, target, record_undo, MoveScope::Thread).await?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+    queue.wake_worker();
+    Ok(result)
+}
+
+/// Which messages of a thread a move takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MoveScope {
+    /// Every message, as a move the person asks for.
+    Thread,
+    /// Only those in the Inbox: what a rule run on new mail saw. The
+    /// person's sent replies and filed messages stay where they are.
+    Inbox,
+}
+
+/// A rule's move of a thread's Inbox messages into one of its account's
+/// folders, inside the rule run's transaction. Queued like any move: the
+/// remote move goes in first, the message keeps its folder until the
+/// provider confirms (`pending_folder_id`). Flags must be queued before.
+pub async fn move_inbox_messages_in_transaction(
+    tx: &mut Transaction<'_, Sqlite>,
+    queue: &SyncQueue,
+    thread_id: &str,
+    folder_id: &str,
+) -> Result<Vec<String>, String> {
+    let ids = [thread_id.to_string()];
+    move_threads_tx(
+        tx,
+        queue,
+        &ids,
+        MoveTarget::Folder(folder_id),
+        false,
+        MoveScope::Inbox,
+    )
+    .await
+    .map(|(queued, _)| queued)
+}
+
+async fn move_threads_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    queue: &SyncQueue,
+    ids: &[String],
+    target: MoveTarget<'_>,
+    record_undo: bool,
+    scope: MoveScope,
+) -> Result<(Vec<String>, TrashReceipt), String> {
+    ensure_no_pending_move(tx, ids).await?;
     for id in ids {
         sqlx::query("DELETE FROM mail_action_receipts WHERE state = 'available' AND id IN (SELECT receipt_id FROM mail_action_threads WHERE thread_id = ?)")
-            .bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+            .bind(id).execute(&mut **tx).await.map_err(|e| e.to_string())?;
     }
     let now = chrono::Utc::now().to_rfc3339();
     let mut queued = Vec::new();
@@ -581,7 +629,7 @@ async fn move_threads_with_receipt(
     if matches!(target, MoveTarget::Archive) {
         queued.extend(
             crate::sync::workflow_markers::enqueue_workflow_markers_in_transaction(
-                &mut tx,
+                tx,
                 queue,
                 ids,
                 &crate::workflow::remote_marker::WorkflowMarker::Done,
@@ -598,13 +646,13 @@ async fn move_threads_with_receipt(
             "DELETE FROM mail_action_receipts WHERE state != 'requested' AND created_at < ?",
         )
         .bind((chrono::Utc::now() - chrono::Duration::days(1)).to_rfc3339())
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(|e| e.to_string())?;
         sqlx::query("INSERT INTO mail_action_receipts (id, created_at) VALUES (?, ?)")
             .bind(&receipt_id)
             .bind(&now)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(|e| e.to_string())?;
     }
@@ -612,8 +660,8 @@ async fn move_threads_with_receipt(
     for id in ids.iter().filter(|id| seen.insert(id.as_str())) {
         let (account, provider): (String, String) = sqlx::query_as(
             "SELECT t.account_id, a.provider FROM threads t JOIN accounts a ON a.id = t.account_id WHERE t.id = ?")
-            .bind(id).fetch_one(&mut *tx).await.map_err(|e| e.to_string())?;
-        let rows = messages(&mut tx, id).await?;
+            .bind(id).fetch_one(&mut **tx).await.map_err(|e| e.to_string())?;
+        let rows = messages(tx, id).await?;
         let permanent = matches!(target, MoveTarget::Trash)
             && !rows.is_empty()
             && rows.iter().all(|m| m.folder_type == "trash");
@@ -626,7 +674,7 @@ async fn move_threads_with_receipt(
             if !refs.is_empty() {
                 queued.push(
                     enqueue(
-                        &mut tx,
+                        tx,
                         queue,
                         &account,
                         RemoteMutationPayload::Delete { refs },
@@ -636,13 +684,13 @@ async fn move_threads_with_receipt(
                 );
             }
             sqlx::query("DELETE FROM attachments WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ?)")
-                .bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+                .bind(id).execute(&mut **tx).await.map_err(|e| e.to_string())?;
             sqlx::query("DELETE FROM messages WHERE thread_id = ?")
                 .bind(id)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(|e| e.to_string())?;
-            refresh_thread_projection_tx(&mut tx, id, &now)
+            refresh_thread_projection_tx(tx, id, &now)
                 .await
                 .map_err(|e| e.to_string())?;
             continue;
@@ -650,14 +698,15 @@ async fn move_threads_with_receipt(
         let queue_start = queued.len();
         if record_undo {
             sqlx::query("INSERT INTO mail_action_threads (receipt_id, thread_id, account_id, workflow_state, board_column, snooze_until, action_at) SELECT ?, id, account_id, workflow_state, board_column, snooze_until, ? FROM threads WHERE id = ?")
-                .bind(&receipt_id).bind(&now).bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+                .bind(&receipt_id).bind(&now).bind(id).execute(&mut **tx).await.map_err(|e| e.to_string())?;
             receipt.undo_thread_ids.push(id.clone());
         }
         let (folder_id, remote, kind) =
-            resolve_target(&mut tx, &account, &provider, &target, &now).await?;
+            resolve_target(tx, &account, &provider, &target, &now).await?;
         let rows = rows
             .into_iter()
             .filter(|m| m.source_folder != remote)
+            .filter(|m| scope == MoveScope::Thread || m.folder_type == "inbox")
             .filter(|m| !matches!(target, MoveTarget::Inbox) || m.folder_type == "spam")
             .filter(|m| {
                 !matches!(target, MoveTarget::Archive)
@@ -675,7 +724,7 @@ async fn move_threads_with_receipt(
             if !provider.eq_ignore_ascii_case("pop3") && !refs.is_empty() {
                 queued.push(
                     enqueue(
-                        &mut tx,
+                        tx,
                         queue,
                         &account,
                         RemoteMutationPayload::Flags {
@@ -692,7 +741,7 @@ async fn move_threads_with_receipt(
             for message in &rows {
                 sqlx::query("UPDATE messages SET is_read = 1 WHERE id = ?")
                     .bind(&message.id)
-                    .execute(&mut *tx)
+                    .execute(&mut **tx)
                     .await
                     .map_err(|e| e.to_string())?;
             }
@@ -709,14 +758,14 @@ async fn move_threads_with_receipt(
             .into_action(id, chrono::Utc::now())?;
             action.status = "pending".into();
             action.scheduled_for = None;
-            queue.enqueue_in_transaction(&mut tx, &action).await?;
+            queue.enqueue_in_transaction(tx, &action).await?;
             queued.push(action.id);
         }
         let moved_any = !rows.is_empty();
         for message in rows {
             if record_undo {
                 sqlx::query("INSERT INTO mail_action_messages (receipt_id, message_id, original_folder_id, target_folder_id) SELECT ?, id, folder_id, ? FROM messages WHERE id = ?")
-                    .bind(&receipt_id).bind(&folder_id).bind(&message.id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+                    .bind(&receipt_id).bind(&folder_id).bind(&message.id).execute(&mut **tx).await.map_err(|e| e.to_string())?;
             }
             if !provider.eq_ignore_ascii_case("pop3") && message.remote_ref().is_some() {
                 sqlx::query(
@@ -725,34 +774,34 @@ async fn move_threads_with_receipt(
                 .bind(&folder_id)
                 .bind(&now)
                 .bind(&message.id)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(|e| e.to_string())?;
             } else {
                 sqlx::query("UPDATE messages SET folder_id = ?, pending_folder_id = NULL, updated_at = ? WHERE id = ?")
-                    .bind(&folder_id).bind(&now).bind(&message.id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+                    .bind(&folder_id).bind(&now).bind(&message.id).execute(&mut **tx).await.map_err(|e| e.to_string())?;
             }
         }
         if matches!(target, MoveTarget::Inbox) {
             if moved_any {
                 sqlx::query("UPDATE threads SET workflow_state = 'inbox', board_column = 'inbox', snooze_until = NULL, workflow_changed_at = ?, updated_at = ? WHERE id = ?")
-                    .bind(&now).bind(&now).bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+                    .bind(&now).bind(&now).bind(id).execute(&mut **tx).await.map_err(|e| e.to_string())?;
             }
         } else if !matches!(target, MoveTarget::Folder(_)) {
             sqlx::query("UPDATE threads SET workflow_state = 'done', board_column = 'done', workflow_changed_at = ?, updated_at = ? WHERE id = ?")
-                .bind(&now).bind(&now).bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+                .bind(&now).bind(&now).bind(id).execute(&mut **tx).await.map_err(|e| e.to_string())?;
         }
         if record_undo {
             for action_id in &queued[queue_start..] {
                 sqlx::query("INSERT INTO mail_action_queue (receipt_id, action_id) VALUES (?, ?)")
                     .bind(&receipt_id)
                     .bind(action_id)
-                    .execute(&mut *tx)
+                    .execute(&mut **tx)
                     .await
                     .map_err(|e| e.to_string())?;
             }
         }
-        refresh_thread_projection_tx(&mut tx, id, &now)
+        refresh_thread_projection_tx(tx, id, &now)
             .await
             .map_err(|e| e.to_string())?;
     }
@@ -760,15 +809,13 @@ async fn move_threads_with_receipt(
         if receipt.undo_thread_ids.is_empty() {
             sqlx::query("DELETE FROM mail_action_receipts WHERE id = ?")
                 .bind(&receipt_id)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(|e| e.to_string())?;
         } else {
             receipt.undo_token = Some(receipt_id);
         }
     }
-    tx.commit().await.map_err(|e| e.to_string())?;
-    queue.wake_worker();
     Ok((queued, receipt))
 }
 

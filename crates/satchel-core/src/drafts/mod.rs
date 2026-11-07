@@ -1363,6 +1363,7 @@ async fn push_draft_to_remote(
         pgp_sign_with_key_id: None,
         pgp_encrypt_to_recipients: false,
         priority: None,
+        auto_submitted: None,
     };
     provider
         .upsert_draft(

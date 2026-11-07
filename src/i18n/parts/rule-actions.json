@@ -1,0 +1,104 @@
+{
+  "en": {
+    "settings": {
+      "ruleActions": {
+        "account": "Account",
+        "allAccounts": "All accounts",
+        "accountHint": "A rule that moves mail belongs to the account whose folder it moves to.",
+        "kinds": {
+          "star": "Pin",
+          "moveToFolder": "Move to folder",
+          "forward": "Forward to"
+        },
+        "folderLabel": "Folder",
+        "folderPlaceholder": "Choose a folder",
+        "chooseAccountFirst": "Choose an account above to pick one of its folders.",
+        "noFolders": "This account has no folder to move mail to.",
+        "addressLabel": "Forward address",
+        "addressPlaceholder": "name{'@'}example.com",
+        "addressInvalid": "Enter one email address, without a name.",
+        "addressOwn": "That is one of your own addresses: the mail would come straight back.",
+        "keepCopy": "Keep a copy on the server",
+        "keepCopyHint": "Without a copy, the server forwards the message and keeps none: if the forward fails (the address bounces), the message is gone from your mailbox. When Satchel forwards it, the original stays either way.",
+        "forwardHint": "New mail is forwarded once, with the original attached; applying rules to mail you already have forwards nothing. Automatic replies and mailing-list mail are not forwarded.",
+        "moveSummary": "Move to {folder}",
+        "forwardSummary": "Forward to {address}",
+        "actionServer": "Server",
+        "actionServerTitle": "This action also runs on the server.",
+        "actionLocal": "Local only",
+        "reasonFolder": "The server does not know this folder.",
+        "oneMoveHint": "A message moves once: the first matching rule decides the folder.",
+        "noCopyConfirmTitle": "Forward without keeping a copy?",
+        "noCopyConfirm": "On the server, messages this rule forwards are not stored in your mailbox. If the forward fails, they are lost.",
+        "noCopyConfirmAction": "Forward without a copy",
+        "actionPending": "Not on the server yet",
+        "accountMissing": "Account removed: the rule no longer runs",
+        "folderMissing": "Folder missing: the move does nothing",
+        "moveSummaryMissing": "Move to a folder that no longer exists",
+        "forwardPaused": "Forwarding paused: this rule forwarded more than {count} messages within an hour. Check the rule, then resume forwarding. Saving the rule leaves it paused.",
+        "forwardResume": "Resume forwarding",
+        "forwardResumed": "Forwarding resumed.",
+        "serverSkips": "One forward was left to the server, which ran this rule when the message arrived. | {count} forwards were left to the server, which ran this rule when the messages arrived.",
+        "onePerRule": "A rule can move to one folder and forward to one address. Remove the extra action to save."
+      }
+    },
+    "backend": {
+      "errors": {
+        "rules": {
+          "actionsInvalid": "This rule's folder or forward address is not allowed."
+        }
+      }
+    }
+  },
+  "de": {
+    "settings": {
+      "ruleActions": {
+        "account": "Konto",
+        "allAccounts": "Alle Konten",
+        "accountHint": "Eine Regel, die E-Mails verschiebt, gehört zu dem Konto, in dessen Ordner sie verschiebt.",
+        "kinds": {
+          "star": "Anheften",
+          "moveToFolder": "In Ordner verschieben",
+          "forward": "Weiterleiten an"
+        },
+        "folderLabel": "Ordner",
+        "folderPlaceholder": "Ordner wählen",
+        "chooseAccountFirst": "Wähle oben ein Konto, um einen seiner Ordner auszuwählen.",
+        "noFolders": "Dieses Konto hat keinen Ordner zum Verschieben.",
+        "addressLabel": "Weiterleitungsadresse",
+        "addressPlaceholder": "name{'@'}example.com",
+        "addressInvalid": "Gib eine einzelne E-Mail-Adresse ohne Namen ein.",
+        "addressOwn": "Das ist eine deiner eigenen Adressen: Die E-Mail käme sofort zurück.",
+        "keepCopy": "Kopie auf dem Server behalten",
+        "keepCopyHint": "Ohne Kopie leitet der Server die Nachricht weiter und behält keine: Scheitert die Weiterleitung (die Adresse weist sie zurück), ist die Nachricht aus deinem Postfach verschwunden. Leitet Satchel sie weiter, bleibt das Original in jedem Fall erhalten.",
+        "forwardHint": "Neue E-Mails werden einmal weitergeleitet, mit dem Original im Anhang; Regeln auf vorhandene E-Mails anzuwenden, leitet nichts weiter. Automatische Antworten und Mails von Verteilerlisten werden nicht weitergeleitet.",
+        "moveSummary": "Verschieben nach {folder}",
+        "forwardSummary": "Weiterleiten an {address}",
+        "actionServer": "Server",
+        "actionServerTitle": "Diese Aktion läuft auch auf dem Server.",
+        "actionLocal": "Nur lokal",
+        "reasonFolder": "Der Server kennt diesen Ordner nicht.",
+        "oneMoveHint": "Eine Nachricht wird einmal verschoben: Die erste passende Regel bestimmt den Ordner.",
+        "noCopyConfirmTitle": "Ohne Kopie weiterleiten?",
+        "noCopyConfirm": "Auf dem Server werden Nachrichten, die diese Regel weiterleitet, nicht in deinem Postfach gespeichert. Scheitert die Weiterleitung, sind sie verloren.",
+        "noCopyConfirmAction": "Ohne Kopie weiterleiten",
+        "actionPending": "Noch nicht auf dem Server",
+        "accountMissing": "Konto entfernt: Die Regel läuft nicht mehr",
+        "folderMissing": "Ordner fehlt: Das Verschieben bewirkt nichts",
+        "moveSummaryMissing": "In einen Ordner verschieben, den es nicht mehr gibt",
+        "forwardPaused": "Weiterleiten pausiert: Diese Regel hat innerhalb einer Stunde mehr als {count} Nachrichten weitergeleitet. Prüfe die Regel und setze das Weiterleiten dann fort. Speichern lässt es pausiert.",
+        "forwardResume": "Weiterleiten fortsetzen",
+        "forwardResumed": "Weiterleiten fortgesetzt.",
+        "serverSkips": "Eine Weiterleitung blieb dem Server überlassen, der diese Regel beim Eintreffen ausgeführt hat. | {count} Weiterleitungen blieben dem Server überlassen, der diese Regel beim Eintreffen ausgeführt hat.",
+        "onePerRule": "Eine Regel verschiebt in einen Ordner und leitet an eine Adresse weiter. Entferne die zusätzliche Aktion, um zu speichern."
+      }
+    },
+    "backend": {
+      "errors": {
+        "rules": {
+          "actionsInvalid": "Ordner oder Weiterleitungsadresse dieser Regel sind nicht erlaubt."
+        }
+      }
+    }
+  }
+}

@@ -310,6 +310,9 @@
       "restoreSearchIndexInvalid": "The backup's search index does not match its messages. Make a fresh backup instead of restoring this one.",
       "restoreStagingChanged": "The staged backup is incomplete or has changed. Stage the backup again.",
       "revealTargetBlocked": "This target cannot be opened in the file manager.",
+      "rules": {
+        "actionsInvalid": "This rule's folder or forward address is not allowed."
+      },
       "scheduledTimeInvalid": "Choose a valid send time in the future.",
       "senderAddressMissing": "This account has no sender address. Add one in Settings → Accounts, then send again.",
       "senderAddressNotOwned": "\"{address}\" is neither this account's address nor one of its aliases. Pick a different sender.",

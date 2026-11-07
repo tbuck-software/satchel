@@ -26,6 +26,7 @@ pub mod events;
 pub mod mail_actions;
 pub mod mail_merge;
 pub mod providers;
+pub mod rules;
 pub mod runtime_capabilities;
 pub mod server_rules;
 pub mod spam;
