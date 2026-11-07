@@ -1,0 +1,48 @@
+{
+  "en": {
+    "settings": {
+      "sections": {
+        "labs": {
+          "label": "Labs",
+          "description": "Try features before they are finished"
+        }
+      },
+      "labs": {
+        "experimental": "Experimental",
+        "note": "These features are not finished. They can change, break or go away in a later version. Each switch applies to this device only.",
+        "restart": "Takes effect after a restart.",
+        "saveFailed": "The switch could not be saved.",
+        "loadFailed": "The Labs settings could not be loaded.",
+        "flags": {
+          "chats": {
+            "title": "Chats with Delta Chat",
+            "description": "Shows mail from Delta Chat as chats: a Chats list under the Inbox, messages as bubbles, and a reply field that sends at once. The mail stays in your folders. With an OpenPGP key for your address, replies are end-to-end encrypted with Autocrypt."
+          }
+        }
+      }
+    }
+  },
+  "de": {
+    "settings": {
+      "sections": {
+        "labs": {
+          "label": "Labs",
+          "description": "Funktionen ausprobieren, bevor sie fertig sind"
+        }
+      },
+      "labs": {
+        "experimental": "Experimentell",
+        "note": "Diese Funktionen sind nicht fertig: Was du hier einschaltest, kann sich ändern, ausfallen oder in einer späteren Version wegfallen. Jeder Schalter gilt nur für dieses Gerät.",
+        "restart": "Wirkt nach einem Neustart.",
+        "saveFailed": "Der Schalter konnte nicht gespeichert werden.",
+        "loadFailed": "Die Labs-Einstellungen konnten nicht geladen werden.",
+        "flags": {
+          "chats": {
+            "title": "Chats mit Delta Chat",
+            "description": "Zeigt Mails aus Delta Chat als Chats: eine Chats-Liste unter dem Posteingang, Nachrichten als Sprechblasen und ein Antwortfeld, das sofort sendet. Die Mails bleiben in deinen Ordnern. Mit einem OpenPGP-Schlüssel für deine Adresse sind Antworten per Autocrypt Ende-zu-Ende-verschlüsselt."
+          }
+        }
+      }
+    }
+  }
+}

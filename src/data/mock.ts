@@ -1179,3 +1179,97 @@ export const mockCalendarInvites: BackendCalendarInvite[] = [
 export const mockCalendarSources: BackendCalendarSource[] = [
   { account_id: 'acc-work', source: 'local', remote_id: 'local', name: 'Satchel' },
 ];
+
+/*
+ * Delta Chat threads for Labs → Chats: mail whose messages carry
+ * `Chat-Version`. They are Inbox mail like any other; the mock adds them
+ * when the Chats flag is on (or with `?mockChats`), so lists without the
+ * experiment keep their fixture.
+ */
+export interface MockChatThread {
+  thread: Thread;
+  messages: Message[];
+  groupId: string | null;
+  groupName: string | null;
+  /** The peers' Autocrypt keys are known: the next message is encrypted. */
+  encrypted: boolean;
+}
+
+const TOM = { name: 'Tom', email: 'tom@satchel.dev' };
+const chatMinutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+
+function chatMessage(threadId: string, index: number, from: { name: string; email: string },
+  to: Array<{ name: string; email: string }>, minutes: number, bodyText: string, subject: string): Message {
+  return {
+    id: `${threadId}-m${index}`,
+    threadId,
+    from,
+    to,
+    subject,
+    bodyText,
+    timestamp: chatMinutesAgo(minutes),
+    isRead: true,
+    attachments: [],
+  };
+}
+
+function chatThread(id: string, subject: string, participants: Thread['participants'],
+  messages: Message[], unreadCount: number): Thread {
+  const last = messages.at(-1)!;
+  return {
+    id,
+    accountId: 'acc-work',
+    subject,
+    participants,
+    snippet: last.bodyText.slice(0, 180),
+    lastMessageAt: last.timestamp,
+    lastMessageAtMs: Date.parse(last.timestamp),
+    messageCount: messages.length,
+    unreadCount,
+    hasAttachments: false,
+    workflowState: 'inbox',
+    priority: 1,
+    mailboxNames: ['INBOX'],
+    tags: [],
+    senderKnown: true,
+  };
+}
+
+function mockChats(): MockChatThread[] {
+  const lena = { name: 'Lena Brandt', email: 'lena@chat.example.test' };
+  const jonas = { name: 'Jonas', email: 'jonas@example.test' };
+  const mia = { name: 'Mia', email: 'mia@chat.example.test' };
+  const lenaMessages = [
+    chatMessage('th-chat-lena', 1, lena, [TOM], 60 * 26, 'Hast du am Wochenende Zeit für den Umzug?', 'Message from Lena Brandt'),
+    chatMessage('th-chat-lena', 2, TOM, [lena], 60 * 25, 'Samstag geht, Sonntag nicht.', 'Message from Tom'),
+    chatMessage('th-chat-lena', 3, lena, [TOM], 74, 'Bist du heute Abend in der Wohnung? Ich müsste noch den Bohrer abholen', 'Message from Lena Brandt'),
+    chatMessage('th-chat-lena', 4, TOM, [lena], 71, 'Ja, ab 19 Uhr. Klingel einfach', 'Message from Tom'),
+    chatMessage('th-chat-lena', 5, lena, [TOM], 58, 'Passt, ich bring den Schlüssel mit\n\n-- \nSent with my Delta Chat Messenger: https://delta.chat', 'Message from Lena Brandt'),
+  ];
+  lenaMessages[4]!.isRead = false;
+  const familyTo = (from: { name: string; email: string }) => [TOM, lena, jonas, mia].filter((person) => person !== from);
+  const familyMessages = [
+    chatMessage('th-chat-family', 1, mia, familyTo(mia), 60 * 3, 'Fotos vom Sonntag kommen heute Abend', 'Chat: Familie: Fotos vom Sonntag kommen heute Abend'),
+    chatMessage('th-chat-family', 2, jonas, familyTo(jonas), 60 * 2, 'Super, danke!\n\n> Fotos vom Sonntag kommen heute Abend', 'Chat: Familie: Super, danke!'),
+    chatMessage('th-chat-family', 3, mia, familyTo(mia), 80, 'Sind hochgeladen 📷', 'Chat: Familie: Sind hochgeladen'),
+  ];
+  familyMessages[2]!.isRead = false;
+  return [
+    {
+      thread: chatThread('th-chat-lena', 'Message from Lena Brandt', [lena, TOM], lenaMessages, 1),
+      messages: lenaMessages,
+      groupId: null,
+      groupName: null,
+      encrypted: true,
+    },
+    {
+      thread: chatThread('th-chat-family', 'Chat: Familie', [mia, jonas, lena, TOM], familyMessages, 1),
+      messages: familyMessages,
+      groupId: 'fAm1lyGr0up-x7',
+      groupName: 'Familie',
+      encrypted: false,
+    },
+  ];
+}
+
+export const mockChatThreads: () => MockChatThread[] = mockChats;

@@ -1634,6 +1634,50 @@ pub async fn load_private_signing_key(
     Ok((armored, passphrase))
 }
 
+/// The private key that speaks for `address`: a stored private key with a
+/// user id for it that can still sign and encrypt. Returns its id and the
+/// armored key; the key may be locked.
+pub async fn own_private_key_for(
+    pool: &SqlitePool,
+    app: &AppHandle,
+    address: &str,
+) -> Result<Option<(String, String)>, String> {
+    prepare_pgp_key_storage(pool, app).await?;
+    let rows = sqlx::query_as::<_, PgpKeySecretRow>(
+        "SELECT id, key_type, armored_key, passphrase
+         FROM pgp_keys WHERE key_type = 'private' ORDER BY id",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|err| err.to_string())?;
+    let needle = address.trim().to_ascii_lowercase();
+    for row in rows {
+        let Ok(armored) = decrypt_secret(
+            &row.armored_key,
+            app,
+            crypto::SecretContext::pgp_armored_key(),
+        ) else {
+            continue;
+        };
+        let Ok(metadata) = pgp_engine::key_metadata(&armored) else {
+            continue;
+        };
+        let speaks_for = metadata
+            .user_ids
+            .iter()
+            .any(|user_id| user_id_matches_email(user_id, &needle));
+        if speaks_for && metadata.can_encrypt && metadata.can_sign && !metadata.is_expired {
+            return Ok(Some((row.id, armored)));
+        }
+    }
+    Ok(None)
+}
+
+/// Whether a key was unlocked this session, so it can sign without a prompt.
+pub async fn key_is_unlocked(state: &AppState, key_id: &str) -> bool {
+    state.pgp_unlock_sessions.lock().await.contains_key(key_id)
+}
+
 /// Resolve public keys for every recipient.
 ///
 /// Returns an error naming the recipients without a key rather than silently

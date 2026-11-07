@@ -5198,6 +5198,8 @@ fn envelope_from_fetch(
         auth_dmarc,
         spam_hint_headers: crate::spam::tokenizer::extract_hint_headers(&header),
         satchel_marks,
+        chat: crate::chat::parse_chat_headers(&header),
+        autocrypt_headers: crate::chat::header_values(&header, "Autocrypt"),
         attachments,
     }
 }

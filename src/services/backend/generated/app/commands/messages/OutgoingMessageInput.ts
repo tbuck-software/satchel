@@ -1,4 +1,5 @@
 // Generated from Rust. Run pnpm ipc:generate.
+import type { ChatSendOptions } from "./ChatSendOptions";
 import type { OutgoingAttachmentInput } from "./OutgoingAttachmentInput";
 export type OutgoingMessageInput = {
     to: Array<string>;
@@ -51,4 +52,9 @@ export type OutgoingMessageInput = {
      */
     signature_override_text: string | null;
     signature_override_html: string | null;
+    /**
+     * A Delta Chat message (Labs → Chats): adds `Chat-Version`, the group
+     * headers and Autocrypt, and encrypts when every peer's key is known.
+     */
+    chat: ChatSendOptions | null;
 };

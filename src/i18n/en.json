@@ -260,6 +260,8 @@
       "calendarRichDescriptionReadOnly": "This description is formatted in Outlook and would lose its links and layout here. Edit it in Outlook.",
       "calendarTimeInvalid": "Enter a valid event time.",
       "calendarTitleRequired": "Enter an event title.",
+      "chatNoRecipient": "This chat has no one to send to.",
+      "chatNotAChat": "This is not a chat.",
       "composeWindowUnsupported": "A separate compose window is only available on the desktop.",
       "contactAvatarFallbackSyncFailed": "Fallback contact photos could not be synchronized.",
       "contactAvatarLocalSyncFailed": "Local contact photos could not be synchronized.",
@@ -772,6 +774,39 @@
       "exception": "{account}: {problem}",
       "problem": "{account}: {problem}"
     }
+  },
+  "chats": {
+    "allAccounts": "All accounts",
+    "composer": {
+      "hint": "Enter sends, Shift+Enter adds a line",
+      "label": "Message",
+      "placeholder": "Message {name}…",
+      "queued": "Queued. It goes out when the connection is back.",
+      "send": "Send",
+      "sendFailed": "The message could not be sent.",
+      "sending": "Sending…"
+    },
+    "empty": {
+      "description": "Messages from Delta Chat appear here as they arrive.",
+      "title": "No chats yet"
+    },
+    "encrypted": "End-to-end encrypted",
+    "list": "Chats",
+    "loadFailed": "The chats could not be loaded.",
+    "members": "{count} member | {count} members",
+    "messagesLoadFailed": "The messages could not be loaded.",
+    "notEncrypted": "Not encrypted",
+    "notEncryptedNoKey": "Replies go out unencrypted: there is no OpenPGP key for {address}.",
+    "notEncryptedNoPeerKey": "Replies go out unencrypted until every member has sent an Autocrypt key.",
+    "select": {
+      "description": "Its messages show as bubbles, with a reply field below.",
+      "title": "Pick a chat"
+    },
+    "showAsMail": "Show as mail",
+    "title": "Chats",
+    "today": "Today",
+    "unread": "{count} unread",
+    "yesterday": "Yesterday"
   },
   "cleanup": {
     "actions": {
@@ -2858,6 +2893,19 @@
       "title": "Embedded images",
       "upfront": "A full run takes at least about {duration} — finishing around {time} at the earliest."
     },
+    "labs": {
+      "experimental": "Experimental",
+      "flags": {
+        "chats": {
+          "description": "Shows mail from Delta Chat as chats: a Chats list under the Inbox, messages as bubbles, and a reply field that sends at once. The mail stays in your folders. With an OpenPGP key for your address, replies are end-to-end encrypted with Autocrypt.",
+          "title": "Chats with Delta Chat"
+        }
+      },
+      "loadFailed": "The Labs settings could not be loaded.",
+      "note": "These features are not finished. They can change, break or go away in a later version. Each switch applies to this device only.",
+      "restart": "Takes effect after a restart.",
+      "saveFailed": "The switch could not be saved."
+    },
     "language": {
       "de": "Deutsch",
       "en": "English",
@@ -3297,6 +3345,10 @@
       "images": {
         "description": "Control loading of external content",
         "label": "External images"
+      },
+      "labs": {
+        "description": "Try features before they are finished",
+        "label": "Labs"
       },
       "mobile-sync": {
         "description": "Fetch new email in the background",

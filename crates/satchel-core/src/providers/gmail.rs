@@ -2636,6 +2636,12 @@ fn map_gmail_message(message: GmailMessageResponse) -> MessageEnvelope {
 
     let list_unsubscribe = header_value(&headers, "List-Unsubscribe");
     let list_unsubscribe_post = header_value(&headers, "List-Unsubscribe-Post");
+    let chat = crate::chat::chat_headers_from(|name| header_value(&headers, name));
+    let autocrypt_headers = headers
+        .iter()
+        .filter(|header| header.name.eq_ignore_ascii_case("Autocrypt"))
+        .map(|header| header.value.trim().to_string())
+        .collect();
     let (auth_spf, auth_dkim, auth_dmarc) = header_value(&headers, "Authentication-Results")
         .map(|value| crate::providers::traits::trusted_authentication_results(&value, "gmail"))
         .unwrap_or((None, None, None));
@@ -2729,6 +2735,8 @@ fn map_gmail_message(message: GmailMessageResponse) -> MessageEnvelope {
         auth_dmarc,
         spam_hint_headers: None,
         satchel_marks: Vec::new(),
+        chat,
+        autocrypt_headers,
         attachments,
     }
 }

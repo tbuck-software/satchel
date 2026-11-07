@@ -48,6 +48,7 @@ const SECTION_KEYS: Record<SettingsSection, readonly string[]> = {
   rules: ['settings.rules', 'settings.sweep'],
   plugins: ['settings.plugins', 'settings.api'],
   diagnostics: ['settings.diagnostics'],
+  labs: ['settings.labs'],
 };
 
 // Outcome messages are not what anyone looks a setting up by.
@@ -65,6 +66,7 @@ export function loadSettingsCatalogue(): Promise<CataloguePart[]> {
     import('@/i18n/parts/settings-c.json'),
     import('@/i18n/parts/language.json'),
     import('@/i18n/parts/translation.json'),
+    import('@/i18n/parts/labs.json'),
   ]).then((modules) => modules.map((module) => module.default as CataloguePart));
   return catalogue;
 }

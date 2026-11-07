@@ -275,23 +275,6 @@ export default {
             "kind": "object",
             "fields": {}
         },
-        "control_mail_merge_job": {
-            "kind": "object",
-            "fields": {
-                "action": {
-                    "required": true,
-                    "shape": {
-                        "kind": "value"
-                    }
-                },
-                "id": {
-                    "required": true,
-                    "shape": {
-                        "kind": "value"
-                    }
-                }
-            }
-        },
         "create_backup": {
             "kind": "object",
             "fields": {
@@ -341,18 +324,6 @@ export default {
                     "shape": {
                         "kind": "ref",
                         "name": "app::commands::folders::CreateFolderInput"
-                    }
-                }
-            }
-        },
-        "create_mail_merge_job": {
-            "kind": "object",
-            "fields": {
-                "input": {
-                    "required": true,
-                    "shape": {
-                        "kind": "ref",
-                        "name": "app::commands::mail_merge::CreateMailMergeJobInput"
                     }
                 }
             }
@@ -923,10 +894,10 @@ export default {
             "kind": "object",
             "fields": {}
         },
-        "get_mail_merge_job": {
+        "get_chat_meta": {
             "kind": "object",
             "fields": {
-                "id": {
+                "threadId": {
                     "required": true,
                     "shape": {
                         "kind": "value"
@@ -1268,11 +1239,11 @@ export default {
                 }
             }
         },
-        "list_local_only_workflow_accounts": {
+        "list_labs_flags": {
             "kind": "object",
             "fields": {}
         },
-        "list_mail_merge_jobs": {
+        "list_local_only_workflow_accounts": {
             "kind": "object",
             "fields": {}
         },
@@ -1786,18 +1757,6 @@ export default {
                 }
             }
         },
-        "parse_mail_merge_csv": {
-            "kind": "object",
-            "fields": {
-                "input": {
-                    "required": true,
-                    "shape": {
-                        "kind": "ref",
-                        "name": "app::commands::mail_merge::ParseMailMergeCsvInput"
-                    }
-                }
-            }
-        },
         "pending_crash_reports": {
             "kind": "object",
             "fields": {}
@@ -1825,18 +1784,6 @@ export default {
                     "required": true,
                     "shape": {
                         "kind": "value"
-                    }
-                }
-            }
-        },
-        "preview_mail_merge": {
-            "kind": "object",
-            "fields": {
-                "input": {
-                    "required": true,
-                    "shape": {
-                        "kind": "ref",
-                        "name": "app::commands::mail_merge::PreviewMailMergeInput"
                     }
                 }
             }
@@ -2170,6 +2117,18 @@ export default {
                 }
             }
         },
+        "send_chat_message": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::chats::SendChatMessageInput"
+                    }
+                }
+            }
+        },
         "send_message": {
             "kind": "object",
             "fields": {
@@ -2308,6 +2267,18 @@ export default {
                     "shape": {
                         "kind": "ref",
                         "name": "app::commands::contacts::ContactAvatarOverrideInput"
+                    }
+                }
+            }
+        },
+        "set_labs_flag": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::labs::SetLabsFlagInput"
                     }
                 }
             }
@@ -3608,6 +3579,23 @@ export default {
                 }
             }
         },
+        "app::commands::chats::SendChatMessageInput": {
+            "kind": "object",
+            "fields": {
+                "text": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "thread_id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "app::commands::contacts::ContactAvatarOverrideInput": {
             "kind": "object",
             "fields": {
@@ -3909,192 +3897,19 @@ export default {
                 }
             }
         },
-        "app::commands::mail_merge::CreateMailMergeJobInput": {
+        "app::commands::labs::SetLabsFlagInput": {
             "kind": "object",
             "fields": {
-                "account_id": {
+                "enabled": {
                     "required": true,
                     "shape": {
                         "kind": "value"
                     }
                 },
-                "delay_seconds": {
+                "id": {
                     "required": true,
                     "shape": {
                         "kind": "value"
-                    }
-                },
-                "email_field": {
-                    "required": true,
-                    "shape": {
-                        "kind": "value"
-                    }
-                },
-                "fields": {
-                    "required": true,
-                    "shape": {
-                        "kind": "array",
-                        "item": {
-                            "kind": "value"
-                        }
-                    }
-                },
-                "message": {
-                    "required": true,
-                    "shape": {
-                        "kind": "ref",
-                        "name": "core::drafts::outgoing::OutgoingMessageInput"
-                    }
-                },
-                "request_id": {
-                    "required": false,
-                    "shape": {
-                        "kind": "optional",
-                        "item": {
-                            "kind": "value"
-                        }
-                    }
-                },
-                "rows": {
-                    "required": true,
-                    "shape": {
-                        "kind": "array",
-                        "item": {
-                            "kind": "ref",
-                            "name": "core::mail_merge::plan::MergeRecipientInput"
-                        }
-                    }
-                },
-                "source_label": {
-                    "required": false,
-                    "shape": {
-                        "kind": "value"
-                    }
-                }
-            }
-        },
-        "app::commands::mail_merge::MergeSignatureInput": {
-            "kind": "object",
-            "fields": {
-                "from_address": {
-                    "required": false,
-                    "shape": {
-                        "kind": "optional",
-                        "item": {
-                            "kind": "value"
-                        }
-                    }
-                },
-                "signature_id": {
-                    "required": false,
-                    "shape": {
-                        "kind": "optional",
-                        "item": {
-                            "kind": "value"
-                        }
-                    }
-                },
-                "signature_override_html": {
-                    "required": false,
-                    "shape": {
-                        "kind": "optional",
-                        "item": {
-                            "kind": "value"
-                        }
-                    }
-                },
-                "signature_override_text": {
-                    "required": false,
-                    "shape": {
-                        "kind": "optional",
-                        "item": {
-                            "kind": "value"
-                        }
-                    }
-                },
-                "signature_variant": {
-                    "required": false,
-                    "shape": {
-                        "kind": "optional",
-                        "item": {
-                            "kind": "value"
-                        }
-                    }
-                }
-            }
-        },
-        "app::commands::mail_merge::ParseMailMergeCsvInput": {
-            "kind": "object",
-            "fields": {
-                "content_base64": {
-                    "required": true,
-                    "shape": {
-                        "kind": "value"
-                    }
-                }
-            }
-        },
-        "app::commands::mail_merge::PreviewMailMergeInput": {
-            "kind": "object",
-            "fields": {
-                "account_id": {
-                    "required": false,
-                    "shape": {
-                        "kind": "optional",
-                        "item": {
-                            "kind": "value"
-                        }
-                    }
-                },
-                "email_field": {
-                    "required": true,
-                    "shape": {
-                        "kind": "value"
-                    }
-                },
-                "fields": {
-                    "required": true,
-                    "shape": {
-                        "kind": "array",
-                        "item": {
-                            "kind": "value"
-                        }
-                    }
-                },
-                "index": {
-                    "required": false,
-                    "shape": {
-                        "kind": "optional",
-                        "item": {
-                            "kind": "value"
-                        }
-                    }
-                },
-                "rows": {
-                    "required": true,
-                    "shape": {
-                        "kind": "array",
-                        "item": {
-                            "kind": "ref",
-                            "name": "core::mail_merge::plan::MergeRecipientInput"
-                        }
-                    }
-                },
-                "signature": {
-                    "required": false,
-                    "shape": {
-                        "kind": "optional",
-                        "item": {
-                            "kind": "ref",
-                            "name": "app::commands::mail_merge::MergeSignatureInput"
-                        }
-                    }
-                },
-                "template": {
-                    "required": true,
-                    "shape": {
-                        "kind": "ref",
-                        "name": "core::mail_merge::plan::MergeTemplate"
                     }
                 }
             }
@@ -6516,6 +6331,29 @@ export default {
                 }
             }
         },
+        "core::chat::ChatSendOptions": {
+            "kind": "object",
+            "fields": {
+                "group_id": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "group_name": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
+        },
         "core::db::account_visibility::AccountVisibilityPolicy": {
             "kind": "object",
             "fields": {
@@ -6955,6 +6793,16 @@ export default {
                         }
                     }
                 },
+                "chat": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "ref",
+                            "name": "core::chat::ChatSendOptions"
+                        }
+                    }
+                },
                 "draft_id": {
                     "required": false,
                     "shape": {
@@ -7165,52 +7013,6 @@ export default {
                         "item": {
                             "kind": "value"
                         }
-                    }
-                }
-            }
-        },
-        "core::mail_merge::plan::MergeRecipientInput": {
-            "kind": "object",
-            "fields": {
-                "line": {
-                    "required": false,
-                    "shape": {
-                        "kind": "optional",
-                        "item": {
-                            "kind": "value"
-                        }
-                    }
-                },
-                "values": {
-                    "required": true,
-                    "shape": {
-                        "kind": "value"
-                    }
-                }
-            }
-        },
-        "core::mail_merge::plan::MergeTemplate": {
-            "kind": "object",
-            "fields": {
-                "body": {
-                    "required": true,
-                    "shape": {
-                        "kind": "value"
-                    }
-                },
-                "body_html": {
-                    "required": false,
-                    "shape": {
-                        "kind": "optional",
-                        "item": {
-                            "kind": "value"
-                        }
-                    }
-                },
-                "subject": {
-                    "required": true,
-                    "shape": {
-                        "kind": "value"
                     }
                 }
             }
