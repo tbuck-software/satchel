@@ -114,6 +114,21 @@ describe('useRecipientDrop', () => {
     expect(drop.dragActive.value).toBe(false);
   });
 
+  it('lights nothing up and opens nothing while refused', () => {
+    const { body } = composer();
+    const { onActiveChange, drop } = setup(true);
+    const event = dragEvent(recipients(['ana@example.test']), body);
+
+    drop.onDragEnter(event);
+
+    expect(drop.dragActive.value).toBe(false);
+    expect(drop.overBody.value).toBe(false);
+    expect(onActiveChange).not.toHaveBeenCalled();
+    // Still kept out of the editor.
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(event.dataTransfer?.dropEffect).toBe('none');
+  });
+
   it('refuses while the message is sending', () => {
     const { body } = composer();
     const { addToTo, drop } = setup(true);

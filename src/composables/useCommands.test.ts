@@ -186,7 +186,7 @@ describe('attach to the open draft', () => {
   it('is offered only while a draft is open, and attaches the selected mail', () => {
     expect(command('draft:attach-mail')).toBeUndefined();
     const attach = vi.fn(async () => {});
-    openDraftTarget.value = { attach, addRecipients: vi.fn() };
+    openDraftTarget.value = { attach, canAddRecipients: () => true, addRecipients: vi.fn() };
 
     command('draft:attach-mail')?.run();
     expect(attach).toHaveBeenCalledWith({ kind: 'threads', ids: ['thread-1'] });

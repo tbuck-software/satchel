@@ -346,7 +346,8 @@ let ccBccOpenedForDrag = false;
 const recipientDrop = useRecipientDrop({
   composerId: composerDragId,
   addToTo: (addresses) => addRecipients('to', addresses),
-  disabled: () => sending.value,
+  // A mail merge has no recipient fields: its list comes from the merge source.
+  disabled: () => sending.value || mergeSource.value !== null,
   onActiveChange: (active) => {
     if (active) {
       if (!showCcBcc.value && !isPhone.value) {
@@ -382,7 +383,10 @@ function onComposerDrop(event: DragEvent) {
 // a contact's "Add to draft".
 const draftTarget: OpenDraftTarget = {
   attach: (source) => threadEmlDrop.attach(source),
-  addRecipients: (addresses) => addRecipients('to', addresses),
+  canAddRecipients: () => mergeSource.value === null,
+  addRecipients: (addresses) => {
+    if (mergeSource.value === null) addRecipients('to', addresses);
+  },
 };
 openDraftTarget.value = draftTarget;
 onBeforeUnmount(() => {

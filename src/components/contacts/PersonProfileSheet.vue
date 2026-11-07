@@ -173,7 +173,7 @@ async function blockPerson() {
         </div>
 
         <div class="person-profile__actions">
-          <AppButton v-if="openDraftTarget" variant="primary" @click="addToDraft">{{ $t('composeDrop.add') }}</AppButton>
+          <AppButton v-if="openDraftTarget?.canAddRecipients()" variant="primary" @click="addToDraft">{{ $t('composeDrop.add') }}</AppButton>
           <AppButton variant="soft" @click="showAllMail">{{ $t('contacts.profile.allMail') }}</AppButton>
           <AppButton variant="ghost" @click="settings.togglePinnedContact(props.person.email)">
             {{ pinned ? $t('contacts.profile.unpin') : $t('contacts.profile.pin') }}

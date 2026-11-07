@@ -65,7 +65,9 @@ export function useRecipientDrop(options: RecipientDropOptions) {
   function onDragEnter(event: DragEvent) {
     if (appDragKind(event) !== 'recipients') return;
     depth += 1;
-    setActive(true);
+    // Refused (sending, a mail merge without recipient fields): nothing
+    // lights up or opens, the drag is only kept out of the editor.
+    if (!disabled()) setActive(true);
     claimBody(event);
   }
 

@@ -10,6 +10,8 @@ import { shallowRef } from 'vue';
  */
 export interface OpenDraftTarget {
   attach(source: { kind: 'threads' | 'messages'; ids: string[] }): Promise<void>;
+  /** False while the draft is a mail merge, which has no recipient fields. Reactive. */
+  canAddRecipients(): boolean;
   /** Adds the recipients to To. */
   addRecipients(addresses: string[]): void;
 }
