@@ -4,6 +4,7 @@ import type { ProviderLabelDto as WireProviderLabelDto } from './generated/app/c
 import type { OptionalWireFields } from './wireTypes';
 // Auto-split from services/backend.ts — domain module.
 import { invoke } from './core';
+import type { BackendStoppedEarly } from './threads';
 
 export type BackendMailbox = WireMailboxDto;
 
@@ -74,11 +75,12 @@ export async function backendCreateProviderLabel(input: {
 }
 
 
+/** Resolves `null` when every thread moved; a stopped move says what it left. */
 export async function backendMoveThreadsToFolder(input: {
   threadIds: string[];
   targetFolderId: string;
-}): Promise<void> {
-  return invoke<void>('move_threads_to_folder', {
+}): Promise<BackendStoppedEarly | null> {
+  return invoke<BackendStoppedEarly | null>('move_threads_to_folder', {
     input: {
       thread_ids: input.threadIds,
       target_folder_id: input.targetFolderId,

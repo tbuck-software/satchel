@@ -491,11 +491,14 @@ async fn workflow_move_reconciliation_in_progress(
     tx: &mut Transaction<'_, Sqlite>,
     thread_id: &str,
 ) -> Result<bool, String> {
-    let payloads = sqlx::query_scalar::<_, String>(
+    let payloads = sqlx::query_scalar::<_, String>(&format!(
         "SELECT payload FROM sync_queue
          WHERE action_type = 'remote_mutation'
-           AND status IN ('pending', 'sending', 'failed')",
-    )
+           AND +status IN ('pending', 'sending', 'failed')
+           AND {} = ?",
+        crate::sync::remote_mutations::QUEUED_MOVE_THREAD_ID
+    ))
+    .bind(thread_id)
     .fetch_all(&mut **tx)
     .await
     .map_err(|err| err.to_string())?;

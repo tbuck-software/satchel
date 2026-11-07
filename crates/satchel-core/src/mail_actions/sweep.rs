@@ -16,7 +16,7 @@ use crate::db::sender_sweep::{
     SenderSweepError, SenderSweepRepository, SweepAction, SweepRuleRecord, SweepSelection,
     SweepTarget,
 };
-use crate::mail_actions::{move_threads, MoveTarget};
+use crate::mail_actions::{move_threads, move_threads_reporting, MoveOutcome, MoveTarget};
 use crate::sync::queue::SyncQueue;
 use crate::workflow::states::WorkflowState;
 use crate::workflow::transitions::{
@@ -222,9 +222,10 @@ async fn archive(
     (result.applied, result.failed.len())
 }
 
-/// One transaction for the chunk; a chunk the batch refuses (one thread with a
-/// move still pending fails all of it) is retried thread by thread, so one
-/// busy thread does not hold back the other 199.
+/// One move for the chunk; a chunk the move refuses (one thread with a move
+/// still pending fails all of it) is retried thread by thread, so one busy
+/// thread does not hold back the other 199. So are the threads a move that
+/// stopped part way left behind.
 async fn move_chunk(
     pool: &SqlitePool,
     queue: &SyncQueue,
@@ -232,12 +233,19 @@ async fn move_chunk(
     target: MoveTarget<'_>,
 ) -> (Vec<String>, usize) {
     let ids: Vec<String> = chunk.iter().map(|t| t.thread_id.clone()).collect();
-    if move_threads(pool, queue, &ids, target).await.is_ok() {
-        return (ids, 0);
-    }
-    let mut swept = Vec::new();
+    let (mut swept, rest) = match move_threads_reporting(pool, queue, &ids, target).await {
+        Ok(MoveOutcome {
+            stopped_early: None,
+            ..
+        }) => return (ids, 0),
+        Ok(MoveOutcome {
+            stopped_early: Some(stopped),
+            ..
+        }) => (stopped.applied, stopped.remaining),
+        Err(_) => (Vec::new(), ids),
+    };
     let mut failed = 0;
-    for id in ids {
+    for id in rest {
         match move_threads(pool, queue, std::slice::from_ref(&id), target).await {
             Ok(_) => swept.push(id),
             Err(error) => {
@@ -299,6 +307,54 @@ mod tests {
             })
             .await
             .unwrap()
+    }
+
+    /// A chunk a later batch stops: what moved counts as swept, the rest is
+    /// retried one by one, and only the thread that fails again is left.
+    #[tokio::test]
+    async fn a_chunk_a_later_batch_stops_retries_only_the_rest() {
+        let pool = pool().await;
+        insert_account(&pool, "a").await;
+        for id in ["s1", "s2", "s3", "s4"] {
+            insert_thread(
+                &pool,
+                "a",
+                id,
+                "news@shop.example",
+                30,
+                "inbox",
+                "inbox",
+                true,
+            )
+            .await;
+        }
+        sqlx::query(
+            "CREATE TRIGGER stop_bulk_move BEFORE UPDATE ON messages WHEN new.thread_id = 's3'
+             BEGIN SELECT RAISE(ABORT, 'database is locked'); END",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let chunk: Vec<SweepTarget> = ["s1", "s2", "s3", "s4"]
+            .into_iter()
+            .map(|id| SweepTarget {
+                thread_id: id.into(),
+                workflow_state: WorkflowState::Inbox,
+                last_message_date: String::new(),
+                unread_count: 0,
+            })
+            .collect();
+
+        // Batches of one, so the chunk crosses batches the way a chunk of 200
+        // would in batches of 50.
+        crate::mail_actions::set_move_batch_threads_for_tests(Some(1));
+        let (swept, failed) = move_chunk(&pool, &SyncQueue::new(), &chunk, MoveTarget::Trash).await;
+        crate::mail_actions::set_move_batch_threads_for_tests(None);
+
+        assert_eq!(swept, ["s1", "s2", "s4"]);
+        assert_eq!(failed, 1);
+        assert_eq!(effective_folder(&pool, "s3").await, "a-inbox");
+        assert_eq!(effective_folder(&pool, "s4").await, "a-trash");
     }
 
     #[tokio::test]

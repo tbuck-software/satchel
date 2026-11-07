@@ -325,6 +325,17 @@ export function createThreadPersistence({
     };
   }
 
+  /**
+   * A move a later batch stopped filed only `applied`: the rest goes back
+   * into the list, as if the backend had refused it.
+   */
+  function keepRemoved(rollback: () => void, receipt: BackendTrashReceipt) {
+    const stopped = receipt.stopped_early;
+    if (!stopped) return;
+    rollback();
+    removeOptimistically(new Set(stopped.applied));
+  }
+
   async function setPriority(threadId: string, priority: Thread['priority']) {
     if (!collection.find(threadId)) return;
     await writeOptimistically([{ id: threadId, values: { priority } }],
@@ -436,7 +447,9 @@ export function createThreadPersistence({
     const receipt = await serializeMutation(async () => {
       const rollback = removeOptimistically(targets);
       try {
-        return await backendMarkThreadsSpam(normalized);
+        const filed = await backendMarkThreadsSpam(normalized);
+        keepRemoved(rollback, filed);
+        return filed;
       } catch (error) {
         if (!backendCommandsAvailable()) return empty;
         rollback();
@@ -563,6 +576,7 @@ export function createThreadPersistence({
         email: sender.senderEmail,
         previous: settings.dismissedNewSenders()[sender.senderEmail],
         through: sender.lastMessageAt,
+        threadIds: sender.threadIds,
       }));
     dismissed.forEach((sender) => settings.setDismissedNewSender(sender.email, sender.through));
 
@@ -574,6 +588,15 @@ export function createThreadPersistence({
       dismissed.forEach((sender) => settings.setDismissedNewSender(sender.email, sender.previous ?? null));
       rollback();
       throw error;
+    }
+    keepRemoved(rollback, receipt);
+    const stopped = receipt.stopped_early;
+    if (stopped) {
+      // A sender none of whose mail moved stays in the new-sender stack.
+      const applied = new Set(stopped.applied);
+      dismissed
+        .filter((sender) => !sender.threadIds.some((threadId) => applied.has(threadId)))
+        .forEach((sender) => settings.setDismissedNewSender(sender.email, sender.previous ?? null));
     }
     // A refresh failure cannot roll back a committed action or lose its Undo receipt.
     await Promise.allSettled([backendDismissMobileNotifications(normalized), refreshHead(), reloadMailboxes()]);

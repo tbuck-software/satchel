@@ -100,7 +100,7 @@ libc = "0.2"
 windows-sys = { version = "0.61", features = ["Win32_Globalization"] }
 
 [dev-dependencies]
-satchel-core = { path = "../crates/satchel-core", features = ["test-support"] }
+satchel-core = { path = "../crates/satchel-core", features = ["test-support", "test-hooks"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

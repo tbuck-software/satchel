@@ -1,4 +1,5 @@
 import type { TrashReceipt } from './generated/core/mail_actions/TrashReceipt';
+import type { StoppedEarly } from './generated/core/mail_actions/StoppedEarly';
 import type { NotSpamReceipt } from './generated/core/mail_actions/NotSpamReceipt';
 import type { SpamFilterMode } from './generated/core/spam/SpamFilterMode';
 import type { SpamFilterStatus } from './generated/core/spam/SpamFilterStatus';
@@ -126,6 +127,8 @@ export async function backendUpdateThreadOrganization(input: {
 
 
 export type BackendTrashReceipt = TrashReceipt;
+/** A bulk move a later batch stopped: what moved, what stayed, why. */
+export type BackendStoppedEarly = StoppedEarly;
 
 export async function backendUndoTrash(receiptId: string): Promise<void> {
   return invoke<void>('undo_trash', { receiptId });
