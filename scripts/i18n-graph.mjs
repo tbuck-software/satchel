@@ -50,7 +50,9 @@ export function resolveImport(spec, fromFile) {
       : null;
   if (!base) return null;
   for (const suffix of CANDIDATE_SUFFIXES) {
-    const candidate = base + suffix;
+    // `/index.ts` on a `\` path would give a second spelling of the same file
+    // on Windows, which no set lookup matches.
+    const candidate = path.normalize(base + suffix);
     if (!/\.(ts|vue)$/.test(candidate)) continue;
     if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
   }

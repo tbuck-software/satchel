@@ -1,0 +1,13 @@
+# Source checks out with LF on every platform. Windows runners default to
+# core.autocrlf=true, and Vitest's module runner rejects a CRLF shebang
+# (`#!/usr/bin/env node\r`), so a script test that is green on Linux failed
+# on Windows. Mail fixtures keep the CRLF they are stored with.
+*.mjs  text eol=lf
+*.cjs  text eol=lf
+*.js   text eol=lf
+*.ts   text eol=lf
+*.vue  text eol=lf
+*.json text eol=lf
+*.css  text eol=lf
+*.html text eol=lf
+*.sh   text eol=lf
