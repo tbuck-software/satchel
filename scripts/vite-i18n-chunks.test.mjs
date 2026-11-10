@@ -71,6 +71,18 @@ describe('i18n chunk plugin', () => {
     expect(helper).toContain("from '@/i18n/messageChunks'");
   });
 
+  // Vite writes module ids with `/` on every platform. On Windows these are
+  // the ids the build hands the plugin; elsewhere the test is the same as above.
+  it('takes ids in Vite\'s form, with `/` on every platform', () => {
+    const viteId = (/** @type {string} */ file) => file.split(path.sep).join('/');
+    const result = hook(wrap, 'transform').call(context, readFileSync(router, 'utf8'), viteId(router));
+    expect(result.code).toContain('__satchelWithMessages("views.SettingsView"');
+    const chunk = viteId(path.join(repoRoot, 'src', 'i18n', 'chunks', 'views.SettingsView.en.json'));
+    expect(JSON.parse(hook(serve, 'load').call(context, chunk)).settings).toBeTypeOf('object');
+    expect(hook(serve, 'load').call(context, viteId(path.join(repoRoot, 'src', 'i18n', 'chunks', 'table.js'))))
+      .toContain('"views.SettingsView"');
+  });
+
   it('refuses a chunk it does not know', () => {
     const id = path.join(repoRoot, 'src', 'i18n', 'chunks', 'views.Nowhere.en.json');
     expect(() => hook(serve, 'load').call(context, id)).toThrow('unknown message chunk');

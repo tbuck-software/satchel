@@ -12,6 +12,7 @@ on:
       - deny.toml
       - 'vendor/lettre/**'
       - 'vendor/wasmtime-internal-cache/**'
+      - 'vendor/sqlx-sqlite/**'
       - crates/satchel-core/tests/vendor_lettre.rs
       - .github/workflows/security-audit.yml
       - scripts/check-rust-audit-exceptions.py
@@ -25,6 +26,7 @@ on:
       - deny.toml
       - 'vendor/lettre/**'
       - 'vendor/wasmtime-internal-cache/**'
+      - 'vendor/sqlx-sqlite/**'
       - crates/satchel-core/tests/vendor_lettre.rs
       - .github/workflows/security-audit.yml
       - scripts/check-rust-audit-exceptions.py

@@ -35,6 +35,7 @@ import {
   keyMentions,
   messageKeys,
   moduleEdges,
+  repoRelative,
   repoRoot,
   staticClosure,
 } from './i18n-graph.mjs';
@@ -118,7 +119,7 @@ const abs = (rel) => path.join(repoRoot, rel);
  * @returns {Iterable<string>}
  */
 export function moduleKeys(file, index) {
-  if (!(path.relative(repoRoot, file) in NOT_KEYS)) return keyMentions(file, index);
+  if (!(repoRelative(file) in NOT_KEYS)) return keyMentions(file, index);
   return [...messageKeys([file])].flatMap((key) => index.expand(key, false));
 }
 
@@ -358,7 +359,7 @@ export function unanchoredKeyCalls(files) {
   /** @type {string[]} */
   const findings = [];
   for (const file of files) {
-    const rel = path.relative(repoRoot, file);
+    const rel = repoRelative(file);
     if (rel in UNANCHORED_KEYS) continue;
     const source = readFileSync(file, 'utf8');
     for (const match of source.matchAll(KEY_CALL_RE)) {

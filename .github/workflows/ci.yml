@@ -155,6 +155,27 @@ jobs:
           # little value and consumes the account-wide Actions storage quota.
           retention-days: 1
 
+  # The release builds the Windows installer from this frontend build. Vite
+  # writes module ids with `/` there and `path` with `\`, so build-time
+  # scripts that compare paths can pass on Linux and fail only in the nightly
+  # (the i18n split did, for four days).
+  frontend-windows:
+    name: Frontend build (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Check the i18n split and its Vite plugin
+        run: pnpm exec vitest run src/i18n/split.test.ts scripts/vite-i18n-chunks.test.mjs
+      - name: Build the frontend
+        run: pnpm exec vite build
+
   backend-portability:
     name: Native compile (${{ matrix.platform }})
     env:

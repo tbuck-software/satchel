@@ -16,6 +16,25 @@ import path from 'node:path';
 
 export const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
+/**
+ * A repo-relative path written with `/` on every platform: the form the
+ * tables in `i18n-split.mjs` are keyed by. `path.relative` writes `\` on
+ * Windows, where a lookup with it misses every entry.
+ *
+ * @param {string} file absolute path
+ */
+export const repoRelative = (file) => path.relative(repoRoot, file).split(path.sep).join('/');
+
+/**
+ * A Vite module id as a path of this platform. Vite writes ids with `/` even
+ * on Windows, while the split computes its paths with `path.join`; without
+ * this, no id compares equal there and the release build cuts no chunks.
+ * Virtual ids (`\0…`) stay as they are.
+ *
+ * @param {string} id
+ */
+export const fsPath = (id) => (id.startsWith('\0') ? id : path.normalize(id));
+
 const CANDIDATE_SUFFIXES = ['', '.ts', '.vue', '/index.ts'];
 
 /**
@@ -31,7 +50,9 @@ export function resolveImport(spec, fromFile) {
       : null;
   if (!base) return null;
   for (const suffix of CANDIDATE_SUFFIXES) {
-    const candidate = base + suffix;
+    // `/index.ts` on a `\` path would give a second spelling of the same file
+    // on Windows, which no set lookup matches.
+    const candidate = path.normalize(base + suffix);
     if (!/\.(ts|vue)$/.test(candidate)) continue;
     if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
   }

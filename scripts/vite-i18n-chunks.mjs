@@ -22,7 +22,9 @@ import { readFileSync } from 'node:fs';
 import {
   DYNAMIC_IMPORT_RE,
   clearGraphCache,
+  fsPath,
   keyIndex,
+  repoRelative,
   repoRoot,
   resolveImport,
   splitFingerprint,
@@ -126,10 +128,11 @@ export function i18nChunks(options = {}) {
       else this.warn(message);
     },
     resolveId(id) {
-      const file = id.startsWith(CHUNK_URL) ? path.join(repoRoot, id) : id;
+      const file = id.startsWith(CHUNK_URL) ? path.join(repoRoot, id) : fsPath(id);
       return file.startsWith(`${CHUNK_DIR}${path.sep}`) ? file : null;
     },
-    load(id) {
+    load(rawId) {
+      const id = fsPath(rawId);
       const { bundles, split, byId } = current();
       if (id === path.join(CHUNK_DIR, HELPER_FILE)) return HELPER_SOURCE;
       if (id === path.join(CHUNK_DIR, TABLE_FILE)) {
@@ -186,7 +189,7 @@ export function i18nChunks(options = {}) {
           server.moduleGraph.invalidateAll();
         } else {
           for (const module of server.moduleGraph.idToModuleMap.values()) {
-            const id = module.id ?? '';
+            const id = fsPath(module.id ?? '');
             if (id.startsWith(CHUNK_DIR) || (options.mock && id.startsWith(path.join(SRC, 'i18n', 'startup.')))) {
               server.moduleGraph.invalidateModule(module);
             }
@@ -194,7 +197,8 @@ export function i18nChunks(options = {}) {
         }
         server.ws.send({ type: 'full-reload' });
       };
-      const refresh = (/** @type {string} */ file) => {
+      const refresh = (/** @type {string} */ changed) => {
+        const file = fsPath(changed);
         if (file.startsWith(PARTS) && file.endsWith('.json')) {
           dirty = true;
         } else if (/\.(ts|vue)$/.test(file) && file.startsWith(SRC)) {
@@ -219,7 +223,8 @@ export function i18nChunks(options = {}) {
     transform(code, id) {
       // A `.vue` file's script may arrive inline or as its own
       // `?vue&type=script` request; styles and templates have no imports.
-      const [file, query = ''] = id.split('?');
+      const [rawFile, query = ''] = id.split('?');
+      const file = fsPath(rawFile);
       if (query && !/(^|&)type=script(&|$)/.test(query)) return null;
       if (!file.startsWith(`${SRC}${path.sep}`) || !/\.(ts|vue)$/.test(file)) return null;
       if (file.startsWith(path.join(SRC, 'i18n') + path.sep) || /\.(test|spec)\.ts$/.test(file)) return null;
@@ -245,7 +250,7 @@ export function i18nChunks(options = {}) {
       /** @type {Map<string, Extract<(typeof bundle)[string], { type: 'chunk' }>>} */
       const chunks = new Map();
       for (const output of Object.values(bundle)) if (output.type === 'chunk') chunks.set(output.fileName, output);
-      const entry = [...chunks.values()].find((chunk) => chunk.isEntry && chunk.facadeModuleId?.endsWith(`${path.sep}index.html`));
+      const entry = [...chunks.values()].find((chunk) => chunk.isEntry && fsPath(chunk.facadeModuleId ?? '').endsWith(`${path.sep}index.html`));
       if (!entry) return;
       /** @type {Set<string>} */
       const seen = new Set();
@@ -260,12 +265,12 @@ export function i18nChunks(options = {}) {
         if (!chunk) continue;
         queue.push(...chunk.imports);
         for (const moduleId of chunk.moduleIds) {
-          const file = moduleId.split('?')[0];
+          const file = fsPath(moduleId.split('?')[0]);
           if (!file.startsWith(`${SRC}${path.sep}`) || !/\.(ts|vue)$/.test(file)) continue;
           if (split.startupModules.has(file)) continue;
           // The injected chunk loader and other key-free modules are harmless.
           const missing = [...moduleKeys(file, index)].filter((key) => !startup.has(key));
-          if (missing.length) unexpected.push(`${path.relative(repoRoot, file)} (${missing.slice(0, 3).join(', ')})`);
+          if (missing.length) unexpected.push(`${repoRelative(file)} (${missing.slice(0, 3).join(', ')})`);
         }
       }
       if (unexpected.length) {
