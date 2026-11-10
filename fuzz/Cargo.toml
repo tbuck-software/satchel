@@ -16,6 +16,7 @@ tokio = { version = "1", features = ["rt", "io-util"] }
 
 [patch.crates-io]
 lettre = { path = "../vendor/lettre" }
+sqlx-sqlite = { path = "../vendor/sqlx-sqlite" }
 
 [[bin]]
 name = "sanitizer"
