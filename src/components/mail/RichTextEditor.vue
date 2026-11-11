@@ -19,6 +19,7 @@ import {
 } from '@/utils/inlineTextStyle';
 import type { InlineImagePayload } from '@/types/composer';
 import { bytesToBase64 } from '@/utils/base64';
+import { readClipboardText } from '@/services/clipboard';
 import { useDismissable } from '@/composables/useDismissable';
 import ModalShell from '@/components/ui/ModalShell.vue';
 import { composerHtmlFromText, isComposerHistoryIntro } from '@/utils/composerHistory';
@@ -197,10 +198,19 @@ editor.value = new Editor({
     ...composerTableExtensions({ onToolbarRequest: focusTableToolbar }),
   ],
   editorProps: {
-    handleKeyDown: (_view, event) => {
+    handleKeyDown: (view, event) => {
       if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
         event.preventDefault();
         emit('submit');
+        return true;
+      }
+      if (isPlainPasteShortcut(event)) {
+        // WebKit binds no paste to this chord, so there is no paste event to
+        // strip; read the clipboard ourselves.
+        event.preventDefault();
+        void readClipboardText().then((text) => {
+          if (text && !view.isDestroyed) view.pasteText(text);
+        });
         return true;
       }
       return false;
@@ -328,6 +338,13 @@ function applyLink() {
     editor.value.chain().focus().setLink({ href: url }).run();
   }
   showLinkDialog.value = false;
+}
+
+/** Cmd/Ctrl+Shift+V, and macOS's Option+Shift+Cmd+V ("Paste and Match Style"). */
+function isPlainPasteShortcut(event: KeyboardEvent): boolean {
+  return event.shiftKey
+    && (event.metaKey || event.ctrlKey)
+    && (event.code === 'KeyV' || event.key.toLowerCase() === 'v');
 }
 
 async function insertImageFromFile(file: File, position?: number) {
@@ -1049,6 +1066,11 @@ defineExpose({ focusEditor, insertHtml, insertText, insertAttachmentImage, remov
   padding-left: 1.45em;
   margin: 0.5em 0;
 }
+/* Tailwind's preflight strips list markers app-wide. */
+.content :deep(.ProseMirror ul) { list-style-type: disc; }
+.content :deep(.ProseMirror ul ul) { list-style-type: circle; }
+.content :deep(.ProseMirror ul ul ul) { list-style-type: square; }
+.content :deep(.ProseMirror ol) { list-style-type: decimal; }
 .content :deep(.ProseMirror p.is-editor-empty:first-child::before) {
   color: var(--text-secondary);
   content: attr(data-placeholder);
