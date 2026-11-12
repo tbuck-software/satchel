@@ -17,7 +17,7 @@ for (const theme of ['dark', 'light'] as const) {
           // The desktop announces standing failures once, then the toast expires.
           await expect(page.locator('.stack')).toBeAttached({ timeout: 30_000 });
         }
-        // The phone leaves them to the banner below: no toast on top of it.
+        // The phone leaves them to the status chip below: no toast on top of it.
         await expect(page.locator('.toast')).toHaveCount(0, { timeout: 20_000 });
         // Without that toast's expiry to wait out, let the queue's first load
         // settle before driving focus: it re-renders the indicator.
@@ -28,9 +28,9 @@ for (const theme of ['dark', 'light'] as const) {
           return outbox.loadedOnce && !outbox.loading;
         });
         const indicator = viewport.width < 640
-          // The phone shows a banner that names the count, with Review as its way in.
-          ? page.getByRole('status').filter({ hasText: '2 items need attention' })
-            .getByRole('button', { name: 'Review issues', exact: true }).filter({ visible: true })
+          // The phone names the count in a chip on the list's subtitle line,
+          // not in a band above the title; the chip is the way in.
+          ? page.getByRole('button', { name: '2 to review', exact: true }).filter({ visible: true })
           : page.locator('.sync-button');
         await expect(indicator).toBeVisible();
         await expect(indicator).toHaveAttribute('aria-haspopup', 'dialog');

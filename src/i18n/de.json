@@ -112,6 +112,20 @@
     "signatures": {
       "discovered": "{count} Signatur in gesendeten Nachrichten gefunden. | {count} Signaturen in gesendeten Nachrichten gefunden."
     },
+    "status": {
+      "certificate": "Zertifikat prüfen",
+      "details": "Details anzeigen",
+      "error": "Fehler aufgetreten",
+      "importing": "Ältere E-Mails {percent}",
+      "more": "+{count}",
+      "offline": "Offline",
+      "review": "{count} zu prüfen",
+      "signIn": "Anmeldung nötig",
+      "syncFailed": "Abgleich gestört",
+      "syncNow": "Jetzt abgleichen",
+      "syncing": "Abgleich läuft",
+      "title": "Abgleich und Konten"
+    },
     "sync": {
       "failures": {
         "explanation": "Vorübergehende Verbindungsprobleme werden automatisch erneut versucht. Diese Einträge müssen geprüft werden.",

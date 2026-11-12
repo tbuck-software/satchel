@@ -112,6 +112,20 @@
     "signatures": {
       "discovered": "Found {count} signature in your sent mail. | Found {count} signatures in your sent mail."
     },
+    "status": {
+      "certificate": "Check certificate",
+      "details": "Show details",
+      "error": "Something failed",
+      "importing": "Older mail {percent}",
+      "more": "+{count}",
+      "offline": "Offline",
+      "review": "{count} to review",
+      "signIn": "Sign-in needed",
+      "syncFailed": "Sync failed",
+      "syncNow": "Sync now",
+      "syncing": "Syncing",
+      "title": "Sync and accounts"
+    },
     "sync": {
       "failures": {
         "explanation": "Temporary connection problems retry automatically. These items need a review.",

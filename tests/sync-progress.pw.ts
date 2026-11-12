@@ -62,3 +62,35 @@ test('shows durable import progress, pauses offline and finishes without a perma
   await expect(details).toHaveCount(0);
   await expect(sync).toBeFocused();
 });
+
+test('keeps phone import progress beside the account and its details open through completion', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await expect(page.locator('.large-title')).toBeVisible();
+  await page.evaluate(async () => {
+    const connectionPath = '/src/stores/connection.ts';
+    const outboxPath = '/src/stores/outbox.ts';
+    const { useConnectionStore } = await import(connectionPath);
+    const { useOutboxStore } = await import(outboxPath);
+    useOutboxStore().items = [];
+    useConnectionStore().$patch({ syncing: false, failedOutbox: 0, failedSends: 0, failedRemoteMutations: 0,
+      syncProgress: [{ account_id: 'work', account_name: 'Work', email: 'alex@example.test',
+        phase: 'waiting', folder: 'Archive', folder_index: 4, folder_total: 12,
+        backfill_remaining: 20000, backfill_total: 40000, updated_at: new Date().toISOString() }] });
+  });
+  const chip = page.locator('.large-title__meta .shell-status').getByRole('button');
+  await expect(chip).toHaveText('Older mail 50%');
+  await expect(page.locator('.mobile-sync-status')).toHaveCount(0);
+  await chip.click();
+  const details = page.getByRole('dialog', { name: 'Mail sync', exact: true });
+  await expect(details).toContainText('20,000 of 40,000 messages');
+  await page.evaluate(async () => {
+    const connectionPath = '/src/stores/connection.ts';
+    const { useConnectionStore } = await import(connectionPath);
+    useConnectionStore().syncProgress = [];
+  });
+  await expect(details).toContainText('Everything is up to date.');
+  await details.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(details).toHaveCount(0);
+  await expect(page.locator('.large-title__switch')).toBeFocused();
+});

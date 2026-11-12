@@ -101,6 +101,20 @@
         "checking": "Checking for updates…",
         "upToDate": "You are up to date.",
         "sourceBuild": "This build is updated from source."
+      },
+      "status": {
+        "signIn": "Sign-in needed",
+        "importing": "Older mail {percent}",
+        "syncFailed": "Sync failed",
+        "error": "Something failed",
+        "certificate": "Check certificate",
+        "review": "{count} to review",
+        "offline": "Offline",
+        "syncing": "Syncing",
+        "more": "+{count}",
+        "title": "Sync and accounts",
+        "details": "Show details",
+        "syncNow": "Sync now"
       }
     },
     "commands": {
@@ -592,6 +606,20 @@
         "checking": "Updates werden gesucht…",
         "upToDate": "Du nutzt die aktuelle Version.",
         "sourceBuild": "Dieser Build wird aus dem Quellcode aktualisiert."
+      },
+      "status": {
+        "signIn": "Anmeldung nötig",
+        "importing": "Ältere E-Mails {percent}",
+        "syncFailed": "Abgleich gestört",
+        "error": "Fehler aufgetreten",
+        "certificate": "Zertifikat prüfen",
+        "review": "{count} zu prüfen",
+        "offline": "Offline",
+        "syncing": "Abgleich läuft",
+        "more": "+{count}",
+        "title": "Abgleich und Konten",
+        "details": "Details anzeigen",
+        "syncNow": "Jetzt abgleichen"
       }
     },
     "commands": {

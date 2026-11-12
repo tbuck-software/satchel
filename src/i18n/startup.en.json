@@ -66,10 +66,21 @@
     "signatures": {
       "discovered": "Found {count} signature in your sent mail. | Found {count} signatures in your sent mail."
     },
+    "status": {
+      "certificate": "Check certificate",
+      "details": "Show details",
+      "error": "Something failed",
+      "importing": "Older mail {percent}",
+      "more": "+{count}",
+      "offline": "Offline",
+      "review": "{count} to review",
+      "signIn": "Sign-in needed",
+      "syncFailed": "Sync failed",
+      "syncing": "Syncing"
+    },
     "sync": {
       "failures": {
-        "label": "{count} item needs attention | {count} items need attention",
-        "review": "Review issues"
+        "label": "{count} item needs attention | {count} items need attention"
       },
       "mutationsFailed": "{count} change didn't reach the server. | {count} changes didn't reach the server.",
       "progress": {

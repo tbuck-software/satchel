@@ -90,7 +90,7 @@ export const FIRST_PAINT = [
   'src/components/layout/ConnectionBanner.vue',
   'src/components/layout/SidebarAccounts.vue',
   'src/components/layout/SidebarAgenda.vue',
-  'src/components/layout/SyncStatusLine.vue',
+  'src/components/layout/ShellStatusChip.vue',
   'src/components/layout/ComposeFab.vue',
 ];
 

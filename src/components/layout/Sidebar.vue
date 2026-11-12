@@ -31,6 +31,11 @@ const FolderBrowserPanel = defineAsyncComponent(() => import('./FolderBrowserPan
 // Async so the calendar utilities stay out of the inbox bundle: the card is a
 // footnote in the sidebar, not a reason to parse the grid code at startup.
 const SidebarAgenda = defineAsyncComponent(() => import('./SidebarAgenda.vue'));
+// Standing notices live here, beside the sync button, as cards: not as a
+// band across the top of the window. ConnectionBanner stays mounted (it hosts
+// the certificate dialog); the reauth notice loads only when it has a case.
+const ConnectionBanner = defineAsyncComponent(() => import('./ConnectionBanner.vue'));
+const AccountReauthBanner = defineAsyncComponent(() => import('@/components/settings/AccountReauthBanner.vue'));
 
 const { t } = useI18n();
 const route = useRoute();
@@ -41,6 +46,8 @@ const syncStatusReady = ref(false);
 watch(() => connection.syncing || connection.syncProgress.length > 0, (active) => {
   if (active) syncStatusReady.value = true;
 }, { immediate: true });
+const reauthNeeded = computed(() =>
+  Boolean(accounts.credentialLock) || accounts.accountsWithAuthError.length > 0);
 const threads = useThreadsStore();
 const settings = useSettingsStore();
 const composer = useComposerStore();
@@ -253,6 +260,8 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
          anchored to the bottom, even with a long mailbox tree. -->
     <footer class="sidebar-footer">
       <SyncStatusLine v-if="syncStatusReady" hide-idle progress-only />
+      <AccountReauthBanner v-if="reauthNeeded" variant="card" />
+      <ConnectionBanner variant="card" />
       <Suspense v-if="!contextualSidebarActive">
         <SidebarAgenda />
       </Suspense>

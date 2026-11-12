@@ -52,6 +52,8 @@ const TopicDetail = defineAsyncComponent(() => import('@/components/topics/Topic
 const SelectionToolbar = defineAsyncComponent(() => import('@/components/mail/SelectionToolbar.vue'));
 // The search machinery loads with the first query, not with the Inbox.
 const ListSearchResults = defineAsyncComponent(() => import('@/components/mail/ListSearchResults.vue'));
+// Phone only: sync and account status on the subtitle line.
+const ShellStatusChip = defineAsyncComponent(() => import('@/components/layout/ShellStatusChip.vue'));
 
 const router = useRouter();
 const { t } = useI18n();
@@ -948,6 +950,9 @@ function acceptExistingSenders() {
         :switch-label="$t('nav.mailboxes.current', { mailbox: listTitle })"
         @switch="ui.openMailboxSwitcher()"
       >
+        <template #status>
+          <ShellStatusChip />
+        </template>
         <template #actions>
           <IconButton size="lg" :title="$t('common.search')" @click="openPhoneSearch">
             <AppIcon size="lg"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></AppIcon>
