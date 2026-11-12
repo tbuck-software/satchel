@@ -50,6 +50,17 @@ where
 /// used by the Tauri sync orchestrator while it aggregates account progress.
 pub fn backfill_stats(cursor: &str) -> Option<(usize, usize)> {
     let value = serde_json::from_str::<serde_json::Value>(cursor).ok()?;
+    cursor_stats(&value, true)
+}
+
+/// History import progress excludes new messages deferred by a bounded IMAP poll.
+/// Those messages trigger fast rescheduling, but are not an initial mail import.
+pub fn history_backfill_stats(cursor: &str) -> Option<(usize, usize)> {
+    let value = serde_json::from_str::<serde_json::Value>(cursor).ok()?;
+    cursor_stats(&value, false)
+}
+
+fn cursor_stats(value: &serde_json::Value, include_incremental: bool) -> Option<(usize, usize)> {
     if let Some(remaining) = value
         .get("backfill_remaining_messages")
         .and_then(serde_json::Value::as_u64)
@@ -61,10 +72,14 @@ pub fn backfill_stats(cursor: &str) -> Option<(usize, usize)> {
             .unwrap_or(remaining as u64) as usize;
         return Some((remaining, total.max(remaining)));
     }
-    let incremental = value
-        .get("incremental_pending")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0) as usize;
+    let incremental = if include_incremental {
+        value
+            .get("incremental_pending")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0) as usize
+    } else {
+        0
+    };
     let backfill = value
         .get("backfill_next_seq")
         .and_then(serde_json::Value::as_u64)
@@ -160,6 +175,15 @@ mod tests {
         assert!(backfill_pending(cursor));
 
         let both = r#"{"backfill_next_seq":4,"backfill_total_seq":10,"incremental_pending":3}"#;
+        assert_eq!(backfill_stats(both), Some((7, 13)));
+    }
+
+    #[test]
+    fn history_progress_does_not_call_incremental_polling_an_import() {
+        let incremental = r#"{"high_uid":40,"incremental_pending":7}"#;
+        assert_eq!(super::history_backfill_stats(incremental), Some((0, 0)));
+        let both = r#"{"backfill_next_seq":4,"backfill_total_seq":10,"incremental_pending":3}"#;
+        assert_eq!(super::history_backfill_stats(both), Some((4, 10)));
         assert_eq!(backfill_stats(both), Some((7, 13)));
     }
 

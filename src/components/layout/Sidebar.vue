@@ -18,6 +18,8 @@ import AppIcon from '@/components/ui/AppIcon.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import SidebarMailNav from './SidebarMailNav.vue';
 import SyncButton from './SyncButton.vue';
+import { useConnectionStore } from '@/stores/connection';
+const SyncStatusLine = defineAsyncComponent(() => import('./SyncStatusLine.vue'));
 
 // Route-specific sidebars used to pull calendar grids and the complete
 // settings navigation into the Inbox bundle even though their v-if was false.
@@ -34,6 +36,11 @@ const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 const accounts = useAccountsStore();
+const connection = useConnectionStore();
+const syncStatusReady = ref(false);
+watch(() => connection.syncing || connection.syncProgress.length > 0, (active) => {
+  if (active) syncStatusReady.value = true;
+}, { immediate: true });
 const threads = useThreadsStore();
 const settings = useSettingsStore();
 const composer = useComposerStore();
@@ -245,6 +252,7 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
     <!-- Kept outside the scroll container so every primary destination stays
          anchored to the bottom, even with a long mailbox tree. -->
     <footer class="sidebar-footer">
+      <SyncStatusLine v-if="syncStatusReady" hide-idle progress-only />
       <Suspense v-if="!contextualSidebarActive">
         <SidebarAgenda />
       </Suspense>

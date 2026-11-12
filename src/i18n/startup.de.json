@@ -72,6 +72,15 @@
         "review": "Probleme prüfen"
       },
       "mutationsFailed": "{count} Änderung ist nicht beim Server angekommen. | {count} Änderungen sind nicht beim Server angekommen.",
+      "progress": {
+        "counts": "{done} von {total} Nachrichten",
+        "details": "Abgleich anzeigen",
+        "folder": "{folder} wird gelesen",
+        "history": "Ältere E-Mails laden",
+        "paused": "Offline pausiert",
+        "preparing": "Postfach verbinden …",
+        "waiting": "Läuft im Hintergrund"
+      },
       "retryFailed": "Erneuter Abgleich fehlgeschlagen: {error}",
       "retryQueued": "{count} Änderung wird erneut abgeglichen. | {count} Änderungen werden erneut abgeglichen.",
       "status": {

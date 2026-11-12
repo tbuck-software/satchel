@@ -17,6 +17,7 @@ export const useConnectionStore = defineStore('connection', () => {
   const online = ref(globalThis.navigator?.onLine ?? true);
   const syncing = ref(false);
   const lastSyncAt = ref<string | null>(null);
+  const syncProgress = ref<BackendConnectionState['sync_progress']>([]);
   const backfillRemaining = ref(0);
   const backfillTotal = ref(0);
   const pendingOutbox = ref(0);
@@ -146,6 +147,10 @@ export const useConnectionStore = defineStore('connection', () => {
     if (typeof state.failed_remote_mutations === 'number') {
       failedRemoteMutations.value = state.failed_remote_mutations;
     }
+    if (Array.isArray(state.sync_progress)) {
+      syncProgress.value = state.sync_progress;
+
+    }
     isLoaded.value = true;
   }
 
@@ -231,6 +236,7 @@ export const useConnectionStore = defineStore('connection', () => {
     syncing,
     syncStatus,
     lastSyncAt,
+    syncProgress,
     backfillRemaining,
     backfillTotal,
     backfillRunning,

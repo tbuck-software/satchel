@@ -21,6 +21,7 @@ pub struct ConnectionStateDto {
     pub failed_outbox: u64,
     pub failed_sends: u64,
     pub failed_remote_mutations: u64,
+    pub sync_progress: Vec<satchel_core::db::connection_state::AccountSyncProgress>,
 }
 
 #[tauri::command]
@@ -39,5 +40,6 @@ pub async fn current_connection_state(
         failed_outbox: snapshot.failed_outbox,
         failed_sends: snapshot.failed_sends,
         failed_remote_mutations: snapshot.failed_remote_mutations,
+        sync_progress: snapshot.sync_progress,
     })
 }

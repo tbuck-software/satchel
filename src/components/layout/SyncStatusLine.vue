@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * The one sentence that answers "am I online, and when did mail last arrive?".
+ * A quiet connection summary, with progress while older mail is imported.
  *
  * It stays silent while `ConnectionBanner` is up. A standing backend failure is
  * the same fact in a stronger, actionable form, and a local-first client that
@@ -11,24 +11,58 @@
  * `status`, never `alert`: being offline is a state the user usually caused,
  * not a failure that interrupts them.
  */
-import { computed, defineAsyncComponent, ref } from 'vue';
+import { computed, defineAsyncComponent, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useConnectionStore } from '@/stores/connection';
 import { useOutboxStore } from '@/stores/outbox';
 import AppBanner from '@/components/ui/AppBanner.vue';
 import AppButton from '@/components/ui/AppButton.vue';
+import CardButton from '@/components/ui/CardButton.vue';
+import ProgressBar from '@/components/ui/ProgressBar.vue';
+import { useSyncProgress } from '@/composables/useSyncProgress';
 import { formatListTime } from '@/utils/listTime';
 
 const props = withDefaults(defineProps<{
   /** Drop the resting "last synced" sentence, for places that are not a footer. */
   hideIdle?: boolean;
+  /** Desktop sidebar: report progress while failures retain their existing affordances. */
+  progressOnly?: boolean;
   /**
    * Show failed items as a banner with a way in, for the phone, where this
    * line is the only sync control on screen. Bare red text there read as
    * leaked debug output.
    */
   bannerFailures?: boolean;
-}>(), { hideIdle: false, bannerFailures: false });
+}>(), { hideIdle: false, bannerFailures: false, progressOnly: false });
+
+const SyncProgressDetails = defineAsyncComponent(() => import('./SyncProgressDetails.vue'));
+const progressOpen = ref(false);
+const connection = useConnectionStore();
+const progress = useSyncProgress();
+const slowSync = ref(false);
+// Routine polls should not make the sidebar footer jump in and out.
+watch(() => props.progressOnly && connection.syncing && !progress.history.value, (defer, _previous, onCleanup) => {
+  slowSync.value = false;
+  if (!defer) return;
+  const timer = setTimeout(() => { slowSync.value = true; }, 3000);
+  onCleanup(() => clearTimeout(timer));
+}, { immediate: true });
+let progressTrigger: HTMLElement | null = null;
+function openProgress(event: MouseEvent) {
+  progressTrigger = event.currentTarget as HTMLElement;
+  progressTrigger.focus();
+  progressOpen.value = true;
+}
+
+function closeProgress() {
+  progressOpen.value = false;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const active = document.activeElement;
+    if (active && active !== document.body && !active.closest('.sheet-root')) return;
+    const target = progressTrigger?.isConnected ? progressTrigger : document.querySelector<HTMLElement>('.sync-button');
+    target?.focus({ preventScroll: true });
+  }));
+}
 
 const SyncFailures = defineAsyncComponent(() => import('./SyncFailures.vue'));
 const failuresOpen = ref(false);
@@ -55,13 +89,14 @@ function closeFailures() {
 }
 const root = ref<HTMLElement | null>(null);
 const outbox = useOutboxStore();
-const failureCount = computed(() => outbox.attentionCount);
-const connection = useConnectionStore();
+const failureCount = computed(() => props.progressOnly ? 0 : outbox.attentionCount);
 const { t } = useI18n();
+const progressTitle = computed(() => [progress.counts.value, progress.phase.value, t('app.sync.progress.details')].filter(Boolean).join(' · '));
 
 const visible = computed(() => {
   if (connection.syncStatus === 'error') return false;
-  return !(props.hideIdle && connection.syncStatus === 'idle');
+  if (props.progressOnly) return progress.history.value || slowSync.value;
+  return !(props.hideIdle && connection.syncStatus === 'idle' && !progress.history.value);
 });
 
 const label = computed(() => {
@@ -73,7 +108,7 @@ const label = computed(() => {
 </script>
 
 <template>
-  <div v-if="failureCount > 0 || visible" ref="root">
+  <div v-if="failureCount > 0 || visible || progressOpen" ref="root">
   <AppBanner
     v-if="failureCount > 0 && props.bannerFailures"
     class="sync-failure-banner"
@@ -88,15 +123,37 @@ const label = computed(() => {
   <AppButton v-else-if="failureCount > 0" variant="link" class="sync-failure-status" aria-haspopup="dialog" :aria-expanded="failuresOpen" @click="openFailures">
     {{ t('app.sync.failures.label', { count: failureCount }, failureCount) }}
   </AppButton>
+  <div v-else-if="visible && progress.active.value" class="sync-progress" role="status">
+    <CardButton class="sync-progress__button" :title="progressTitle" aria-haspopup="dialog" :aria-expanded="progressOpen" @click="openProgress">
+      <span class="sync-progress__line">
+        <span class="sync-progress__label">{{ progress.label.value }}</span>
+        <span v-if="progress.percent.value" class="sync-progress__percent">{{ progress.percent.value }}</span>
+      </span>
+      <ProgressBar v-if="progress.history.value && progress.total.value > 0" class="sync-progress__bar"
+        :value="progress.done.value" :max="progress.total.value" :label="progress.label.value" :value-text="progress.counts.value" />
+    </CardButton>
+  </div>
   <p v-else-if="visible" class="sync-status" :class="`sync-status--${connection.syncStatus}`" role="status">
     <span class="sync-status__dot" aria-hidden="true" />
     <span class="sync-status__text">{{ label }}</span>
   </p>
+  <SyncProgressDetails v-if="progressOpen" :open="progressOpen" @close="closeProgress" />
   <SyncFailures v-if="failureCount > 0 || failuresOpen" :open="failuresOpen" @close="closeFailures" />
   </div>
 </template>
 
 <style scoped>
+/* One line and a hairline: the footer is shared with the agenda, and a fresh
+   install can sit here for an hour. Counts and the current folder live in the
+   tooltip and the details sheet. */
+.sync-progress { padding: 0 var(--space-xs); }
+.sync-progress__button { display: grid; gap: var(--space-2xs); width: 100%; min-width: 0; padding: var(--space-xs) var(--space-sm); border-radius: var(--radius-md); text-align: left; transition: background-color var(--duration-fast) var(--ease-out); }
+.sync-progress__button:hover { background: var(--bg-hover); }
+.sync-progress__line { display: flex; align-items: baseline; gap: var(--space-sm); min-width: 0; font-size: var(--font-size-xs); }
+.sync-progress__label { flex: 1; min-width: 0; overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; white-space: nowrap; }
+.sync-progress__percent { flex-shrink: 0; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+.sync-progress__bar { height: var(--space-2xs); }
+
 .sync-failure-status { color: var(--accent-red-soft); padding: var(--space-xs) var(--space-sm); }
 .sync-status {
   display: flex;
