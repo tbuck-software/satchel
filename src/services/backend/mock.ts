@@ -1,3 +1,4 @@
+import { MOCK_PDF_BASE64 } from './mockPdf';
 import { createPersistedSlot, persistence } from '@/persistence';
 import type { BackendAccountQuota, BackendAccountVisibilityPolicy } from './accounts';
 import type { BackendTask, BackendTaskList } from './tasks';
@@ -2138,8 +2139,8 @@ const handlers: Record<string, Handler> = {
   },
   /*
    * A 2x2 PNG is enough: the card only has to receive bytes it can decode.
-   * Anything else answers with its own name as text, which is what a plain
-   * `.txt` or an unknown type would hold anyway.
+   * PDFs use a valid two-page fixture; other files answer with their name,
+   * which is enough for a plain `.txt` or an unknown type.
    */
   download_attachment: (payload) => {
     const id = (input(payload).attachment_id as string | undefined) ?? '';
@@ -2152,7 +2153,7 @@ const handlers: Record<string, Handler> = {
     return {
       filename,
       mime_type: attachment?.contentType ?? 'application/octet-stream',
-      data_base64: isImage ? MOCK_PNG_BASE64 : btoa(filename),
+      data_base64: isImage ? MOCK_PNG_BASE64 : attachment?.contentType === 'application/pdf' ? MOCK_PDF_BASE64 : btoa(filename),
       cached_path: null,
     };
   },
