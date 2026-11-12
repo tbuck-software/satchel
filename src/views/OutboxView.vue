@@ -38,6 +38,8 @@ import TimeAgo from '@/components/common/TimeAgo.vue';
 import type { BackendOutboxItem } from '@/types/outbox';
 
 const MailMergeJobsPanel = defineAsyncComponent(() => import('@/components/mail/MailMergeJobsPanel.vue'));
+// Phone only: sync and account status on the subtitle line.
+const ShellStatusChip = defineAsyncComponent(() => import('@/components/layout/ShellStatusChip.vue'));
 
 const { locale, t } = useI18n();
 const ui = useUiStore();
@@ -248,6 +250,9 @@ async function cancel(item: BackendOutboxItem) {
       :switch-label="$t('nav.mailboxes.current', { mailbox: $t('outbox.title') })"
       @switch="ui.openMailboxSwitcher()"
     >
+      <template #status>
+        <ShellStatusChip />
+      </template>
       <template #actions>
         <IconButton :title="$t('common.refresh')" :disabled="outbox.loading" @click="outbox.load()">
           <AppIcon :class="{ spinning: outbox.loading }"><path d="M13.5 8a5.5 5.5 0 1 1-1.7-3.9" /><path d="M13.5 2v3.2h-3.2" /></AppIcon>

@@ -66,10 +66,21 @@
     "signatures": {
       "discovered": "{count} Signatur in gesendeten Nachrichten gefunden. | {count} Signaturen in gesendeten Nachrichten gefunden."
     },
+    "status": {
+      "certificate": "Zertifikat prüfen",
+      "details": "Details anzeigen",
+      "error": "Fehler aufgetreten",
+      "importing": "Ältere E-Mails {percent}",
+      "more": "+{count}",
+      "offline": "Offline",
+      "review": "{count} zu prüfen",
+      "signIn": "Anmeldung nötig",
+      "syncFailed": "Abgleich gestört",
+      "syncing": "Abgleich läuft"
+    },
     "sync": {
       "failures": {
-        "label": "{count} Eintrag benötigt Aufmerksamkeit | {count} Einträge benötigen Aufmerksamkeit",
-        "review": "Probleme prüfen"
+        "label": "{count} Eintrag benötigt Aufmerksamkeit | {count} Einträge benötigen Aufmerksamkeit"
       },
       "mutationsFailed": "{count} Änderung ist nicht beim Server angekommen. | {count} Änderungen sind nicht beim Server angekommen.",
       "progress": {

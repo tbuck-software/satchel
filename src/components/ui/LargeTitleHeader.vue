@@ -6,6 +6,10 @@ import CardButton from './CardButton.vue';
  * The phone's large title, as on iOS: the name of the list in display type,
  * and the name itself the control that switches lists ("Inbox ▾"). Actions
  * share the row on the right; the search field follows below, full width.
+ *
+ * The `status` slot sits on the subtitle line, after the account it is
+ * about: sync and account trouble is told there, as a chip, rather than in a
+ * band above the title.
  */
 defineProps<{
   title: string;
@@ -27,7 +31,10 @@ const emit = defineEmits<{ switch: [] }>();
     <div v-if="$slots.actions" class="large-title__actions">
       <slot name="actions" />
     </div>
-    <p v-if="subtitle" class="large-title__subtitle">{{ subtitle }}</p>
+    <div v-if="subtitle || $slots.status" class="large-title__meta">
+      <p v-if="subtitle" class="large-title__subtitle">{{ subtitle }}</p>
+      <slot name="status" />
+    </div>
   </header>
 </template>
 
@@ -69,9 +76,19 @@ const emit = defineEmits<{ switch: [] }>();
   gap: var(--space-1-5);
 }
 
-.large-title__subtitle {
+.large-title__meta {
   grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+  min-height: 22px;
   margin: calc(-1 * var(--space-xs)) 0 0;
+}
+
+.large-title__subtitle {
+  min-width: 0;
+  margin: 0;
   overflow: hidden;
   color: var(--text-tertiary);
   font-size: var(--font-size-xs);

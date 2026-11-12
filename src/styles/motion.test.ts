@@ -65,7 +65,7 @@ describe('the local reduced-motion rules', () => {
     const local = vueSources(SOURCE_ROOT)
       .filter((path) => readFileSync(path, 'utf8').includes('prefers-reduced-motion'));
 
-    expect(local.length).toBe(24);
+    expect(local.length).toBe(25);
   });
 });
 
