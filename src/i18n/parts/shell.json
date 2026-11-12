@@ -68,6 +68,21 @@
           "never": "Not synced yet",
           "offline": "Offline — no connection",
           "syncing": "Syncing…"
+        },
+        "progress": {
+          "title": "Mail sync",
+          "history": "Loading older mail",
+          "details": "Show sync details",
+          "counts": "{done} of {total} messages",
+          "folder": "Reading {folder}",
+          "folderCount": "{folder} · folder {current} of {total}",
+          "preparing": "Connecting to your mailbox…",
+          "waiting": "Working in the background",
+          "paused": "Paused while offline",
+          "needsAttention": "This account needs attention. Check its sync error.",
+          "updated": "Last activity {time}",
+          "explanation": "Older mail loads in the background — keep working meanwhile. Totals grow while more folders are found.",
+          "complete": "Everything is up to date."
         }
       },
       "update": {
@@ -544,6 +559,21 @@
           "never": "Noch nicht synchronisiert",
           "offline": "Offline — keine Verbindung",
           "syncing": "Wird synchronisiert …"
+        },
+        "progress": {
+          "title": "E-Mail-Abgleich",
+          "history": "Ältere E-Mails laden",
+          "details": "Abgleich anzeigen",
+          "counts": "{done} von {total} Nachrichten",
+          "folder": "{folder} wird gelesen",
+          "folderCount": "{folder} · Ordner {current} von {total}",
+          "preparing": "Postfach verbinden …",
+          "waiting": "Läuft im Hintergrund",
+          "paused": "Offline pausiert",
+          "needsAttention": "Dieses Konto benötigt deine Aufmerksamkeit. Prüfe den Sync-Fehler.",
+          "updated": "Letzte Aktivität {time}",
+          "explanation": "Ältere E-Mails laden im Hintergrund — du kannst weiterarbeiten. Die Summe wächst, solange weitere Ordner gefunden werden.",
+          "complete": "Alles ist auf dem neuesten Stand."
         }
       },
       "update": {

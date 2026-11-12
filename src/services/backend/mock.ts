@@ -2567,6 +2567,7 @@ const handlers: Record<string, Handler> = {
     failures: [],
   }),
   current_connection_state: () => ({
+    sync_progress: [],
     unread_count: threads.filter(thread => accountVisible(thread.accountId) && thread.workflowState === 'inbox' && thread.unreadCount > 0 && !thread.isMuted && thread.mailboxNames?.some(name => name.toLowerCase() === 'inbox')).length,
     online: true,
     syncing: false,

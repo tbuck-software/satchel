@@ -26,7 +26,7 @@ function deferredSnapshot() {
 
 function snapshot(pending: number, syncing = false): ConnectionSnapshot {
   return {
-    online: true, syncing, last_sync_at: null, pending_outbox: pending, pending_sends: pending,
+    sync_progress: [], online: true, syncing, last_sync_at: null, pending_outbox: pending, pending_sends: pending,
     failed_outbox: 0, failed_sends: 0, failed_remote_mutations: 0,
   };
 }
@@ -119,7 +119,7 @@ describe('connection backend errors', () => {
   it('uses browser hints through successful local refreshes and cleans up listeners', async () => {
     vi.stubGlobal('navigator', { onLine: false });
     vi.mocked(backendCurrentConnectionState).mockResolvedValue({
-      online: true, syncing: false, last_sync_at: null, pending_outbox: 0, pending_sends: 0,
+      sync_progress: [], online: true, syncing: false, last_sync_at: null, pending_outbox: 0, pending_sends: 0,
       failed_outbox: 0, failed_sends: 0, failed_remote_mutations: 0,
     });
     const store = useConnectionStore();
@@ -147,7 +147,7 @@ describe('connection backend errors', () => {
     handler?.({ event: 'connection:state', id: 1, payload: { syncing: true } });
     expect(store.syncing).toBe(true);
     resolveSnapshot?.({
-      online: true, syncing: false, last_sync_at: null, pending_outbox: 0, pending_sends: 0,
+      sync_progress: [], online: true, syncing: false, last_sync_at: null, pending_outbox: 0, pending_sends: 0,
       failed_outbox: 0, failed_sends: 0, failed_remote_mutations: 0,
     });
     await starting;
@@ -249,7 +249,7 @@ describe('connection backend errors', () => {
 
   it('keeps failed mail separate from failed internal sync actions', async () => {
     vi.mocked(backendCurrentConnectionState).mockResolvedValue({
-      online: true,
+      sync_progress: [], online: true,
       syncing: false,
       last_sync_at: null,
       pending_outbox: 12,
@@ -263,4 +263,18 @@ describe('connection backend errors', () => {
     expect(store.failedSends).toBe(1);
     expect(store.failedRemoteMutations).toBe(4);
   });
+});
+
+it('restores durable progress from the connection snapshot and clears it on the next update', async () => {
+  setActivePinia(createPinia());
+  const progress = { account_id: 'a', account_name: 'Work', email: 'me@example.test', phase: 'folder',
+    folder: 'Archive', folder_index: 2, folder_total: 4, backfill_remaining: 200, backfill_total: 1000,
+    updated_at: '2026-11-12T12:00:00Z' };
+  vi.mocked(backendCurrentConnectionState).mockResolvedValueOnce({ ...snapshot(0, true), sync_progress: [progress] });
+  const store = useConnectionStore();
+  await store.refresh();
+  expect(store.syncProgress).toEqual([progress]);
+  vi.mocked(backendCurrentConnectionState).mockResolvedValueOnce(snapshot(0));
+  await store.refresh();
+  expect(store.syncProgress).toEqual([]);
 });

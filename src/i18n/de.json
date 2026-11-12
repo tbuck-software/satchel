@@ -122,6 +122,21 @@
         "unavailable": "Öffne den Postausgang, um die betroffenen Einträge zu prüfen."
       },
       "mutationsFailed": "{count} Änderung ist nicht beim Server angekommen. | {count} Änderungen sind nicht beim Server angekommen.",
+      "progress": {
+        "complete": "Alles ist auf dem neuesten Stand.",
+        "counts": "{done} von {total} Nachrichten",
+        "details": "Abgleich anzeigen",
+        "explanation": "Ältere E-Mails laden im Hintergrund — du kannst weiterarbeiten. Die Summe wächst, solange weitere Ordner gefunden werden.",
+        "folder": "{folder} wird gelesen",
+        "folderCount": "{folder} · Ordner {current} von {total}",
+        "history": "Ältere E-Mails laden",
+        "needsAttention": "Dieses Konto benötigt deine Aufmerksamkeit. Prüfe den Sync-Fehler.",
+        "paused": "Offline pausiert",
+        "preparing": "Postfach verbinden …",
+        "title": "E-Mail-Abgleich",
+        "updated": "Letzte Aktivität {time}",
+        "waiting": "Läuft im Hintergrund"
+      },
       "retryFailed": "Erneuter Abgleich fehlgeschlagen: {error}",
       "retryQueued": "{count} Änderung wird erneut abgeglichen. | {count} Änderungen werden erneut abgeglichen.",
       "status": {

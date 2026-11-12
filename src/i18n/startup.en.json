@@ -72,6 +72,15 @@
         "review": "Review issues"
       },
       "mutationsFailed": "{count} change didn't reach the server. | {count} changes didn't reach the server.",
+      "progress": {
+        "counts": "{done} of {total} messages",
+        "details": "Show sync details",
+        "folder": "Reading {folder}",
+        "history": "Loading older mail",
+        "paused": "Paused while offline",
+        "preparing": "Connecting to your mailbox…",
+        "waiting": "Working in the background"
+      },
       "retryFailed": "Re-sync failed: {error}",
       "retryQueued": "{count} change is being synced again. | {count} changes are being synced again.",
       "status": {

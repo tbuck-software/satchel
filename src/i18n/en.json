@@ -122,6 +122,21 @@
         "unavailable": "Open Outbox to review the affected items."
       },
       "mutationsFailed": "{count} change didn't reach the server. | {count} changes didn't reach the server.",
+      "progress": {
+        "complete": "Everything is up to date.",
+        "counts": "{done} of {total} messages",
+        "details": "Show sync details",
+        "explanation": "Older mail loads in the background — keep working meanwhile. Totals grow while more folders are found.",
+        "folder": "Reading {folder}",
+        "folderCount": "{folder} · folder {current} of {total}",
+        "history": "Loading older mail",
+        "needsAttention": "This account needs attention. Check its sync error.",
+        "paused": "Paused while offline",
+        "preparing": "Connecting to your mailbox…",
+        "title": "Mail sync",
+        "updated": "Last activity {time}",
+        "waiting": "Working in the background"
+      },
       "retryFailed": "Re-sync failed: {error}",
       "retryQueued": "{count} change is being synced again. | {count} changes are being synced again.",
       "status": {
