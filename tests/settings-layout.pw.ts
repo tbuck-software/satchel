@@ -50,7 +50,7 @@ test('settings sections stay inside a narrow desktop dialog', async ({ page }) =
     if (excess > 1) overflow.push({ section: name, excess });
     const hidden = await dialog.locator('.settings-view__content').evaluate((content) => {
       const issues: { element: string; container: string }[] = [];
-      for (const node of content.querySelectorAll<HTMLElement>('button, input, select, textarea, [role="switch"], .setting-label, .setting-hint')) {
+      for (const node of Array.from(content.querySelectorAll<HTMLElement>('button, input, select, textarea, [role="switch"], .setting-label, .setting-hint'))) {
         const rect = node.getBoundingClientRect();
         if (rect.width <= 2 || rect.height <= 2 || getComputedStyle(node).visibility !== 'visible') continue;
         for (let parent = node.parentElement; parent && content.contains(parent); parent = parent.parentElement) {
