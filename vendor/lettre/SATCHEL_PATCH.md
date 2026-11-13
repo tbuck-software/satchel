@@ -86,6 +86,28 @@ patch table still points at the vendor tree, and — when
 `SATCHEL_VENDOR_UPSTREAM_CHECK=1` is set — asks crates.io whether a newer
 release exists. The weekly `Security audit` workflow sets that variable. The reviewed drift through
 0.11.23 is temporarily accepted by `.cargo/lettre-upstream-exception.json` until
-2026-11-12 UTC. A newer release or an expired deadline fails the check.
+2026-11-20 UTC. A newer release or an expired deadline fails the check.
 `crates/satchel-core/tests/smtp_response_caps.rs` exercises the response limits
 against a hostile peer in both readers.
+
+
+## Re-review on 2026-11-13
+
+Re-downloaded the crates.io archives for 0.11.19 and 0.11.23 and compared the
+local source and manifest against the pinned release. The same eight files
+listed above differ; no additional local patches were found. The upstream
+changelog through 0.11.23 still matches the reviewed drift table, and the
+[crates.io release list](https://crates.io/crates/lettre/versions) still names
+0.11.23 as the newest stable release.
+
+The upgrade blocker remains: Lettre 0.11.23 calls `new_with_extra_roots` in
+its platform-verifier branch. The current verifier, 0.7.1, still has no such
+constructor in its Android implementation, and
+[rustls-platform-verifier#58](https://github.com/rustls/rustls-platform-verifier/issues/58)
+is open. Satchel's mobile JNI integration is still pinned to 0.6.2. The
+existing response caps and bounded reads remain in both local SMTP readers;
+the hostile-peer regression tests cover them.
+
+The exception is renewed for one week, through 2026-11-20 UTC, to keep the
+mobile verifier upgrade and remaining upstream drift due for review. This
+review changes neither the vendored code nor the accepted upstream version.

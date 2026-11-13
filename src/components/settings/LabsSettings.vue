@@ -67,6 +67,7 @@ async function toggle(id: LabsFlagId, value: boolean) {
 <style scoped>
 .labs-settings {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-lg);
 }
 
