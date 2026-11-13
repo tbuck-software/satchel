@@ -157,6 +157,20 @@ test('editable composer lines stay close to the text height', async ({ page }) =
   }
 });
 
+test('lists in the composer show their markers', async ({ page }) => {
+  // Tailwind's preflight sets `list-style: none` on every ul/ol in the app.
+  await page.goto('/');
+  await page.getByRole('button', { name: 'New message', exact: true }).click();
+  const writer = page.getByRole('dialog', { name: 'Compose email' }).locator('.ProseMirror').first();
+  await writer.click();
+  await page.keyboard.type('- Tenant-ID');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('1. Client-ID');
+  await expect(writer.locator('ul')).toHaveCSS('list-style-type', 'disc');
+  await expect(writer.locator('ol')).toHaveCSS('list-style-type', 'decimal');
+});
+
 test('a draft sent or discarded elsewhere still lets the composer close', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'New message', exact: true }).click();

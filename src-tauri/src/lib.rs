@@ -133,6 +133,9 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // Paste without formatting reads the clipboard natively: WKWebView's
+        // `navigator.clipboard.readText()` asks with a "Paste" popup each time.
+        .plugin(tauri_plugin_clipboard_manager::init())
         .manage(commands::app_update::UpdateState::default())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,

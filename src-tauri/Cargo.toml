@@ -70,6 +70,8 @@ tauri-plugin-autostart = "2"
 tauri-plugin-updater = { version = "2.14", default-features = false, features = ["rustls-tls"] }
 semver = "1"
 tauri-plugin-single-instance = "2"
+# Paste without formatting (Cmd/Ctrl+Shift+V) is a hardware-keyboard shortcut.
+tauri-plugin-clipboard-manager = "2.5"
 
 # The Android side of `rustls-platform-verifier` needs a JNI init call from the
 # notification worker; the trust store itself is configured in `satchel-core`.
