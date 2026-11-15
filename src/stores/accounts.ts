@@ -305,53 +305,41 @@ export const useAccountsStore = defineStore('accounts', () => {
    * Change how an account looks: shown at once, written behind it, put back
    * with a toast if the backend refuses.
    */
-  async function updateAppearance(accountId: string, change: { color: string } | { avatar: string | null }) {
+  /** Change an account in place; the backend call decides, a refusal rolls back with a toast. */
+  async function updateAccount(accountId: string, change: Partial<Account>, send: () => Promise<unknown>, failed: string) {
     const index = accounts.value.findIndex((account) => account.id === accountId);
     const before = accounts.value[index];
     if (!before) return false;
     accounts.value[index] = { ...before, ...change };
     try {
-      if ('color' in change) await backendSetAccountColor(accountId, change.color);
-      else await backendSetAccountAvatar(accountId, change.avatar);
+      await send();
       return true;
     } catch (error) {
       const current = accounts.value.findIndex((account) => account.id === accountId);
       if (current >= 0) accounts.value[current] = before;
-      toast.error(translateBackendError(error) || t('accountAppearance.saveFailed'));
+      toast.error(translateBackendError(error) || failed);
       return false;
     }
   }
 
   function setColor(accountId: string, color: string) {
-    return updateAppearance(accountId, { color });
+    return updateAccount(accountId, { color }, () => backendSetAccountColor(accountId, color), t('accountAppearance.saveFailed'));
   }
 
   function setAvatar(accountId: string, avatar: string | null) {
-    return updateAppearance(accountId, { avatar });
+    return updateAccount(accountId, { avatar }, () => backendSetAccountAvatar(accountId, avatar), t('accountAppearance.saveFailed'));
   }
 
-  /** Rename the account and its sender; optimistic, rolled back with a toast. */
-  async function setNames(accountId: string, label: string | null, senderName: string) {
-    const index = accounts.value.findIndex((account) => account.id === accountId);
-    const before = accounts.value[index];
-    if (!before) return false;
+  function setNames(accountId: string, label: string | null, senderName: string) {
     const cleanLabel = label?.trim() || null;
     const cleanSender = senderName.trim();
-    accounts.value[index] = {
-      ...before,
-      label: cleanLabel,
-      senderName: cleanSender,
-      displayName: cleanLabel || cleanSender || before.email,
-    };
-    try {
-      await backendSetAccountNames(accountId, cleanLabel, cleanSender);
-      return true;
-    } catch (error) {
-      const current = accounts.value.findIndex((account) => account.id === accountId);
-      if (current >= 0) accounts.value[current] = before;
-      toast.error(translateBackendError(error) || t('settings.accounts.names.saveFailed'));
-      return false;
-    }
+    const email = accounts.value.find((account) => account.id === accountId)?.email ?? '';
+    return updateAccount(
+      accountId,
+      { label: cleanLabel, senderName: cleanSender, displayName: cleanLabel || cleanSender || email },
+      () => backendSetAccountNames(accountId, cleanLabel, cleanSender),
+      t('settings.accounts.names.saveFailed'),
+    );
   }
 
   async function clearAuthError(accountId: string) {
