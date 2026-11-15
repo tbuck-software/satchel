@@ -211,6 +211,7 @@ pub fn registered_repairs() -> &'static [DataRepair] {
         crate::spam::bootstrap::SPAM_BOOTSTRAP,
         super::known_senders::KNOWN_SENDERS_SENT,
         OUTLOOK_CALENDAR_RESYNC,
+        super::sent_copies::SENT_LOCAL_COPIES,
     ]
 }
 

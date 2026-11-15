@@ -349,17 +349,12 @@ pub async fn ensure_gmail_archive_folder(
     pool: &SqlitePool,
     account_id: &str,
 ) -> Result<String, String> {
-    if let Some(id) = sqlx::query_scalar::<_, String>(
-        "SELECT id FROM folders
-         WHERE account_id = ? AND folder_type = 'archive'
-         ORDER BY updated_at DESC LIMIT 1",
-    )
-    .bind(account_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|err| err.to_string())?
+    if let Some(folder) =
+        satchel_core::db::folders::preferred_folder_of_type(pool, account_id, "archive")
+            .await
+            .map_err(|err| err.to_string())?
     {
-        return Ok(id);
+        return Ok(folder.id);
     }
     let id = satchel_core::db::folders::resolve_provider_folder_id(pool, account_id, "ARCHIVE")
         .await

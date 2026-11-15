@@ -982,6 +982,27 @@ async fn persist_provider_message(
             committed_projection_threads.push(prior_thread_id.clone());
         }
     }
+    // The server copy of a mail sent from here replaces the copy the send
+    // stored locally, whichever Sent folder that one ended up in.
+    let envelope_has_message_id = message
+        .message_id_header
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty());
+    if message_is_sent && !message_is_draft && envelope_has_message_id {
+        let retired = satchel_core::db::sent_copies::retire_local_sent_copies(
+            tx,
+            account_id,
+            &message_id_header,
+            &message_id,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+        for retired_thread in retired {
+            if !committed_projection_threads.contains(&retired_thread) {
+                committed_projection_threads.push(retired_thread);
+            }
+        }
+    }
     refresh_thread_projections_tx(tx, &committed_projection_threads)
         .await
         .map_err(|error| error.to_string())?;
@@ -3900,6 +3921,65 @@ mod tests {
         assert_eq!(
             remaining_drafts, 0,
             "the sent copy supersedes its Spark autosave"
+        );
+    }
+
+    /// The reported account: the local copy of a send sits in the legacy
+    /// `Sent Messages`, the server copy arrives in `Sent`. The server copy
+    /// replaces it; the old Apple Mail mail in the legacy folder stays.
+    #[tokio::test]
+    async fn a_synced_sent_copy_replaces_the_local_one_in_another_sent_folder() {
+        let pool = ingest_pool().await;
+        sqlx::query(
+            "INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at) VALUES
+             ('sent-legacy', 'account', 'INBOX.Sent Messages', 'INBOX.Sent Messages', 'sent', 'INBOX.Sent Messages', '', ''),
+             ('sent-live', 'account', 'INBOX.Sent', 'INBOX.Sent', 'sent', 'INBOX.Sent', '', '');
+             INSERT INTO threads (id, account_id, subject, last_message_date, message_count, unread_count, workflow_state, created_at, updated_at)
+             VALUES ('th-local', 'account', 'Re: Hello', '2026-11-14T23:38:50Z', 1, 0, 'waiting', '', '');
+             INSERT INTO messages (id, account_id, folder_id, thread_id, message_id_header, from_address, to_addresses, subject, date, is_read, is_sent, created_at, updated_at) VALUES
+             ('m-local', 'account', 'sent-legacy', 'th-local', '<reply@satchel.local>', 'account@example.com', '[\"friend@example.com\"]', 'Re: Hello', '2026-11-14T23:38:50Z', 1, 1, '', ''),
+             ('m-apple', 'account', 'sent-legacy', 'th-local', '<apple@tbuck.de>', 'account@example.com', '[]', 'Old', '2025-03-27T10:23:02Z', 1, 1, '', '');
+             UPDATE messages SET remote_uid = 4, remote_id = '4' WHERE id = 'm-apple';",
+        )
+        .execute(&pool)
+        .await
+        .expect("seed");
+
+        let mut server = envelope("398");
+        server.message_id_header = Some("<reply@satchel.local>".to_string());
+        server.subject = "Re: Hello".to_string();
+        server.from_address = "account@example.com".to_string();
+        server.to_addresses = vec!["friend@example.com".to_string()];
+        server.date_rfc3339 = "2026-11-14T23:38:50Z".to_string();
+        upsert_provider_message(
+            None,
+            &pool,
+            "imap",
+            "account",
+            "account@example.com",
+            "Account",
+            &crate::commands::accounts::AccountConfig::from_plaintext("{}"),
+            "sent-live",
+            "INBOX.Sent",
+            "sent",
+            &server,
+            None,
+        )
+        .await
+        .expect("server copy");
+
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT folder_id, COALESCE(remote_id, '-') FROM messages ORDER BY folder_id, remote_id",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("rows");
+        assert_eq!(
+            rows,
+            [
+                ("sent-legacy".to_string(), "4".to_string()),
+                ("sent-live".to_string(), "398".to_string()),
+            ]
         );
     }
 

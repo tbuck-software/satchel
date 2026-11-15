@@ -285,19 +285,12 @@ pub async fn prepare_thread_workflow_moves_in_transaction(
     source_folder_type: &str,
     target_folder_type: &str,
 ) -> Result<Vec<PreparedWorkflowMove>, String> {
-    let rows = sqlx::query_as::<_, (String, String, Option<String>, String, Option<i64>, String)>(
+    let rows = sqlx::query_as::<_, (String, String, Option<String>, String, Option<i64>)>(
         "SELECT m.account_id,
                 m.remote_id,
                 f.remote_id,
                 f.full_path,
-                f.uidvalidity,
-                (
-                  SELECT COALESCE(NULLIF(TRIM(target.remote_id), ''), target.full_path)
-                  FROM folders target
-                  WHERE target.account_id = m.account_id
-                    AND LOWER(TRIM(target.folder_type)) = LOWER(TRIM(?))
-                  ORDER BY target.updated_at DESC LIMIT 1
-                ) AS target_remote_folder_id
+                f.uidvalidity
          FROM messages m
          JOIN accounts a ON a.id = m.account_id
          JOIN folders f ON f.id = m.folder_id
@@ -306,23 +299,33 @@ pub async fn prepare_thread_workflow_moves_in_transaction(
            AND m.remote_id IS NOT NULL
            AND LOWER(TRIM(f.folder_type)) = LOWER(TRIM(?))",
     )
-    .bind(target_folder_type)
     .bind(thread_id)
     .bind(source_folder_type)
     .fetch_all(&mut **tx)
     .await
     .map_err(|err| err.to_string())?;
 
+    let mut targets = HashMap::<String, String>::new();
     let mut grouped = HashMap::<(String, String), Vec<MessageRef>>::new();
-    for (
-        account_id,
-        remote_id,
-        folder_remote_id,
-        folder_path,
-        folder_uidvalidity,
-        target_remote_id,
-    ) in rows
-    {
+    for (account_id, remote_id, folder_remote_id, folder_path, folder_uidvalidity) in rows {
+        let target_remote_id = match targets.get(&account_id) {
+            Some(target) => target.clone(),
+            None => {
+                let target = crate::db::folders::preferred_folder_of_type(
+                    &mut **tx,
+                    &account_id,
+                    target_folder_type,
+                )
+                .await
+                .map_err(|err| err.to_string())?
+                .ok_or_else(|| {
+                    format!("local target folder missing for workflow move: {target_folder_type}")
+                })?
+                .remote_path;
+                targets.insert(account_id.clone(), target.clone());
+                target
+            }
+        };
         grouped
             .entry((account_id, target_remote_id))
             .or_default()
@@ -815,16 +818,11 @@ pub async fn apply_completed_workflow_move_projection(
     refs: &[MessageRef],
     target_folder_type: &str,
 ) -> Result<(), String> {
-    let target_folder_id: Option<String> = sqlx::query_scalar(
-        "SELECT id FROM folders
-         WHERE account_id = ? AND folder_type = ?
-         ORDER BY updated_at DESC LIMIT 1",
-    )
-    .bind(account_id)
-    .bind(target_folder_type)
-    .fetch_optional(pool)
-    .await
-    .map_err(|err| err.to_string())?;
+    let target_folder_id =
+        crate::db::folders::preferred_folder_of_type(pool, account_id, target_folder_type)
+            .await
+            .map_err(|err| err.to_string())?
+            .map(|folder| folder.id);
     let Some(target_folder_id) = target_folder_id else {
         return Err(format!(
             "local target folder missing for workflow move: {target_folder_type}"
@@ -1108,19 +1106,12 @@ async fn remote_folder_for_kind(
     account_id: &str,
     folder_type: &str,
 ) -> Result<String, String> {
-    if let Some(row) = sqlx::query_as::<_, FolderTargetRow>(
-        "SELECT f.account_id, f.remote_id, f.full_path
-         FROM folders f
-         WHERE f.account_id = ? AND f.folder_type = ?
-         LIMIT 1",
-    )
-    .bind(account_id)
-    .bind(folder_type)
-    .fetch_optional(pool)
-    .await
-    .map_err(|err| err.to_string())?
+    if let Some(folder) =
+        crate::db::folders::preferred_folder_of_type(pool, account_id, folder_type)
+            .await
+            .map_err(|err| err.to_string())?
     {
-        return Ok(row.remote_id.unwrap_or(row.full_path));
+        return Ok(folder.remote_path);
     }
 
     let provider: String = sqlx::query_scalar("SELECT provider FROM accounts WHERE id = ?")
