@@ -221,7 +221,8 @@ fn db_error(error: sqlx::Error) -> CommandError {
 
 pub async fn overview(pool: &SqlitePool) -> Result<ServerRulesOverviewDto, CommandError> {
     let imap_accounts: Vec<(String, String, String)> = sqlx::query_as(
-        "SELECT id, display_name, email FROM accounts WHERE provider = 'imap' ORDER BY created_at, id",
+        "SELECT id, COALESCE(label, display_name), email FROM accounts
+         WHERE provider = 'imap' ORDER BY created_at, id",
     )
     .fetch_all(pool)
     .await

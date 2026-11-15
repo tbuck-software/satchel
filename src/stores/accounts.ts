@@ -14,6 +14,7 @@ import {
   backendPollOauthFlow,
   backendSetAccountAvatar,
   backendSetAccountColor,
+  backendSetAccountNames,
   backendStartOauthFlow,
   translateBackendError,
   type SourceCapabilities,
@@ -170,12 +171,16 @@ export const useAccountsStore = defineStore('accounts', () => {
     }
   }
 
-  function addAccount(input: { displayName: string; email: string; provider: Account['provider'] }): Account {
+  function addAccount(input: { displayName: string; label?: string; email: string; provider: Account['provider'] }): Account {
     const id = `acc-${Date.now().toString(36)}`;
     const colorIndex = accounts.value.length % ACCOUNT_COLORS.length;
+    const senderName = input.displayName || input.email.split('@')[0]!;
+    const label = input.label?.trim() || null;
     const account: Account = {
       id,
-      displayName: input.displayName || input.email.split('@')[0]!,
+      displayName: label || senderName,
+      label,
+      senderName,
       email: input.email,
       provider: input.provider,
       kind: 'email',
@@ -218,7 +223,9 @@ export const useAccountsStore = defineStore('accounts', () => {
       if (nextCapabilities) capabilities.value = nextCapabilities;
       accounts.value = rows.map((row) => ({
         id: row.id,
-        displayName: row.display_name,
+        displayName: row.label?.trim() || row.display_name?.trim() || row.email,
+        label: row.label ?? null,
+        senderName: row.display_name,
         email: row.email,
         provider: normalizeProvider(row.provider),
         kind: row.kind ?? 'email',
@@ -323,6 +330,30 @@ export const useAccountsStore = defineStore('accounts', () => {
     return updateAppearance(accountId, { avatar });
   }
 
+  /** Rename the account and its sender; optimistic, rolled back with a toast. */
+  async function setNames(accountId: string, label: string | null, senderName: string) {
+    const index = accounts.value.findIndex((account) => account.id === accountId);
+    const before = accounts.value[index];
+    if (!before) return false;
+    const cleanLabel = label?.trim() || null;
+    const cleanSender = senderName.trim();
+    accounts.value[index] = {
+      ...before,
+      label: cleanLabel,
+      senderName: cleanSender,
+      displayName: cleanLabel || cleanSender || before.email,
+    };
+    try {
+      await backendSetAccountNames(accountId, cleanLabel, cleanSender);
+      return true;
+    } catch (error) {
+      const current = accounts.value.findIndex((account) => account.id === accountId);
+      if (current >= 0) accounts.value[current] = before;
+      toast.error(translateBackendError(error) || t('settings.accounts.names.saveFailed'));
+      return false;
+    }
+  }
+
   async function clearAuthError(accountId: string) {
     try {
       await backendClearAccountOauthError(accountId);
@@ -366,5 +397,6 @@ export const useAccountsStore = defineStore('accounts', () => {
     clearAuthError,
     setColor,
     setAvatar,
+    setNames,
   };
 });

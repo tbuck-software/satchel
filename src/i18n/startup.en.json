@@ -118,6 +118,7 @@
       "accountConfigurationInvalid": "The account configuration is invalid.",
       "accountCredentialAccessFailed": "The saved account credentials could not be accessed. Please try again.",
       "accountHasNoPassword": "This account signs in through its provider and has no password to change.",
+      "accountNameInvalid": "Use a name without line breaks, at most 120 characters long.",
       "accountNotFound": "The account was not found.",
       "accountNotImap": "This account does not use IMAP.",
       "accountPasswordRequired": "Enter the account password.",
@@ -966,7 +967,18 @@
   },
   "settings": {
     "accounts": {
-      "allAccounts": "All accounts",
+      "detail": {
+        "server": "On the server"
+      },
+      "groupware": {
+        "badge": "CalDAV / CardDAV"
+      },
+      "names": {
+        "saveFailed": "The names could not be saved."
+      },
+      "password": {
+        "label": "Password"
+      },
       "reauth": {
         "failed": "Sign-in failed: {error}"
       },
@@ -976,7 +988,15 @@
         "doneCalendarError": "Reconnected: {email}. Calendar: {error}",
         "timeout": "The sign-in took too long. Please try again."
       },
+      "removed": "Account deleted: {email}",
+      "status": {
+        "upToDate": "Up to date"
+      },
       "sync": {
+        "backfillProgress": "{done}/{total} ({percent}%)",
+        "backfillProgressPlain": "{done} done",
+        "backfillStatus": "Mail backfill: {progress}, {remaining} remaining ({accounts}), {threads}",
+        "finishedWithBackfill": "Mail sync: {messages} ({accounts}), backfill {progress}, {remaining} remaining for {pending}, {threads}",
         "syncImapNow": "Sync IMAP now"
       }
     },

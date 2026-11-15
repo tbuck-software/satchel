@@ -10,8 +10,8 @@ vi.mock('@/services/backend', async (importOriginal) => ({
   ...backend,
 }));
 
-const route = vi.hoisted(() => ({ query: {} as Record<string, string> }));
-vi.mock('vue-router', () => ({ useRoute: () => route, useRouter: () => ({}) }));
+const route = vi.hoisted(() => ({ query: { section: 'accounts', account: 'acc-work' } as Record<string, string> }));
+vi.mock('vue-router', () => ({ useRoute: () => route, useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
 
 const accounts = vi.hoisted(() => {
   const account = {
@@ -23,7 +23,7 @@ const accounts = vi.hoisted(() => {
     color: '#123456',
     syncStatus: 'error',
   };
-  return { account, accounts: [account], emailAccounts: [account], activeAccountId: '', load: vi.fn() };
+  return { account, accounts: [account], emailAccounts: [account], activeAccountId: '', load: vi.fn(), isVisible: () => true };
 });
 vi.mock('@/stores/accounts', () => ({ useAccountsStore: () => accounts }));
 const connection = vi.hoisted(() => ({ applySyncSummary: vi.fn(), requestRetry: vi.fn() }));
@@ -39,18 +39,20 @@ vi.mock('./AccountVisibilitySettings.vue', () => ({ default: { template: '<div /
 vi.mock('@/stores/accountQuota', () => ({ useAccountQuotaStore: () => ({ load: vi.fn(), quotaFor: () => null, levelFor: () => null }) }));
 vi.mock('@/stores/workflowSync', () => ({ useWorkflowSyncStore: () => ({ load: vi.fn(), isLocalOnly: () => false, reasonFor: () => null }) }));
 vi.mock('./AccountQuotaSettings.vue', () => ({ default: { template: '<div />' } }));
+vi.mock('./AccountAppearanceSettings.vue', () => ({ default: { template: '<div />' } }));
+vi.mock('./AccountNameSettings.vue', () => ({ default: { template: '<div />' } }));
+vi.mock('./ServerRulesSettings.vue', () => ({ __esModule: true, default: { template: '<div />' } }));
 
 import AccountSetup from './AccountSetup.vue';
 
 beforeEach(() => {
   vi.clearAllMocks();
-  route.query = {};
+  route.query = { section: 'accounts', account: 'acc-work' };
   accounts.load.mockResolvedValue(undefined);
 });
 
 describe('replacing an account password', () => {
-  it('opens the form for the account the banner named', async () => {
-    route.query = { section: 'accounts', account: 'acc-work' };
+  it('opens the form for the failing account the banner named', async () => {
     const wrapper = mount(AccountSetup, { attachTo: document.body });
     await flushPromises();
 
@@ -62,8 +64,7 @@ describe('replacing an account password', () => {
   it('stores the checked password and syncs again', async () => {
     backend.backendUpdateAccountPassword.mockResolvedValue(undefined);
     const wrapper = mount(AccountSetup);
-    await wrapper.findAll('button').find((button) => button.text() === 'Update password')!.trigger('click');
-
+    await flushPromises();
     await wrapper.get('.password-form input').setValue('correct horse');
     await wrapper.get('.password-form').trigger('submit');
     await flushPromises();
@@ -80,7 +81,7 @@ describe('replacing an account password', () => {
       params: { reason: 'imap login failed: No Response: [AUTHENTICATIONFAILED] Invalid credentials' },
     })));
     const wrapper = mount(AccountSetup);
-    await wrapper.findAll('button').find((button) => button.text() === 'Update password')!.trigger('click');
+    await flushPromises();
     await wrapper.get('.password-form input').setValue('still wrong');
     await wrapper.get('.password-form').trigger('submit');
     await flushPromises();

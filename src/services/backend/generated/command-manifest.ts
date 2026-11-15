@@ -2296,6 +2296,32 @@ export default {
                 }
             }
         },
+        "set_account_names": {
+            "kind": "object",
+            "fields": {
+                "accountId": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "label": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "senderName": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "set_account_visibility": {
             "kind": "object",
             "fields": {
@@ -3190,6 +3216,15 @@ export default {
                     "required": true,
                     "shape": {
                         "kind": "value"
+                    }
+                },
+                "label": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
                     }
                 },
                 "provider": {

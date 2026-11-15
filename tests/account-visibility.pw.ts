@@ -61,7 +61,8 @@ for (const theme of ['dark', 'light']) {
     // Route inside the same app to retain the two-account fixture.
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
     await page.getByRole('button', { name: 'Accounts', exact: true }).click();
-    const work = page.locator('.account-card').filter({ hasText: 'tom@satchel.dev' });
+    await page.getByTestId('account-row').filter({ hasText: 'tom@satchel.dev' }).click();
+    const work = page.locator('.account-detail');
     await expect(work.getByRole('button', { name: 'Scheduled', exact: true })).toHaveAttribute('aria-pressed', 'true');
     await expect(work.locator('input[type="time"]').first()).toHaveValue('09:00');
     await screenshot('account-schedule');

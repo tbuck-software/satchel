@@ -95,8 +95,8 @@ describe('account markers in the sidebar', () => {
     expect(marker.classes()).not.toContain('sidebar-accounts__quota--critical');
     expect(marker.attributes('title')).toBe('Work: mailbox 93% full. Open account settings.');
     await marker.trigger('click');
-    // No `account`: on the accounts page that opens the password form.
-    expect(router.push).toHaveBeenCalledWith({ name: 'settings', query: { section: 'accounts' } });
+    // The account's own page, where the quota meter is.
+    expect(router.push).toHaveBeenCalledWith({ name: 'settings', query: { section: 'accounts', account: 'acc-work' } });
   });
 
   it('turns critical from 98 %', () => {

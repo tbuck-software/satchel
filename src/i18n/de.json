@@ -239,6 +239,7 @@
       "accountConfigurationInvalid": "Die Kontokonfiguration ist ungültig.",
       "accountCredentialAccessFailed": "Auf die gespeicherten Zugangsdaten des Kontos konnte nicht zugegriffen werden. Bitte versuche es erneut.",
       "accountHasNoPassword": "Dieses Konto meldet sich über seinen Anbieter an und hat kein Passwort, das sich ändern ließe.",
+      "accountNameInvalid": "Verwende einen Namen ohne Zeilenumbrüche mit höchstens 120 Zeichen.",
       "accountNotFound": "Das Konto wurde nicht gefunden.",
       "accountNotImap": "Dieses Konto verwendet kein IMAP.",
       "accountPasswordRequired": "Gib das Kontopasswort ein.",
@@ -2235,12 +2236,16 @@
       "later": "Später",
       "microsoft365Detected": "{domain} empfängt Mail über Microsoft 365",
       "microsoftDetected": "Microsoft-Anmeldung erkannt",
+      "nameHint": "Nur in Satchel sichtbar.",
       "nameLabel": "Kontoname",
       "namePlaceholder": "Arbeit, Privat, …",
       "otherMethod": "Andere Anmeldeart?",
       "passwordHint": "Gilt für Posteingang, Postausgang, Kalender und Kontakte.",
       "passwordLabel": "Passwort",
       "passwordPlaceholder": "Dein Mail-Passwort",
+      "senderHint": "So sehen Empfänger dich als Absender.",
+      "senderLabel": "Dein Name",
+      "senderPlaceholder": "Alex Beispiel",
       "signInSecurely": "Sicher anmelden",
       "workspaceDetected": "{domain} empfängt Mail über Google Workspace"
     },
@@ -2500,7 +2505,24 @@
         "unreadableTitle": "{count} Konto ist gesperrt | {count} Konten sind gesperrt"
       },
       "description": "E-Mail-Konten, Synchronisierung und Anmeldung verwalten.",
+      "detail": {
+        "calendarsHint": "CalDAV-Kalender und CardDAV-Kontakte desselben Anbieters verbinden.",
+        "connection": "Verbindung",
+        "general": "Allgemein",
+        "labelsTitle": "Labels und Kategorien",
+        "passwordTitle": "Passwort",
+        "remove": "Konto entfernen",
+        "removeHint": "Löscht Mails, Ordner und gespeicherte Anmeldung dieses Kontos von diesem Gerät.",
+        "server": "Auf dem Server",
+        "signInHint": "Angemeldet über {provider}. Erneuere die Anmeldung, wenn Satchel neue Berechtigungen braucht.",
+        "signInTitle": "Anmeldung",
+        "syncTitle": "Synchronisierung"
+      },
       "disconnected": "nicht verbunden",
+      "empty": {
+        "description": "Füge ein Konto hinzu, um mit Satchel Mails zu lesen und zu schreiben.",
+        "title": "Noch kein E-Mail-Konto"
+      },
       "groupware": {
         "autoFailed": "Automatische Erkennung nicht möglich: {error}. Bitte ergänze die Zugangsdaten.",
         "badge": "CalDAV / CardDAV",
@@ -2533,7 +2555,18 @@
       "imapFailed": "IMAP-Verbindung fehlgeschlagen: {error}",
       "imapOk": "IMAP-Verbindung OK ({folders} Ordner)",
       "imapOkWithSample": "IMAP-Verbindung OK ({folders} Ordner): {sample}",
+      "mailAccounts": "E-Mail-Konten",
+      "names": {
+        "label": "Kontoname",
+        "labelHint": "So heißt das Konto in der Seitenleiste und in Listen.",
+        "saveFailed": "Die Namen konnten nicht gespeichert werden.",
+        "saved": "Namen gespeichert.",
+        "sender": "Absendername",
+        "senderHint": "Empfänger sehen diesen Namen neben {email}.",
+        "senderPlaceholder": "Vor- und Nachname"
+      },
       "oauthStatus": "{provider}: {state}",
+      "openAccount": "Einstellungen für {name}",
       "password": {
         "action": "Passwort ändern",
         "checking": "Anmeldung läuft …",
@@ -2570,6 +2603,10 @@
       "removeRequiresApp": "Konten löschen ist nur in der Desktop-App möglich.",
       "removeTitle": "Konto entfernen",
       "removed": "Konto gelöscht: {email}",
+      "status": {
+        "signInNeeded": "Anmeldung nötig",
+        "upToDate": "Aktuell"
+      },
       "statusUnavailable": "Status nicht verfügbar: {error}",
       "sync": {
         "accountsCount": "{count} Konto | {count} Konten",

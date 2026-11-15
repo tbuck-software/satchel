@@ -118,6 +118,7 @@
       "accountConfigurationInvalid": "Die Kontokonfiguration ist ungültig.",
       "accountCredentialAccessFailed": "Auf die gespeicherten Zugangsdaten des Kontos konnte nicht zugegriffen werden. Bitte versuche es erneut.",
       "accountHasNoPassword": "Dieses Konto meldet sich über seinen Anbieter an und hat kein Passwort, das sich ändern ließe.",
+      "accountNameInvalid": "Verwende einen Namen ohne Zeilenumbrüche mit höchstens 120 Zeichen.",
       "accountNotFound": "Das Konto wurde nicht gefunden.",
       "accountNotImap": "Dieses Konto verwendet kein IMAP.",
       "accountPasswordRequired": "Gib das Kontopasswort ein.",
@@ -966,7 +967,18 @@
   },
   "settings": {
     "accounts": {
-      "allAccounts": "Alle Konten",
+      "detail": {
+        "server": "Auf dem Server"
+      },
+      "groupware": {
+        "badge": "CalDAV / CardDAV"
+      },
+      "names": {
+        "saveFailed": "Die Namen konnten nicht gespeichert werden."
+      },
+      "password": {
+        "label": "Passwort"
+      },
       "reauth": {
         "failed": "Anmeldung fehlgeschlagen: {error}"
       },
@@ -976,7 +988,15 @@
         "doneCalendarError": "Neu verbunden: {email}. Kalender: {error}",
         "timeout": "Die Anmeldung hat zu lange gedauert. Bitte erneut versuchen."
       },
+      "removed": "Konto gelöscht: {email}",
+      "status": {
+        "upToDate": "Aktuell"
+      },
       "sync": {
+        "backfillProgress": "{done}/{total} ({percent}%)",
+        "backfillProgressPlain": "{done} erledigt",
+        "backfillStatus": "Mail-Nachladen: {progress}, {remaining} verbleibend ({accounts}), {threads}",
+        "finishedWithBackfill": "Mail-Sync: {messages} ({accounts}), Nachladen {progress}, {remaining} verbleibend für {pending}, {threads}",
         "syncImapNow": "IMAP jetzt synchronisieren"
       }
     },

@@ -711,7 +711,8 @@ function threadDto(thread: Thread) {
 function accountDto(account: Account) {
   return {
     id: account.id,
-    display_name: account.displayName,
+    display_name: account.senderName ?? account.displayName,
+    label: account.label ?? null,
     email: account.email,
     provider: account.provider,
     kind: account.kind,
@@ -1726,6 +1727,19 @@ const handlers: Record<string, Handler> = {
     if (avatar != null && (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/.test(String(avatar))
       || String(avatar).length > 96 * 1024)) throw new Error('backend.errors.accountAvatarInvalid');
     account.avatar = (avatar as string | null | undefined) ?? null;
+  },
+  // The same refusals as AccountRepository::set_names.
+  set_account_names: ({ accountId, label, senderName }) => {
+    const account = accounts.find((item) => item.id === accountId);
+    if (!account) throw new Error('backend.errors.accountNotFound');
+    const nextLabel = String(label ?? '').trim() || null;
+    const nextSender = String(senderName ?? '').trim();
+    const control = (char: string) => { const code = char.codePointAt(0)!; return code < 0x20 || (code >= 0x7f && code <= 0x9f); };
+    const invalid = (value: string) => [...value].length > 120 || [...value].some(control);
+    if ((nextLabel && invalid(nextLabel)) || invalid(nextSender)) throw new Error('backend.errors.accountNameInvalid');
+    account.label = nextLabel;
+    account.senderName = nextSender;
+    account.displayName = nextLabel || nextSender || account.email;
   },
   set_account_visibility: (payload) => {
     visibilityPolicies[payload.accountId as string] = JSON.parse(JSON.stringify(payload.policy)) as BackendAccountVisibilityPolicy;
