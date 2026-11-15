@@ -76,6 +76,8 @@ pub struct AppState {
     pub smime_unlock_sessions: Arc<Mutex<std::collections::HashMap<String, UnlockedSmimeSession>>>,
     pub pending_open_with: Arc<commands::open_with::PendingOpenWith>,
     pub write_grants: Arc<commands::write_grants::WriteGrants>,
+    pub read_grants: Arc<commands::read_grants::ReadGrants>,
+    pub viewer_files: Arc<commands::message_file::ViewerFiles>,
     pub shown_decrypted_parts: Arc<commands::attachments::ShownDecryptedParts>,
 }
 
@@ -100,6 +102,8 @@ impl AppState {
             smime_unlock_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
             pending_open_with: Arc::new(commands::open_with::PendingOpenWith::default()),
             write_grants: Arc::new(commands::write_grants::WriteGrants::default()),
+            read_grants: Arc::new(commands::read_grants::ReadGrants::default()),
+            viewer_files: Arc::new(commands::message_file::ViewerFiles::default()),
             shown_decrypted_parts: Arc::new(Default::default()),
         }
     }
@@ -865,6 +869,7 @@ pub fn run() {
             commands::tray::set_start_minimized,
             commands::write_grants::choose_save_path,
             commands::write_grants::choose_directory,
+            commands::read_grants::choose_open_file,
             commands::tray::tray_preferences,
             commands::tray::tray_snapshot,
             commands::tray::open_tray_thread,
@@ -1193,6 +1198,7 @@ fn open_path_with_satchel(app: &tauri::AppHandle, path: &std::path::Path) {
             // Buffered as well as emitted: on a cold start this runs before any
             // webview exists, and the event would go nowhere.
             if let Some(state) = app.try_state::<AppState>() {
+                state.read_grants.grant_file(path);
                 state
                     .pending_open_with
                     .push(path.to_string_lossy().into_owned());

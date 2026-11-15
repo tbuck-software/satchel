@@ -187,6 +187,7 @@ const COMMANDS: &[&str] = &[
     "set_start_minimized",
     "choose_save_path",
     "choose_directory",
+    "choose_open_file",
     "tray_preferences",
     "tray_snapshot",
     "open_tray_thread",

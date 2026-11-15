@@ -5,6 +5,7 @@ import { useConfirm } from '@/composables/useConfirm';
 import { useAccountsStore } from '@/stores/accounts';
 import {
   backendChooseDirectory,
+  backendChooseOpenFile,
   backendChooseSavePath,
   backendCancelImport,
   backendCancelPendingRestore,
@@ -23,7 +24,6 @@ import {
   type BackendImportProgress,
 } from '@/services/backend';
 import { listenToBackend } from '@/services/appEvents';
-import { pickDirectory, pickFile } from '@/services/fileDialog';
 import { useToast } from '@/composables/useToast';
 import { formatBytes } from '@/utils/formatBytes';
 import AppButton from '@/components/ui/AppButton.vue';
@@ -159,7 +159,7 @@ async function loadCredentialsStatus() {
 }
 
 async function pickBackupDir(): Promise<string | null> {
-  const selected = await pickDirectory(backupDir.value);
+  const selected = await backendChooseDirectory(backupDir.value);
   if (!selected) return null;
   backupDir.value = selected;
   return selected;
@@ -355,7 +355,7 @@ async function importNow() {
   status.value = '';
   errorStatus.value = '';
   try {
-    const selected = await pickFile([{ name: 'Mailbox', extensions: ['mbox', 'eml', 'txt'] }]);
+    const selected = await backendChooseOpenFile({ filterName: 'Mailbox', extensions: ['mbox', 'eml', 'txt'] });
     if (!selected) {
       busy.value = false;
       return;
@@ -417,7 +417,7 @@ async function importPlatformNow() {
   status.value = '';
   errorStatus.value = '';
   try {
-    const selected = await pickFile([{ name: 'Satchel Platform JSON', extensions: ['json'] }]);
+    const selected = await backendChooseOpenFile({ filterName: 'Satchel Platform JSON', extensions: ['json'] });
     if (!selected) {
       busy.value = false;
       return;

@@ -321,6 +321,7 @@
       "queueRejected": "The server rejected this action. Review its details before trying again.",
       "queueTemporary": "The server is temporarily unavailable. Satchel will try again automatically.",
       "queuedDraftNotRestorable": "This message can no longer be reopened as a draft because its draft changed after it was queued. It is still in the Outbox, where you can view it or discard it before it is sent.",
+      "readSourceNotChosen": "Satchel only reads a file or folder chosen in its own dialog. Choose {path} again.",
       "recipientAddressInvalid": "This is not a valid recipient address: {value}",
       "replyContextLoadFailed": "The reply context could not be loaded. The message has not been sent yet.",
       "replyThreadNotFound": "The conversation for this reply is no longer available.",

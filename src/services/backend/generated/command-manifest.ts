@@ -195,6 +195,26 @@ export default {
                 }
             }
         },
+        "choose_open_file": {
+            "kind": "object",
+            "fields": {
+                "extensions": {
+                    "required": true,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "filterName": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "choose_save_path": {
             "kind": "object",
             "fields": {

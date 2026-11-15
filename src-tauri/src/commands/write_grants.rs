@@ -88,7 +88,12 @@ pub async fn choose_directory(
         if let Some(default_path) = default_path.filter(|path| !path.is_empty()) {
             dialog = dialog.set_directory(default_path);
         }
-        Ok(granted_path(&state, dialog.blocking_pick_folder()))
+        let chosen = granted_path(&state, dialog.blocking_pick_folder());
+        // A picked folder is also where the backup list and restore may read.
+        if let Some(path) = &chosen {
+            state.read_grants.grant_folder(std::path::Path::new(path));
+        }
+        Ok(chosen)
     }
     #[cfg(mobile)]
     {

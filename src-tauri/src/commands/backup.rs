@@ -939,9 +939,11 @@ pub async fn export_platform_data(
 #[tauri::command]
 pub async fn import_platform_data(
     app: tauri::AppHandle,
+    state: tauri::State<'_, crate::AppState>,
     pool: tauri::State<'_, SqlitePool>,
     path: String,
 ) -> CommandResult<PlatformDataResult> {
+    state.read_grants.file(Path::new(&path))?;
     crate::commands::file_limits::guard_import_size(std::path::Path::new(&path)).await?;
     let raw = tokio::fs::read_to_string(&path)
         .await
@@ -1180,13 +1182,39 @@ fn reformat_date_for_mbox(rfc3339: &str) -> String {
 use crate::email::mbox::strip_mbox_from_line;
 use crate::email::mbox::MboxEntries;
 
+/// A viewer window may import only the message file it shows; every other
+/// window only a file the backend granted.
+fn check_import_source(
+    window_label: &str,
+    path: &str,
+    read_grants: &crate::commands::read_grants::ReadGrants,
+    viewer_files: &crate::commands::message_file::ViewerFiles,
+) -> CommandResult<()> {
+    if window_label.starts_with(crate::commands::message_file::VIEWER_LABEL_PREFIX) {
+        if viewer_files.is_bound(window_label, path) {
+            return Ok(());
+        }
+        return Err(CommandError::new("backend.errors.readSourceNotChosen")
+            .with_param("path", path.to_string()));
+    }
+    read_grants.file(Path::new(path)).map(|_| ())
+}
+
 #[tauri::command]
 pub async fn import_mbox(
     app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, crate::AppState>,
     pool: tauri::State<'_, SqlitePool>,
     path: String,
     account_id: String,
 ) -> CommandResult<ImportResult> {
+    check_import_source(
+        window.label(),
+        &path,
+        &state.read_grants,
+        &state.viewer_files,
+    )?;
     let account = sqlx::query_as::<_, (String,)>("SELECT email FROM accounts WHERE id = ? LIMIT 1")
         .bind(&account_id)
         .fetch_one(pool.inner())
@@ -1969,7 +1997,15 @@ async fn create_backup_in(
 /// listed backup, so ten backups of a 5-GB database read 50 GB before the first
 /// row appeared. A backup without a manifest lists with zeroes.
 #[tauri::command]
-pub async fn list_backups(dir: String) -> CommandResult<Vec<BackupEntry>> {
+pub async fn list_backups(
+    state: tauri::State<'_, crate::AppState>,
+    dir: String,
+) -> CommandResult<Vec<BackupEntry>> {
+    state.read_grants.folder(Path::new(&dir))?;
+    list_backups_in(dir).await
+}
+
+async fn list_backups_in(dir: String) -> CommandResult<Vec<BackupEntry>> {
     let root = std::path::PathBuf::from(&dir);
     let mut read_dir = match tokio::fs::read_dir(&root).await {
         Ok(entries) => entries,
@@ -2043,9 +2079,11 @@ pub async fn list_backups(dir: String) -> CommandResult<Vec<BackupEntry>> {
 #[tauri::command]
 pub async fn restore_backup(
     app: tauri::AppHandle,
+    state: tauri::State<'_, crate::AppState>,
     path: String,
     passphrase: Option<String>,
 ) -> CommandResult<RestoreStaged> {
+    state.read_grants.folder_or_entry(Path::new(&path))?;
     let source = std::path::PathBuf::from(&path);
     let candidate = if source.is_dir() {
         source.clone()
@@ -2092,9 +2130,18 @@ pub async fn restore_backup(
 /// Keep the newest `keep` completed publications. Legacy or unverified backups
 /// remain visible/restorable, but neither consume retention slots nor get deleted.
 #[tauri::command]
-pub async fn prune_backups(dir: String, keep: usize) -> CommandResult<Vec<String>> {
+pub async fn prune_backups(
+    state: tauri::State<'_, crate::AppState>,
+    dir: String,
+    keep: usize,
+) -> CommandResult<Vec<String>> {
+    state.read_grants.folder(Path::new(&dir))?;
+    prune_backups_in(dir, keep).await
+}
+
+async fn prune_backups_in(dir: String, keep: usize) -> CommandResult<Vec<String>> {
     let keep = keep.max(1);
-    let stale: Vec<String> = list_backups(dir)
+    let stale: Vec<String> = list_backups_in(dir)
         .await?
         .into_iter()
         .filter(|entry| {
@@ -2832,7 +2879,7 @@ mod tests {
 
         let entries = INTEGRITY_CHECKS
             .scope(std::cell::Cell::new(0), async {
-                let entries = list_backups(root.path().to_string_lossy().to_string())
+                let entries = list_backups_in(root.path().to_string_lossy().to_string())
                     .await
                     .expect("listing");
                 assert_eq!(
@@ -2861,7 +2908,7 @@ mod tests {
         let dir = backup_dir(root.path(), "satchel-20260910-120000", 4096, 1500);
         std::fs::remove_file(dir.join(satchel_core::backup::BACKUP_MANIFEST)).expect("manifest");
 
-        let entries = list_backups(root.path().to_string_lossy().to_string())
+        let entries = list_backups_in(root.path().to_string_lossy().to_string())
             .await
             .expect("listing");
 
@@ -2948,8 +2995,8 @@ mod tests {
             .await
             .is_err()
         );
-        assert_eq!(list_backups(dir.clone()).await.unwrap().len(), 7);
-        assert!(prune_backups(dir.clone(), 5).await.unwrap().is_empty());
+        assert_eq!(list_backups_in(dir.clone()).await.unwrap().len(), 7);
+        assert!(prune_backups_in(dir.clone(), 5).await.unwrap().is_empty());
         assert!(Path::new(&valid.path).is_dir());
         assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 13);
         pool.close().await;
@@ -2973,7 +3020,7 @@ mod tests {
         drop(creation);
         drop(connection);
         assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
-        assert!(list_backups(root.path().to_string_lossy().to_string())
+        assert!(list_backups_in(root.path().to_string_lossy().to_string())
             .await
             .unwrap()
             .is_empty());
@@ -3005,7 +3052,7 @@ mod tests {
                     .unwrap(),
             );
         }
-        let removed = prune_backups(dir.clone(), 5).await.unwrap();
+        let removed = prune_backups_in(dir.clone(), 5).await.unwrap();
         assert_eq!(removed.len(), 2);
         for entry in &completed {
             let should_survive = entry.created_at != backup_time(0).to_rfc3339()
@@ -3018,7 +3065,7 @@ mod tests {
                 "legacy and unverified directories are never pruned"
             );
         }
-        assert_eq!(list_backups(dir).await.unwrap().len(), 8);
+        assert_eq!(list_backups_in(dir).await.unwrap().len(), 8);
         inspect_database(&legacy.join("satchel.db")).await.unwrap();
         let keys = crate::utils::crypto::backup_master_keys(&legacy, None).unwrap();
         let profile = tempfile::tempdir().unwrap();
@@ -3063,7 +3110,7 @@ mod tests {
         }
         assert_eq!(std::fs::read(existing.join("satchel.db")).unwrap(), before);
         assert_eq!(
-            list_backups(root.path().to_string_lossy().to_string())
+            list_backups_in(root.path().to_string_lossy().to_string())
                 .await
                 .unwrap()
                 .len(),
@@ -3179,7 +3226,7 @@ mod tests {
                 .unwrap();
         }
         assert_eq!(
-            prune_backups(root.path().to_string_lossy().to_string(), 5)
+            prune_backups_in(root.path().to_string_lossy().to_string(), 5)
                 .await
                 .unwrap()
                 .len(),
@@ -3190,7 +3237,7 @@ mod tests {
         assert!(Path::new(&changed.path).is_dir());
         assert!(Path::new(&replaced_db.path).is_dir());
         assert_eq!(
-            list_backups(root.path().to_string_lossy().to_string())
+            list_backups_in(root.path().to_string_lossy().to_string())
                 .await
                 .unwrap()
                 .len(),
@@ -4112,5 +4159,32 @@ Content-Transfer-Encoding: 8bit\r\n\r\nGr\xfc\xdfe\r\n\
         assert_eq!(entries.len(), 1);
         assert!(entries[0].contains("Subject: Real"));
         assert_eq!(dropped, 0);
+    }
+
+    #[test]
+    fn a_viewer_window_imports_only_its_own_message_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let own = directory.path().join("own.eml");
+        let other = directory.path().join("other.eml");
+        let mbox = directory.path().join("granted.mbox");
+        for path in [&own, &other, &mbox] {
+            std::fs::write(path, b"Subject: x\r\n\r\nbody").unwrap();
+        }
+        let own = own.to_string_lossy().to_string();
+        let other = other.to_string_lossy().to_string();
+        let mbox_path = mbox.to_string_lossy().to_string();
+        let grants = crate::commands::read_grants::ReadGrants::default();
+        let viewers = crate::commands::message_file::ViewerFiles::default();
+        viewers.bind("message-file-aa", &own);
+        grants.grant_file(&mbox);
+
+        assert!(check_import_source("message-file-aa", &own, &grants, &viewers).is_ok());
+        assert!(check_import_source("message-file-aa", &other, &grants, &viewers).is_err());
+        assert!(check_import_source("message-file-bb", &own, &grants, &viewers).is_err());
+        // A grant from the main window does not widen a viewer.
+        assert!(check_import_source("message-file-aa", &mbox_path, &grants, &viewers).is_err());
+
+        assert!(check_import_source("main", &mbox_path, &grants, &viewers).is_ok());
+        assert!(check_import_source("main", &own, &grants, &viewers).is_err());
     }
 }
