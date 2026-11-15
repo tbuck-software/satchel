@@ -11,7 +11,7 @@ import type { GroupwareSyncSummary as WireGroupwareSyncSummary } from './generat
 // Auto-split from services/backend.ts — domain module.
 import { invoke } from './core';
 
-export type BackendAccount = RefinedWireFields<OptionalWireFields<WireAccountDto, 'color' | 'last_oauth_error' | 'last_oauth_error_at' | 'last_sync_at' | 'sync_status' | 'last_sync_error' | 'last_sync_error_at' | 'sync_progress_json' | 'avatar'>, { kind: 'email' | 'webhook' | 'script' | 'rss' }>;
+export type BackendAccount = RefinedWireFields<OptionalWireFields<WireAccountDto, 'label' | 'color' | 'last_oauth_error' | 'last_oauth_error_at' | 'last_sync_at' | 'sync_status' | 'last_sync_error' | 'last_sync_error_at' | 'sync_progress_json' | 'avatar'>, { kind: 'email' | 'webhook' | 'script' | 'rss' }>;
 
 
 export type BackendDiscoveredService = OptionalWireFields<WireDiscoveredService, 'host' | 'port' | 'collections'>;
@@ -39,7 +39,10 @@ export async function backendListAccounts(): Promise<BackendAccount[]> {
 
 
 export async function backendAddAccount(payload: {
+  /** The sender name on outgoing mail. */
   displayName: string;
+  /** Satchel's own name for the account; blank shows the sender name. */
+  label?: string;
   email: string;
   provider: 'imap' | 'pop3' | 'gmail' | 'outlook';
   config?: Record<string, unknown>;
@@ -47,6 +50,7 @@ export async function backendAddAccount(payload: {
   return invoke<BackendAccount>('add_account', {
     input: {
       display_name: payload.displayName,
+      label: payload.label?.trim() || null,
       email: payload.email,
       provider: payload.provider,
       config: payload.config ?? {},
@@ -74,6 +78,14 @@ export async function backendClearAccountOauthError(accountId: string): Promise<
 /** Recolour an account; `color` is `#rrggbb`. */
 export async function backendSetAccountColor(accountId: string, color: string): Promise<void> {
   return invoke<void>('set_account_color', { accountId, color });
+}
+
+/**
+ * Rename the account (`label`, blank shows the sender name) and set the name
+ * on its outgoing mail.
+ */
+export async function backendSetAccountNames(accountId: string, label: string | null, senderName: string): Promise<void> {
+  return invoke<void>('set_account_names', { accountId, label, senderName });
 }
 
 /** Set the account's picture as a small data URL, or clear it with `null`. */

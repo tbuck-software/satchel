@@ -721,6 +721,7 @@ pub fn run() {
             commands::accounts::clear_account_oauth_error,
             commands::accounts::set_account_color,
             commands::accounts::set_account_avatar,
+            commands::accounts::set_account_names,
             commands::mailboxes::list_mailboxes,
             commands::folders::create_folder,
             commands::folders::rename_folder,

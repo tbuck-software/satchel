@@ -39,6 +39,7 @@ const COMMANDS: &[&str] = &[
     "clear_account_oauth_error",
     "set_account_color",
     "set_account_avatar",
+    "set_account_names",
     "list_mailboxes",
     "create_folder",
     "rename_folder",

@@ -2,6 +2,7 @@ import { MOCK_PDF_BASE64 } from './mockPdf';
 import { createPersistedSlot, persistence } from '@/persistence';
 import type { BackendAccountQuota, BackendAccountVisibilityPolicy } from './accounts';
 import type { BackendTask, BackendTaskList } from './tasks';
+import type { BackendSource, BackendWebhook } from './sources';
 import { splitSubjectPrefixes } from '@/utils/composerText';
 import { cleanContactName, isContactEmail } from '@/utils/contactIdentity';
 import { bytesToBase64 } from '@/utils/base64';
@@ -613,6 +614,18 @@ function takeQueuedDraft(id: string): BackendDraft {
 const calendarEvents: BackendCalendarEvent[] = mockCalendarEvents.map((event) => ({ ...event }));
 const calendarInvites: BackendCalendarInvite[] = mockCalendarInvites.map((invite) => ({ ...invite }));
 const calendarSources: BackendCalendarSource[] = mockCalendarSources.map((source) => ({ ...source }));
+// Feeds and webhooks start empty, as on a fresh install.
+const sources: BackendSource[] = [];
+const webhooks: BackendWebhook[] = [];
+
+function webhookUrlValid(raw: unknown): boolean {
+  try {
+    const url = new URL(String(raw));
+    return url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname));
+  } catch {
+    return false;
+  }
+}
 const senderPreferences = new Map<string, { category: string | null; isPriority: boolean }>();
 
 /**
@@ -711,7 +724,8 @@ function threadDto(thread: Thread) {
 function accountDto(account: Account) {
   return {
     id: account.id,
-    display_name: account.displayName,
+    display_name: account.senderName ?? account.displayName,
+    label: account.label ?? null,
     email: account.email,
     provider: account.provider,
     kind: account.kind,
@@ -1727,6 +1741,19 @@ const handlers: Record<string, Handler> = {
       || String(avatar).length > 96 * 1024)) throw new Error('backend.errors.accountAvatarInvalid');
     account.avatar = (avatar as string | null | undefined) ?? null;
   },
+  // The same refusals as AccountRepository::set_names.
+  set_account_names: ({ accountId, label, senderName }) => {
+    const account = accounts.find((item) => item.id === accountId);
+    if (!account) throw new Error('backend.errors.accountNotFound');
+    const nextLabel = String(label ?? '').trim() || null;
+    const nextSender = String(senderName ?? '').trim();
+    const control = (char: string) => { const code = char.codePointAt(0)!; return code < 0x20 || (code >= 0x7f && code <= 0x9f); };
+    const invalid = (value: string) => [...value].length > 120 || [...value].some(control);
+    if ((nextLabel && invalid(nextLabel)) || invalid(nextSender)) throw new Error('backend.errors.accountNameInvalid');
+    account.label = nextLabel;
+    account.senderName = nextSender;
+    account.displayName = nextLabel || nextSender || account.email;
+  },
   set_account_visibility: (payload) => {
     visibilityPolicies[payload.accountId as string] = JSON.parse(JSON.stringify(payload.policy)) as BackendAccountVisibilityPolicy;
     persistence.write(visibilitySlot, visibilityPolicies);
@@ -2633,6 +2660,57 @@ const handlers: Record<string, Handler> = {
   consume_pending_mobile_notification: () => ({ threadId: null, actionId: null }),
   // No native notification gate retains responses here.
   mobile_notification_response_handled: () => undefined,
+  list_sources: () => sources.map((source) => ({ ...source })),
+  create_source: ({ input }) => {
+    const fields = input as { name?: string; kind?: string; identity?: string; color?: string; config?: unknown };
+    const name = String(fields.name ?? '').trim();
+    const identity = String(fields.identity ?? '').trim();
+    if (!name || name.length > 160) throw new Error('invalid name');
+    if (!identity || identity.length > 2048) throw new Error('invalid identity');
+    if (!['webhook', 'script', 'rss'].includes(String(fields.kind))) throw new Error('unsupported source kind');
+    if (fields.kind === 'rss' && !/^https?:\/\//i.test(identity)) throw new Error('feed URL must use http or https');
+    const config = fields.config && typeof fields.config === 'object' && !Array.isArray(fields.config) ? fields.config : {};
+    const source: BackendSource = {
+      id: `src-${++sequence}`,
+      display_name: name,
+      identity,
+      kind: String(fields.kind),
+      provider: String(fields.kind),
+      color: fields.color ?? '#4cd68a',
+      config: JSON.stringify(config),
+      sync_state: '{}',
+    };
+    sources.push(source);
+    return { ...source };
+  },
+  delete_source: ({ sourceId }) => {
+    const index = sources.findIndex((source) => source.id === sourceId);
+    if (index >= 0) sources.splice(index, 1);
+  },
+  // The mock fetches no feeds.
+  poll_source: () => 0,
+  list_webhooks: () => webhooks.map((webhook) => ({ ...webhook })),
+  upsert_webhook: ({ input }) => {
+    const fields = input as { id?: string | null; url: string; events: string[]; enabled: boolean };
+    if (!webhookUrlValid(fields.url)) throw new Error('backend.errors.webhookUrlInvalid');
+    const now = new Date().toISOString();
+    const existing = fields.id ? webhooks.find((webhook) => webhook.id === fields.id) : undefined;
+    const webhook: BackendWebhook = {
+      id: existing?.id ?? fields.id ?? `wh-${++sequence}`,
+      url: fields.url,
+      events_json: JSON.stringify(fields.events ?? []),
+      enabled: fields.enabled ? 1 : 0,
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    if (existing) Object.assign(existing, webhook);
+    else webhooks.push(webhook);
+    return { ...webhook };
+  },
+  delete_webhook: ({ id }) => {
+    const index = webhooks.findIndex((webhook) => webhook.id === id);
+    if (index >= 0) webhooks.splice(index, 1);
+  },
   list_plugins: () => [],
   list_plugin_metrics: () => [],
   list_plugin_audit_log: () => [],

@@ -119,7 +119,8 @@ impl<'a> ConnectionStateRepository<'a> {
         // Read only the cursor envelope, not deferred message/snapshot payloads.
         // This uses the existing ten-second connection ticker, with no UI poll.
         let accounts = sqlx::query_as::<_, AccountProgressRow>(
-            "SELECT id, display_name, email, sync_status, sync_progress_json, updated_at,
+            "SELECT id, COALESCE(label, display_name) AS display_name, email, sync_status,
+                    sync_progress_json, updated_at,
                     CASE WHEN json_valid(sync_state) THEN json_extract(sync_state, '$.cursors') END AS cursors_json
              FROM accounts WHERE is_active = 1 AND provider IN ('imap', 'pop3', 'gmail', 'outlook')
              ORDER BY id",

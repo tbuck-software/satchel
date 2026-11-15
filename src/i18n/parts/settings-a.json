@@ -50,6 +50,35 @@
         "allAccounts": "All accounts",
         "description": "Manage email accounts, syncing and sign-in.",
         "addAccount": "Add email account",
+        "mailAccounts": "Email accounts",
+        "openAccount": "Settings for {name}",
+        "empty": {
+          "title": "No email account yet",
+          "description": "Add an account to read and send mail with Satchel."
+        },
+        "status": { "signInNeeded": "Sign-in needed", "upToDate": "Up to date" },
+        "detail": {
+          "general": "General",
+          "connection": "Connection",
+          "remove": "Remove account",
+          "removeHint": "Deletes this account's mail, folders and stored sign-in from this device.",
+          "syncTitle": "Mail sync",
+          "signInTitle": "Sign-in",
+          "signInHint": "Signed in with {provider}. Renew the sign-in when Satchel asks for new permissions.",
+          "passwordTitle": "Password",
+          "calendarsHint": "Connect CalDAV calendars and CardDAV contacts from the same provider.",
+          "labelsTitle": "Labels and categories",
+          "server": "On the server"
+        },
+        "names": {
+          "label": "Account name",
+          "labelHint": "How the account appears in the sidebar and in lists.",
+          "sender": "Sender name",
+          "senderHint": "Recipients see this name next to {email}.",
+          "senderPlaceholder": "First and last name",
+          "saved": "Names saved.",
+          "saveFailed": "The names could not be saved."
+        },
         "removeTitle": "Remove account",
         "removed": "Account deleted: {email}",
         "removeConfirmTitle": "Delete this account for good?",
@@ -576,6 +605,35 @@
         "allAccounts": "Alle Konten",
         "description": "E-Mail-Konten, Synchronisierung und Anmeldung verwalten.",
         "addAccount": "E-Mail-Konto hinzufügen",
+        "mailAccounts": "E-Mail-Konten",
+        "openAccount": "Einstellungen für {name}",
+        "empty": {
+          "title": "Noch kein E-Mail-Konto",
+          "description": "Füge ein Konto hinzu, um mit Satchel Mails zu lesen und zu schreiben."
+        },
+        "status": { "signInNeeded": "Anmeldung nötig", "upToDate": "Aktuell" },
+        "detail": {
+          "general": "Allgemein",
+          "connection": "Verbindung",
+          "remove": "Konto entfernen",
+          "removeHint": "Löscht Mails, Ordner und gespeicherte Anmeldung dieses Kontos von diesem Gerät.",
+          "syncTitle": "Synchronisierung",
+          "signInTitle": "Anmeldung",
+          "signInHint": "Angemeldet über {provider}. Erneuere die Anmeldung, wenn Satchel neue Berechtigungen braucht.",
+          "passwordTitle": "Passwort",
+          "calendarsHint": "CalDAV-Kalender und CardDAV-Kontakte desselben Anbieters verbinden.",
+          "labelsTitle": "Labels und Kategorien",
+          "server": "Auf dem Server"
+        },
+        "names": {
+          "label": "Kontoname",
+          "labelHint": "So heißt das Konto in der Seitenleiste und in Listen.",
+          "sender": "Absendername",
+          "senderHint": "Empfänger sehen diesen Namen neben {email}.",
+          "senderPlaceholder": "Vor- und Nachname",
+          "saved": "Namen gespeichert.",
+          "saveFailed": "Die Namen konnten nicht gespeichert werden."
+        },
         "removeTitle": "Konto entfernen",
         "removed": "Konto gelöscht: {email}",
         "removeConfirmTitle": "Dieses Konto endgültig löschen?",

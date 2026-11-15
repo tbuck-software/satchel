@@ -1,1177 +1,254 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useAccountsStore } from '@/stores/accounts';
-import { useConnectionStore } from '@/stores/connection';
-import { useMailboxesStore } from '@/stores/mailboxes';
-import { useThreadsStore } from '@/stores/threads';
 import { useUiStore } from '@/stores/ui';
 import { useSettingsLocation } from '@/composables/useSettingsLocation';
 import { useCertificateTrustStore } from '@/stores/certificateTrust';
 import { useAccountQuotaStore } from '@/stores/accountQuota';
 import { useWorkflowSyncStore } from '@/stores/workflowSync';
-import { certificateShort, formatCertificateMoment } from '@/utils/certificateLabels';
-import {
-  backendAutoconfigureGroupware,
-  backendDeleteAccount,
-  backendCommandsAvailable,
-  backendConfigureGroupware,
-  backendOauthStatus,
-  backendRunImapSync,
-  backendSyncGroupware,
-  backendTestImapAccountConnection,
-  backendUpdateAccountPassword,
-  translateBackendError,
-} from '@/services/backend';
-import { useConfirm } from '@/composables/useConfirm';
-import { transportErrorLabel, transportErrorText } from '@/utils/transportLabels';
-import AccountVisibilitySettings from './AccountVisibilitySettings.vue';
-import AccountAppearanceSettings from './AccountAppearanceSettings.vue';
-import AccountQuotaSettings from './AccountQuotaSettings.vue';
-import AccountWorkflowSyncNote from './AccountWorkflowSyncNote.vue';
+import { certificateShort } from '@/utils/certificateLabels';
+import type { Account } from '@/types/mail';
+import { providerLabel, syncErrorText, syncProgressLabel, syncStatusLabel } from './accountStatus';
+import AccountDetail from './AccountDetail.vue';
 import AccountAvatar from '@/components/common/AccountAvatar.vue';
 import AppButton from '@/components/ui/AppButton.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
+import CardButton from '@/components/ui/CardButton.vue';
+import EmptyState from '@/components/ui/EmptyState.vue';
+import SectionHeading from '@/components/ui/SectionHeading.vue';
 
+/**
+ * Accounts: a list to see every account at a glance, and one page per
+ * account for everything that can be changed about it. The list used to hold
+ * every option of every account at once, with no room for renaming one.
+ */
 const { locale, t } = useI18n();
 const accounts = useAccountsStore();
-const connection = useConnectionStore();
-const mailboxes = useMailboxesStore();
-const threads = useThreadsStore();
 const ui = useUiStore();
 const certificates = useCertificateTrustStore();
 const quotas = useAccountQuotaStore();
-// The numbers change at most every few hours; one read per visit is plenty.
-onMounted(() => void quotas.load());
 const workflowSync = useWorkflowSyncStore();
-// Settles on the first sync after an account is added; one read per visit.
-onMounted(() => void workflowSync.load());
+const location = useSettingsLocation();
+// Quota and workflow sync change at most every few hours; one read per visit.
+onMounted(() => {
+  void quotas.load();
+  void workflowSync.load();
+});
 
-/** A rejected certificate or a running exception, as one line that opens the details. */
-function certificateLine(accountId: string): string | null {
-  const problem = certificates.problemFor(accountId);
-  if (problem) return certificateShort(problem.rejection);
-  const exception = certificates.exceptionFor(accountId);
-  return exception
-    ? t('certificates.exceptionShort', { until: formatCertificateMoment(exception.expires_at) })
-    : null;
-}
-const { ask } = useConfirm();
-const oauthAvailable = backendCommandsAvailable();
 const emailAccounts = computed(() => accounts.emailAccounts);
+const openAccount = computed(() =>
+  emailAccounts.value.find((account) => account.id === location.account.value) ?? null);
 
-const syncBusy = ref(false);
-const statusText = ref('');
-/**
- * The untouched chain behind the last failure, paired with the line it belongs
- * to. The pairing is what keeps every success path untouched: a newer status
- * no longer matches, so stale details cannot outlive the failure.
- */
-const lastFailure = ref({ status: '', raw: '' });
-const statusDetail = computed(() =>
-  lastFailure.value.status === statusText.value ? lastFailure.value.raw : '',
-);
-// The same pairing decides the tone: a failure must not look like the
-// success line that shares its place.
-const statusIsError = computed(() =>
-  statusText.value !== '' && lastFailure.value.status === statusText.value,
-);
-const groupwareOpen = ref(false);
-const groupwareBusy = ref(false);
-const groupwareAccountId = ref('');
-const groupwareAccountEmail = ref('');
-const groupwareUsername = ref('');
-const groupwarePassword = ref('');
-const caldavServer = ref('');
-const carddavServer = ref('');
-const settingsLocation = useSettingsLocation();
-const passwordAccountId = ref('');
-const newPassword = ref('');
-const passwordBusy = ref(false);
-const passwordInput = ref<HTMLInputElement | null>(null);
-const passwordAccount = computed(() =>
-  emailAccounts.value.find((account) => account.id === passwordAccountId.value) ?? null,
-);
+type Tone = 'ok' | 'idle' | 'busy' | 'warning' | 'error';
 
-/** A failure with no chain behind it — a missing field, a partial sync. */
-function reportProblem(text: string) {
-  statusText.value = text;
-  lastFailure.value = { status: text, raw: '' };
-}
-
-/** Put the class of failure in the status line and the chain behind it. */
-function reportFailure(key: string, error: unknown) {
-  const raw = transportErrorText(error);
-  const label = transportErrorLabel(error);
-  statusText.value = t(key, { error: label || raw });
-  lastFailure.value = { status: statusText.value, raw: label === raw ? '' : raw };
-}
-
-function providerLabel(provider: string): string {
-  if (provider === 'gmail') return 'Gmail';
-  if (provider === 'outlook') return 'Outlook';
-  if (provider === 'pop3') return 'POP3';
-  return 'IMAP';
-}
-
-function syncStatusLabel(account: (typeof accounts.accounts)[number]): string {
-  const status = account.syncStatus ?? 'idle';
-  if (status === 'syncing') return t('settings.accounts.sync.running');
-  if (status === 'error') return t('settings.accounts.sync.error');
-  if (account.lastSyncAt) {
-    return t('settings.accounts.sync.lastAt', {
-      time: new Date(account.lastSyncAt).toLocaleString(locale.value, { dateStyle: 'medium', timeStyle: 'short', hour12: false }),
-    });
+/** The one thing worth knowing about an account, most urgent first. */
+function statusOf(account: Account): { tone: Tone; text: string } {
+  if (account.lastOauthError) return { tone: 'error', text: t('settings.accounts.status.signInNeeded') };
+  if (account.syncStatus === 'error') {
+    return { tone: 'error', text: syncErrorText(account) ?? t('settings.accounts.sync.error') };
   }
-  return t('settings.accounts.sync.never');
-}
-
-function syncProgressLabel(raw?: string | null): string {
-  if (!raw) return '';
-  try {
-    const parsed = JSON.parse(raw) as {
-      phase?: string;
-      folder?: string;
-      folder_index?: number;
-      folder_total?: number;
-    };
-    if (parsed.phase === 'folder' && parsed.folder) {
-      return `${parsed.folder_index ?? '?'} / ${parsed.folder_total ?? '?'}: ${parsed.folder}`;
-    }
-    if (parsed.phase === 'complete') return t('settings.accounts.sync.progressComplete');
-    if (parsed.phase === 'error') return t('common.error');
-  } catch {}
-  return '';
-}
-
-function statusButtonTitle(provider: string): string {
-  if (provider === 'imap') {
-    return t('settings.accounts.testImap');
+  const problem = certificates.problemFor(account.id);
+  if (problem) return { tone: 'warning', text: certificateShort(problem.rejection) };
+  const quota = quotas.levelFor(account.id);
+  if (quota === 'warning' || quota === 'critical') {
+    return { tone: 'warning', text: quota === 'critical' ? t('accountQuota.critical') : t('accountQuota.warning') };
   }
-  if (provider === 'pop3') {
-    return t('settings.accounts.testPop3');
+  if (account.syncStatus === 'syncing') {
+    const progress = syncProgressLabel(account.syncProgressJson, t);
+    const label = t('settings.accounts.sync.running');
+    return { tone: 'busy', text: progress ? `${label} · ${progress}` : label };
   }
-  return t('settings.accounts.checkOrRenew');
-}
-
-function groupwareErrorSuffix(errors: string[]): string {
-  if (errors.length === 0) return '';
-  return `; ${errors.map((error) => translateBackendError(error) ?? error).join('; ')}`;
-}
-
-function openGroupware(account: (typeof accounts.accounts)[number]) {
-  if (groupwareOpen.value && groupwareAccountId.value === account.id) {
-    groupwareOpen.value = false;
-    return;
-  }
-  const domain = account.email.split('@')[1]?.trim() ?? '';
-  groupwareAccountId.value = account.id;
-  groupwareAccountEmail.value = account.email;
-  groupwareUsername.value = account.email.split('@')[0]?.trim() ?? account.email;
-  groupwarePassword.value = '';
-  caldavServer.value = domain ? `gwcaldav.${domain}` : '';
-  carddavServer.value = domain ? `gwcarddav.${domain}` : '';
-  groupwareOpen.value = true;
-}
-
-async function connectGroupware(account: (typeof accounts.accounts)[number]) {
-  groupwareAccountId.value = account.id;
-  groupwareAccountEmail.value = account.email;
-  groupwareBusy.value = true;
-  statusText.value = t('settings.accounts.groupware.discovering');
-  try {
-    const result = await backendAutoconfigureGroupware(account.id);
-    let services = t('settings.accounts.groupware.contacts');
-    if (result.caldav_server && result.carddav_server) {
-      services = t('settings.accounts.groupware.calendarAndContacts');
-    } else if (result.caldav_server) {
-      services = t('settings.accounts.groupware.calendar');
-    }
-    const suffix = groupwareErrorSuffix(result.summary.errors);
-    statusText.value = t('settings.accounts.groupware.connected', {
-      services,
-      events: result.summary.events_synced,
-      contacts: result.summary.contacts_synced,
-      suffix,
-    });
-    groupwareOpen.value = false;
-  } catch (error) {
-    reportFailure('settings.accounts.groupware.autoFailed', error);
-    groupwareOpen.value = false;
-    openGroupware(account);
-  } finally {
-    groupwareBusy.value = false;
-  }
-}
-
-async function saveGroupware() {
-  if (!groupwareAccountId.value || !groupwareUsername.value.trim() || !groupwarePassword.value) {
-    reportProblem(t('settings.accounts.groupware.credentialsRequired'));
-    return;
-  }
-  if (!caldavServer.value.trim() && !carddavServer.value.trim()) {
-    reportProblem(t('settings.accounts.groupware.serverRequired'));
-    return;
-  }
-  groupwareBusy.value = true;
-  try {
-    const result = await backendConfigureGroupware({
-      accountId: groupwareAccountId.value,
-      username: groupwareUsername.value.trim(),
-      password: groupwarePassword.value,
-      caldavServer: caldavServer.value.trim() || null,
-      carddavServer: carddavServer.value.trim() || null,
-    });
-    const suffix = groupwareErrorSuffix(result.errors);
-    statusText.value = t('settings.accounts.groupware.saved', {
-      events: result.events_synced,
-      contacts: result.contacts_synced,
-      suffix,
-    });
-    groupwarePassword.value = '';
-    groupwareOpen.value = false;
-  } catch (error) {
-    reportFailure('settings.accounts.groupware.saveFailed', error);
-  } finally {
-    groupwareBusy.value = false;
-  }
-}
-
-async function syncGroupwareNow() {
-  if (!groupwareAccountId.value) return;
-  groupwareBusy.value = true;
-  try {
-    const result = await backendSyncGroupware(groupwareAccountId.value);
-    const suffix = groupwareErrorSuffix(result.errors);
-    statusText.value = t('settings.accounts.groupware.synced', {
-      events: result.events_synced,
-      contacts: result.contacts_synced,
-      suffix,
-    });
-  } catch (error) {
-    reportFailure('settings.accounts.groupware.syncFailed', error);
-  } finally {
-    groupwareBusy.value = false;
-  }
-}
-
-function usesPassword(provider: string): boolean {
-  return provider === 'imap' || provider === 'pop3';
-}
-
-function openPasswordForm(accountId: string) {
-  passwordAccountId.value = accountId;
-  newPassword.value = '';
-  // Focusing scrolls the field into view as well.
-  void nextTick(() => passwordInput.value?.focus());
-}
-
-function togglePasswordForm(accountId: string) {
-  if (passwordAccountId.value === accountId) passwordAccountId.value = '';
-  else openPasswordForm(accountId);
-}
-
-// `?account=` is how the connection banner's "Update password" lands here.
-watch(
-  () => [settingsLocation.account.value, emailAccounts.value.length] as const,
-  ([requested]) => {
-    if (typeof requested !== 'string' || passwordAccountId.value === requested) return;
-    const account = emailAccounts.value.find((candidate) => candidate.id === requested);
-    if (account && usesPassword(account.provider)) openPasswordForm(account.id);
-  },
-  { immediate: true },
-);
-
-async function savePassword() {
-  const account = passwordAccount.value;
-  if (!account || !newPassword.value || passwordBusy.value) return;
-  passwordBusy.value = true;
-  try {
-    await backendUpdateAccountPassword(account.id, newPassword.value);
-    newPassword.value = '';
-    passwordAccountId.value = '';
-    statusText.value = t('settings.accounts.password.saved', { email: account.email });
-    connection.requestRetry();
-    void accounts.load();
-  } catch (error) {
-    reportFailure('settings.accounts.password.failed', error);
-  } finally {
-    passwordBusy.value = false;
-  }
-}
-
-async function syncImapNow(showIfEmpty = true) {
-  if (!oauthAvailable) {
-    reportProblem(t('settings.accounts.sync.requiresApp'));
-    return;
-  }
-
-  syncBusy.value = true;
-  try {
-    const summary = await backendRunImapSync();
-    // Same numbers this pane already prints, for the inbox that has no reply
-    // of its own to read them from.
-    connection.applySyncSummary(summary);
-    await Promise.all([threads.load(), mailboxes.load(), accounts.load()]);
-    const total = summary.messages_synced;
-    const activeAccountId = accounts.activeAccountId;
-    const localThreadCount = threads.threads.filter((thread) =>
-      activeAccountId ? thread.accountId === activeAccountId : true,
-    ).length;
-    const backfillTotal = Math.max(summary.backfill_total_messages, 0);
-    const backfillRemaining = Math.max(summary.backfill_remaining_messages, 0);
-    const backfillDone = Math.max(backfillTotal - backfillRemaining, 0);
-    const backfillPercent =
-      backfillTotal > 0 ? Math.min(100, Math.round((backfillDone / backfillTotal) * 100)) : 0;
-    const backfillProgress =
-      backfillTotal > 0
-        ? t('settings.accounts.sync.backfillProgress', {
-            done: backfillDone,
-            total: backfillTotal,
-            percent: backfillPercent,
-          })
-        : t('settings.accounts.sync.backfillProgressPlain', { done: backfillDone });
-    const threadsCount = t(
-      'settings.accounts.sync.threadsCount',
-      { count: localThreadCount },
-      localThreadCount,
-    );
-    if (summary.failures.length > 0 || summary.accounts_failed > 0) {
-      const rawFailure = summary.failures[0];
-      const firstFailure = rawFailure
-        ? translateBackendError(rawFailure) ?? rawFailure
-        : t('settings.accounts.sync.unknownFailure');
-      const failedCount = Math.max(summary.accounts_failed, summary.failures.length);
-      reportProblem(t('settings.accounts.sync.partial', {
-        messages: t(
-          'settings.accounts.sync.messagesCount',
-          { count: summary.messages_synced },
-          summary.messages_synced,
-        ),
-        failed: failedCount,
-        error: firstFailure,
-        threads: threadsCount,
-      }));
-    } else if (total === 0 && showIfEmpty) {
-      if (summary.backfill_pending_accounts > 0) {
-        statusText.value = t('settings.accounts.sync.backfillStatus', {
-          progress: backfillProgress,
-          remaining: backfillRemaining,
-          accounts: t(
-            'settings.accounts.sync.accountsCount',
-            { count: summary.backfill_pending_accounts },
-            summary.backfill_pending_accounts,
-          ),
-          threads: threadsCount,
-        });
-      } else {
-        statusText.value = t('settings.accounts.sync.finishedEmpty', { threads: threadsCount });
-      }
-    } else {
-      const messagesCount = t(
-        'settings.accounts.sync.messagesCount',
-        { count: summary.messages_synced },
-        summary.messages_synced,
-      );
-      const accountsCount = t(
-        'settings.accounts.sync.accountsCount',
-        { count: summary.accounts_synced },
-        summary.accounts_synced,
-      );
-      if (summary.backfill_pending_accounts > 0) {
-        statusText.value = t('settings.accounts.sync.finishedWithBackfill', {
-          messages: messagesCount,
-          accounts: accountsCount,
-          progress: backfillProgress,
-          remaining: backfillRemaining,
-          pending: t(
-            'settings.accounts.sync.accountsCount',
-            { count: summary.backfill_pending_accounts },
-            summary.backfill_pending_accounts,
-          ),
-          threads: threadsCount,
-        });
-      } else {
-        statusText.value = t('settings.accounts.sync.finished', {
-          messages: messagesCount,
-          accounts: accountsCount,
-          threads: threadsCount,
-        });
-      }
-    }
-  } catch (error) {
-    reportFailure('settings.accounts.sync.failed', error);
-  } finally {
-    syncBusy.value = false;
-  }
-}
-
-async function checkStatus(accountId: string, provider: string) {
-  if (provider === 'imap') {
-    try {
-      const result = await backendTestImapAccountConnection(accountId);
-      const sample = result.folder_sample.slice(0, 3).join(', ');
-      statusText.value = sample
-        ? t('settings.accounts.imapOkWithSample', { folders: result.folders, sample })
-        : t('settings.accounts.imapOk', { folders: result.folders });
-    } catch (error) {
-      reportFailure('settings.accounts.imapFailed', error);
-    }
-    return;
-  }
-
-  try {
-    const result = await backendOauthStatus(accountId);
-    statusText.value = t('settings.accounts.oauthStatus', {
-      provider: result.provider,
-      state: result.connected
-        ? t('settings.accounts.connected')
-        : t('settings.accounts.disconnected'),
-    });
-  } catch (error) {
-    reportFailure('settings.accounts.statusUnavailable', error);
-  }
-}
-
-const reauthBusyId = ref('');
-
-async function reconnectOauth(account: (typeof accounts.accounts)[number]) {
-  if (!oauthAvailable || reauthBusyId.value) return;
-  reauthBusyId.value = account.id;
-  statusText.value = t('settings.accounts.reconnect.browserOpened', { email: account.email });
-  try {
-    await accounts.startReauth(account.id);
-    statusText.value = t('settings.accounts.reconnect.done', { email: account.email });
-  } catch (error) {
-    reportFailure('settings.accounts.reconnect.failed', error);
-  } finally {
-    reauthBusyId.value = '';
-  }
-}
-
-async function removeAccount(accountId: string, email: string) {
-  if (!oauthAvailable) {
-    reportProblem(t('settings.accounts.removeRequiresApp'));
-    return;
-  }
-
-  // A trash icon with no dialog and no undo, next to twelve other icons — and
-  // it used to only deactivate, so "removed" was a word for hiding gigabytes.
-  const confirmed = await ask({
-    title: t('settings.accounts.removeConfirmTitle'),
-    body: t('settings.accounts.removeConfirmBody'),
-    detail: email,
-    confirmLabel: t('settings.accounts.removeConfirmAction'),
-    tone: 'danger',
-  });
-  if (!confirmed) return;
-
-  try {
-    await backendDeleteAccount(accountId);
-    await accounts.load();
-    await Promise.all([threads.load(), mailboxes.load()]);
-    statusText.value = t('settings.accounts.removed', { email });
-  } catch (error) {
-    reportFailure('settings.accounts.removeFailed', error);
-  }
+  return { tone: account.lastSyncAt ? 'ok' : 'idle', text: syncStatusLabel(account, t, locale.value) };
 }
 </script>
 
 <template>
-  <div class="section">
-    <header class="section-header">
-      <h3 class="settings-page-title">{{ $t('settings.sections.accounts.label') }}</h3>
-      <p class="section-desc">{{ $t('settings.accounts.description') }}</p>
+  <AccountDetail v-if="openAccount" :key="openAccount.id" :account-id="openAccount.id" />
+
+  <div v-else class="accounts">
+    <header class="accounts__header">
+      <div class="accounts__heading">
+        <h3 class="settings-page-title">{{ $t('settings.sections.accounts.label') }}</h3>
+        <p>{{ $t('settings.accounts.description') }}</p>
+      </div>
+      <AppButton v-if="emailAccounts.length" variant="primary" size="sm" @click="ui.openAccountSetup()">
+        <template #icon><AppIcon size="sm"><path d="M8 3v10M3 8h10" /></AppIcon></template>
+        {{ $t('settings.accounts.addAccount') }}
+      </AppButton>
     </header>
 
-    <!-- Account Cards -->
-    <div class="account-list">
-      <article v-for="account in emailAccounts" :key="account.id" class="account-card">
-        <div class="account-card__head">
-          <AccountAvatar :name="account.displayName" :color="account.color" :avatar="account.avatar" :size="32" />
-          <div class="account-info">
-            <span class="account-name">{{ account.displayName }}</span>
-            <span class="account-email">{{ account.email }}</span>
-            <span
-              class="account-sync"
-              :class="{ error: account.syncStatus === 'error', busy: account.syncStatus === 'syncing' }"
-            >
-              {{ syncStatusLabel(account) }}
-              <template v-if="syncProgressLabel(account.syncProgressJson)">
-                · {{ syncProgressLabel(account.syncProgressJson) }}
-              </template>
-              <template v-if="account.lastSyncError">
-                · {{ translateBackendError(account.lastSyncError) ?? account.lastSyncError }}
-              </template>
+    <EmptyState
+      v-if="emailAccounts.length === 0"
+      :title="$t('settings.accounts.empty.title')"
+      :description="$t('settings.accounts.empty.description')"
+      :action-label="$t('settings.accounts.addAccount')"
+      @action="ui.openAccountSetup()"
+    />
+
+    <section v-else class="accounts__section">
+      <SectionHeading :label="$t('settings.accounts.mailAccounts')" :count="emailAccounts.length" />
+      <ul class="accounts__list" role="list">
+        <li v-for="account in emailAccounts" :key="account.id" class="accounts__item">
+          <CardButton
+            class="accounts__row"
+            :title="$t('settings.accounts.openAccount', { name: account.displayName })"
+            data-testid="account-row"
+            @click="location.showAccount(account.id)"
+          >
+            <AccountAvatar
+              :name="account.displayName"
+              :color="account.color"
+              :avatar="account.avatar"
+              :size="36"
+              :resting="!accounts.isVisible(account.id)"
+            />
+            <span class="accounts__copy">
+              <span class="accounts__name">{{ account.displayName }}</span>
+              <span class="accounts__email">{{ account.email }}</span>
+              <span class="accounts__status" :class="`accounts__status--${statusOf(account).tone}`">
+                <span class="accounts__dot" aria-hidden="true" />
+                {{ statusOf(account).text }}
+              </span>
             </span>
-            <AppButton
-              v-if="certificateLine(account.id)"
-              class="account-certificate"
-              variant="link"
-              size="sm"
-              @click.stop.prevent="certificates.openDetails(account.id)"
-            >
-              {{ certificateLine(account.id) }}
-            </AppButton>
-          </div>
-          <span class="account-provider">{{ providerLabel(account.provider) }}</span>
-        </div>
-        <!-- Named actions: four bare icons asked the user to hover each one,
-             and the trash sat between them. Removal stands apart. -->
-        <div class="account-card__actions">
-          <AppButton
-            v-if="account.provider === 'imap'"
-            variant="secondary"
-            size="sm"
-            :title="$t('settings.accounts.groupware.connectTitle')"
-            :disabled="!oauthAvailable || groupwareBusy"
-            @click.stop.prevent="connectGroupware(account)"
-          >
-            {{ $t('settings.accounts.actions.calendars') }}
-          </AppButton>
-          <AppButton
-            v-if="usesPassword(account.provider)"
-            variant="secondary"
-            size="sm"
-            :disabled="!oauthAvailable"
-            @click.stop.prevent="togglePasswordForm(account.id)"
-          >
-            {{ $t('settings.accounts.password.action') }}
-          </AppButton>
-          <AppButton
-            v-if="account.provider === 'gmail' || account.provider === 'outlook'"
-            variant="secondary"
-            size="sm"
-            :title="$t('settings.accounts.reconnect.buttonTitle')"
-            :disabled="!oauthAvailable || reauthBusyId === account.id"
-            @click.stop.prevent="reconnectOauth(account)"
-          >
-            {{ $t('settings.accounts.actions.renew') }}
-          </AppButton>
-          <!-- Sync belongs to the account it syncs, not under the list. -->
-          <AppButton
-            v-if="account.provider === 'imap'"
-            variant="secondary"
-            size="sm"
-            :disabled="!oauthAvailable || syncBusy"
-            @click.stop.prevent="syncImapNow()"
-          >
-            {{ syncBusy ? $t('settings.accounts.sync.syncing') : $t('settings.accounts.actions.sync') }}
-          </AppButton>
-          <AppButton
-            variant="secondary"
-            size="sm"
-            :title="statusButtonTitle(account.provider)"
-            :disabled="!oauthAvailable"
-            @click.stop.prevent="checkStatus(account.id, account.provider)"
-          >
-            {{ $t('settings.accounts.actions.test') }}
-          </AppButton>
-        </div>
-        <AccountQuotaSettings :account-id="account.id" />
-        <AccountWorkflowSyncNote :account-id="account.id" />
-        <AccountAppearanceSettings :account-id="account.id" />
-        <AccountVisibilitySettings :account-id="account.id" />
-        <!-- Removal last and on its own, away from the everyday actions. -->
-        <div class="account-card__danger">
-          <AppButton
-            class="account-card__remove"
-            variant="ghost"
-            size="sm"
-            :disabled="!oauthAvailable"
-            @click.stop.prevent="removeAccount(account.id, account.email)"
-          >
-            {{ $t('settings.accounts.removeTitle') }}
-          </AppButton>
-        </div>
-      </article>
-    </div>
-
-    <form v-if="passwordAccount" class="oauth-form password-form" @submit.prevent="savePassword">
-      <div class="oauth-hero">
-        <p class="oauth-hero-title">
-          {{ $t('settings.accounts.password.formTitle', { email: passwordAccount.email }) }}
-        </p>
-        <p class="oauth-hero-copy">{{ $t('settings.accounts.password.formCopy') }}</p>
-      </div>
-      <label class="field">
-        <span class="field-label">{{ $t('settings.accounts.password.label') }}</span>
-        <input
-          ref="passwordInput"
-          v-model="newPassword"
-          type="password"
-          autocomplete="current-password"
-          :placeholder="$t('settings.accounts.password.placeholder')"
-        />
-      </label>
-      <div class="form-actions">
-        <AppButton type="button" :disabled="passwordBusy" @click="passwordAccountId = ''">
-          {{ $t('common.cancel') }}
-        </AppButton>
-        <AppButton type="submit" variant="primary" :disabled="passwordBusy || !newPassword">
-          {{
-            passwordBusy
-              ? $t('settings.accounts.password.checking')
-              : $t('settings.accounts.password.save')
-          }}
-        </AppButton>
-      </div>
-    </form>
-
-    <div v-if="groupwareOpen" class="oauth-form groupware-form">
-      <div class="oauth-hero">
-        <div class="oauth-provider-badge">
-          <span class="oauth-provider-dot" /><span>{{ $t('settings.accounts.groupware.badge') }}</span>
-        </div>
-        <p class="oauth-hero-title">
-          {{ $t('settings.accounts.groupware.formTitle', { email: groupwareAccountEmail }) }}
-        </p>
-        <p class="oauth-hero-copy">{{ $t('settings.accounts.groupware.formCopy') }}</p>
-      </div>
-
-      <div class="field-row">
-        <label class="field grow">
-          <span class="field-label">{{ $t('settings.accounts.groupware.username') }}</span>
-          <input
-            v-model="groupwareUsername"
-            autocomplete="username"
-            :placeholder="$t('settings.accounts.groupware.usernamePlaceholder')"
-          />
-        </label>
-        <label class="field grow">
-          <span class="field-label">{{ $t('settings.accounts.groupware.password') }}</span>
-          <input
-            v-model="groupwarePassword"
-            type="password"
-            autocomplete="current-password"
-            :placeholder="$t('settings.accounts.groupware.passwordPlaceholder')"
-          />
-        </label>
-      </div>
-      <div class="field-row">
-        <label class="field grow">
-          <span class="field-label">{{ $t('settings.accounts.groupware.caldavServer') }}</span>
-          <input v-model="caldavServer" :placeholder="$t('settings.accounts.groupware.caldavServerPlaceholder')" />
-        </label>
-        <label class="field grow">
-          <span class="field-label">{{ $t('settings.accounts.groupware.carddavServer') }}</span>
-          <input v-model="carddavServer" :placeholder="$t('settings.accounts.groupware.carddavServerPlaceholder')" />
-        </label>
-      </div>
-      <div class="form-actions">
-        <AppButton :disabled="groupwareBusy" @click="syncGroupwareNow">
-          {{ $t('settings.accounts.groupware.syncNow') }}
-        </AppButton>
-        <AppButton variant="primary" :disabled="groupwareBusy" @click="saveGroupware">
-          {{
-            groupwareBusy
-              ? $t('settings.accounts.groupware.checking')
-              : $t('settings.accounts.groupware.connect')
-          }}
-        </AppButton>
-      </div>
-    </div>
-
-    <!-- Status message -->
-    <p
-      v-if="statusText"
-      class="status-msg"
-      :class="{ 'status-msg--error': statusIsError }"
-      :role="statusIsError ? 'alert' : 'status'"
-    >
-      {{ statusText }}
-    </p>
-    <details v-if="statusDetail" class="status-detail">
-      <summary>{{ $t('errors.technicalDetails') }}</summary>
-      <pre>{{ statusDetail }}</pre>
-    </details>
-
-    <button type="button" class="add-account-button" @click="ui.openAccountSetup()">
-      <span class="add-account-icon">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M8 3v10M3 8h10" />
-        </svg>
-      </span>
-      <span>{{ $t('settings.accounts.addAccount') }}</span>
-      <svg class="add-account-arrow" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M3 8h10M9 4l4 4-4 4" />
-      </svg>
-    </button>
+            <span class="accounts__provider">{{ providerLabel(account.provider) }}</span>
+            <AppIcon class="accounts__chevron"><path d="m6 3 5 5-5 5" /></AppIcon>
+          </CardButton>
+        </li>
+      </ul>
+    </section>
   </div>
 </template>
 
 <style scoped>
-.section {
+.accounts {
   display: grid;
-  gap: 20px;
+  gap: var(--space-xl);
 }
 
-.section-header h3 {
-  margin: 0;
-  font-size: var(--font-size-2xl);
-  font-weight: var(--weight-bold);
-  letter-spacing: -0.02em;
-  color: var(--text-primary);
+.accounts__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-lg);
 }
 
-.section-desc {
-  margin: 4px 0 0;
+.accounts__heading {
+  display: grid;
+  min-width: 0;
+}
+
+.accounts__heading p {
+  margin: var(--space-2xs) 0 0;
+  color: var(--text-secondary);
   font-size: var(--font-size-sm);
-  color: var(--text-tertiary);
 }
 
-/* Account Cards */
-.account-list {
+.accounts__section {
   display: grid;
-  gap: 6px;
+  gap: var(--space-sm);
 }
 
-.account-card {
+.accounts__list {
   display: grid;
-  gap: 12px;
-  padding: 14px 16px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
   border: 1px solid var(--border-color-muted);
   border-radius: var(--radius-md);
   background: var(--bg-surface);
+  list-style: none;
   --swatch-ring: var(--bg-surface);
 }
 
-.account-card__head {
-  display: flex;
+.accounts__item + .accounts__item {
+  border-top: 1px solid var(--border-color);
+}
+
+.accounts__row {
   align-items: center;
-  gap: 12px;
-  min-width: 0;
+  gap: var(--space-md);
+  width: 100%;
+  padding: var(--space-md) var(--space-lg);
+  transition: background var(--duration-fast) var(--ease-out);
 }
 
-.account-card__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-xs);
+.accounts__row:hover {
+  background: var(--bg-hover);
 }
 
-/* Destructive, so it keeps its distance from the everyday actions. */
-.account-card__danger {
-  display: flex;
-  padding-top: var(--space-sm);
-  border-top: 1px solid var(--border-color-muted);
-}
-
-.account-card__remove {
-  color: var(--accent-red-soft);
-}
-
-/* Phone: the actions as a two-column grid of full touch rows, with removal on
-   its own line underneath instead of filling whatever slot was left. */
-@media (max-width: 767px) {
-  /* Phone: the actions as a list of tappable rows, not a block of pills. */
-  .account-card__actions {
-    display: grid;
-    gap: 0;
-    margin-inline: calc(-1 * var(--space-lg));
-  }
-
-  .account-card__actions > * {
-    justify-content: flex-start;
-    min-height: var(--touch-target);
-    padding-inline: var(--space-lg);
-    border: 0;
-    border-top: 1px solid var(--border-color-muted);
-    border-radius: 0;
-    background: transparent;
-    font-size: var(--font-size-md);
-    font-weight: var(--weight-regular);
-  }
-}
-
-.account-info {
+.accounts__copy {
   display: grid;
-  gap: 1px;
-  min-width: 0;
   flex: 1;
+  gap: var(--space-2xs);
+  min-width: 0;
 }
 
-.account-name {
+.accounts__name,
+.accounts__email,
+.accounts__status {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accounts__name {
+  color: var(--text-primary);
   font-size: var(--font-size-md);
   font-weight: var(--weight-semibold);
-  color: var(--text-primary);
 }
 
-.account-email {
-  font-size: var(--font-size-xs);
-  color: var(--text-tertiary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.account-sync {
-  font-size: var(--font-size-xs);
-  color: var(--text-tertiary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.account-sync.busy {
-  color: var(--accent-primary);
-}
-
-.account-sync.error {
-  color: var(--accent-red-soft);
-}
-
-.account-certificate {
-  justify-self: start;
-  color: var(--accent-orange);
-  font-size: var(--font-size-xs);
-}
-
-.account-provider {
-  font-size: var(--font-size-xs);
-  font-weight: var(--weight-medium);
+.accounts__email {
   color: var(--text-secondary);
-  padding: 3px 8px;
-  border-radius: var(--radius-full);
-  background: var(--bg-overlay);
+  font-size: var(--font-size-sm);
+}
+
+.accounts__status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+}
+
+.accounts__dot {
   flex-shrink: 0;
-}
-
-.status-msg {
-  margin: 0;
-  font-size: var(--font-size-xs);
-  color: var(--text-secondary);
-}
-
-.status-msg--error {
-  color: var(--accent-red-soft);
-  font-weight: var(--weight-semibold);
-}
-
-.status-detail {
-  margin: 0;
-  font-size: var(--font-size-xs);
-  color: var(--text-tertiary);
-}
-
-.status-detail summary {
-  cursor: pointer;
-}
-
-.status-detail pre {
-  margin: var(--space-xs) 0 0;
-  padding: var(--space-sm);
-  border-radius: var(--radius-sm);
-  background: var(--bg-raised);
-  overflow-x: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.add-account-button {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  width: 100%;
-  padding: 11px 13px;
-  border: 1px solid color-mix(in srgb, var(--accent-primary) 24%, var(--border-color-muted));
-  border-radius: var(--radius-md);
-  color: var(--text-secondary);
-  background: color-mix(in srgb, var(--accent-primary) 4%, var(--bg-raised));
-  font-family: var(--font-sans);
-  font-size: var(--font-size-sm);
-  font-weight: var(--weight-semibold);
-  cursor: pointer;
-  transition: border-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out);
-}
-
-.add-account-button:hover {
-  border-color: color-mix(in srgb, var(--accent-primary) 48%, var(--border-color));
-  color: var(--text-primary);
-  background: color-mix(in srgb, var(--accent-primary) 8%, var(--bg-raised));
-}
-
-.add-account-icon {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 9px 9px 9px 4px;
-  color: var(--accent-primary);
-  background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
-}
-
-.add-account-arrow {
-  margin-left: auto;
-  color: var(--text-tertiary);
-  transition: transform var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
-}
-
-.add-account-button:hover .add-account-arrow {
-  transform: translateX(2px);
-  color: var(--accent-primary);
-}
-
-/* OAuth Section */
-.oauth-section {
-  display: grid;
-  gap: 0;
-  border-radius: var(--radius-md);
-  background: var(--bg-raised);
-  overflow: hidden;
-}
-
-.oauth-trigger {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 12px 16px;
-  border: 0;
-  background: transparent;
-  color: var(--text-secondary);
-  font-family: var(--font-sans);
-  font-size: var(--font-size-sm);
-  font-weight: var(--weight-medium);
-  cursor: pointer;
-  transition:
-    background var(--duration-fast) var(--ease-out),
-    color var(--duration-fast) var(--ease-out);
-}
-
-.oauth-trigger:hover {
-  background: var(--bg-overlay);
-  color: var(--text-primary);
-}
-
-.oauth-trigger:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-.chevron {
-  margin-left: auto;
-  transition: transform var(--duration-normal) var(--ease-out);
-}
-
-.chevron.open {
-  transform: rotate(180deg);
-}
-
-.oauth-form {
-  display: grid;
-  gap: 12px;
-  padding: 0 16px 16px;
-  border-top: 1px solid var(--border-color-muted);
-  padding-top: 14px;
-}
-
-.oauth-hero {
-  display: grid;
-  gap: 8px;
-  padding: 14px;
-  border-radius: var(--radius-md);
-  background:
-    radial-gradient(circle at top left, color-mix(in srgb, var(--accent-primary) 16%, transparent), transparent 45%),
-    var(--bg-surface);
-  /* The card sits on --bg-base; the fill alone is a 1.1:1 step, so the border
-     is what actually separates it in the light theme. */
-  border: 1px solid var(--border-color);
-}
-
-.oauth-provider-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  width: fit-content;
-  padding: 6px 10px;
+  width: 6px;
+  height: 6px;
   border-radius: var(--radius-full);
-  background: var(--bg-raised);
+  background: var(--accent-green);
+}
+
+.accounts__status--idle .accounts__dot { background: var(--text-tertiary); }
+.accounts__status--busy { color: var(--accent-primary); }
+.accounts__status--busy .accounts__dot { background: var(--accent-primary); }
+.accounts__status--warning { color: var(--accent-amber-soft); }
+.accounts__status--warning .accounts__dot { background: var(--accent-amber); }
+.accounts__status--error { color: var(--accent-red-soft); }
+.accounts__status--error .accounts__dot { background: var(--accent-red); }
+
+.accounts__provider {
+  flex-shrink: 0;
+  padding: var(--space-2xs) var(--space-sm);
+  border-radius: var(--radius-full);
+  background: var(--bg-overlay);
   color: var(--text-secondary);
   font-size: var(--font-size-xs);
-  font-weight: var(--weight-semibold);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.oauth-provider-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--accent-primary);
-}
-
-.oauth-provider-badge[data-provider='outlook'] .oauth-provider-dot {
-  background: var(--accent-primary);
-}
-
-.oauth-hero-title,
-.oauth-hero-copy {
-  margin: 0;
-}
-
-.oauth-hero-title {
-  color: var(--text-primary);
-  font-size: var(--font-size-md);
-  font-weight: var(--weight-semibold);
-}
-
-.oauth-hero-copy {
-  color: var(--text-secondary);
-  line-height: 1.5;
-}
-
-.oauth-hero-copy code {
-  font-family: var(--font-mono);
-  color: var(--text-primary);
-}
-
-.oauth-fallback,
-.manual-panel {
-  display: grid;
-  gap: 10px;
-  padding: 12px;
-  border-radius: var(--radius-md);
-  background: var(--bg-surface);
-  border: 1px solid var(--border-color-muted);
-}
-
-.oauth-fallback-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.oauth-link-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.text-link {
-  color: var(--accent-primary);
-  font-size: var(--font-size-xs);
-  font-weight: var(--weight-semibold);
-  text-decoration: none;
-}
-
-.text-link:hover {
-  opacity: 0.82;
-}
-
-.button-link {
-  border: 0;
-  padding: 0;
-  background: transparent;
-  cursor: pointer;
-  font-family: var(--font-sans);
-}
-
-.manual-toggle {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-family: var(--font-sans);
-  font-size: var(--font-size-sm);
   font-weight: var(--weight-medium);
 }
 
-.manual-toggle:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-.oauth-waiting {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
-}
-
-.waiting-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--accent-primary);
-  box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-primary) 45%, transparent);
-  animation: waiting-pulse 1.4s ease-out infinite;
-}
-
-.field-row {
-  display: flex;
-  gap: 10px;
-  align-items: flex-end;
-}
-
-.field {
-  display: grid;
-  gap: 5px;
-}
-
-.field.grow {
-  flex: 1;
-  min-width: 0;
-}
-
-.field-label {
-  font-size: var(--font-size-xs);
-  font-weight: var(--weight-medium);
+.accounts__chevron {
+  flex-shrink: 0;
   color: var(--text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
-input,
-select,
-textarea {
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  background: var(--bg-surface);
-  color: var(--text-primary);
-  padding: 8px 10px;
-  font-family: var(--font-sans);
-  font-size: var(--font-size-sm);
-  transition: border-color var(--duration-fast) var(--ease-out);
-}
-
-input:focus,
-select:focus,
-textarea:focus {
-  border-color: var(--accent-primary);
-}
-
-textarea {
-  resize: vertical;
-  font-family: var(--font-mono);
-  font-size: var(--font-size-xs);
-}
-
-select {
-  cursor: pointer;
-}
-
-.form-actions {
-  display: flex;
-  justify-content: flex-end;
-}
-
-@keyframes waiting-pulse {
-  0% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-primary) 40%, transparent);
+@media (max-width: 767px) {
+  .accounts__header {
+    flex-direction: column;
   }
 
-  70% {
-    box-shadow: 0 0 0 10px transparent;
-  }
-
-  100% {
-    box-shadow: 0 0 0 0 transparent;
+  .accounts__provider {
+    display: none;
   }
 }
 </style>

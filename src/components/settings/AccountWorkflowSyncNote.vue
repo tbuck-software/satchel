@@ -26,6 +26,7 @@ const body = computed(() => {
   <AppBanner
     v-if="reason"
     class="workflow-sync-note"
+    variant="card"
     tone="info"
     :title="t('workflowSync.localOnlyTitle')"
     :detail="body"
@@ -33,7 +34,3 @@ const body = computed(() => {
   />
 </template>
 
-<style scoped>
-/* Full row in the account card's wrapping layout. */
-.workflow-sync-note { flex-basis: 100%; }
-</style>

@@ -23,6 +23,9 @@ import SegmentedControl from '@/components/ui/SegmentedControl.vue';
  * person already has a script of their own active.
  */
 
+/** On an account's page: that account alone, under the page's own heading. */
+const props = defineProps<{ accountId?: string }>();
+
 const { t, d } = useI18n();
 const { ask } = useConfirm();
 const overview = ref<BackendServerRulesOverview | null>(null);
@@ -31,7 +34,8 @@ const errors = reactive<Record<string, string>>({});
 const editing = ref<string | null>(null);
 const draft = reactive({ host: '', port: '', tls: 'starttls' });
 
-const rows = computed(() => overview.value?.accounts ?? []);
+const rows = computed(() => (overview.value?.accounts ?? [])
+  .filter((state) => !props.accountId || state.account_id === props.accountId));
 
 function errorText(error: unknown): string {
   return translateBackendError(error) ?? (error instanceof Error ? error.message : String(error));
@@ -182,15 +186,19 @@ defineExpose({ load });
 
 <template>
   <section class="server-rules">
-    <h3 class="settings-page-title">{{ $t('settings.serverRules.title') }}</h3>
-    <p class="hint">{{ $t('settings.serverRules.hint') }}</p>
+    <template v-if="!accountId">
+      <h3 class="settings-page-title">{{ $t('settings.serverRules.title') }}</h3>
+      <p class="hint">{{ $t('settings.serverRules.hint') }}</p>
+    </template>
     <p v-if="errors.__all" role="alert" class="error">{{ errors.__all }}</p>
 
     <div v-for="state in rows" :key="state.account_id" class="setting-group" data-testid="server-rules-account">
       <div class="setting-row setting-row--stack-phone">
         <div class="setting-info">
-          <span class="setting-label">{{ state.display_name }}</span>
-          <span>{{ state.email }}</span>
+          <template v-if="!accountId">
+            <span class="setting-label">{{ state.display_name }}</span>
+            <span>{{ state.email }}</span>
+          </template>
           <span>
             <span :class="['badge', `badge--${status(state).tone}`]">{{ status(state).label }}</span>
             <template v-if="endpointText(state)"> {{ endpointText(state) }}</template>

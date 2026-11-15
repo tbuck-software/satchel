@@ -18,7 +18,10 @@ use super::error::{CommandError, CommandResult};
 )]
 pub struct AccountDto {
     pub id: String,
+    /// The name on outgoing mail.
     pub display_name: String,
+    /// The account's name in Satchel's lists; `null` shows `display_name`.
+    pub label: Option<String>,
     pub email: String,
     pub provider: String,
     pub kind: String,
@@ -39,6 +42,7 @@ impl From<AccountSummary> for AccountDto {
         Self {
             id: account.id,
             display_name: account.display_name,
+            label: account.label,
             email: account.email,
             provider: account.provider,
             kind: account.kind,
@@ -59,7 +63,11 @@ impl From<AccountSummary> for AccountDto {
 #[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ipc-types", ts(export, export_to = "app/commands/accounts/", optional_fields = nullable))]
 pub struct NewAccount {
+    /// The sender name on outgoing mail.
     pub display_name: String,
+    /// Satchel's own name for the account, never sent.
+    #[serde(default)]
+    pub label: Option<String>,
     pub email: String,
     pub provider: String,
     pub config: Option<serde_json::Value>,
@@ -112,6 +120,20 @@ pub async fn set_account_color(
         .map_err(Into::into)
 }
 
+/// `label` is the name in Satchel's lists, `sender_name` the one on outgoing mail.
+#[tauri::command]
+pub async fn set_account_names(
+    pool: tauri::State<'_, SqlitePool>,
+    account_id: String,
+    label: Option<String>,
+    sender_name: String,
+) -> CommandResult<()> {
+    AccountRepository::new(pool.inner())
+        .set_names(&account_id, label.as_deref(), &sender_name)
+        .await
+        .map_err(Into::into)
+}
+
 /// `None` clears the picture and the account falls back to its initials.
 #[tauri::command]
 pub async fn set_account_avatar(
@@ -134,6 +156,7 @@ pub async fn add_account(
     let account = AccountRepository::new(pool.inner())
         .create_email(CreateEmailAccount {
             display_name: input.display_name,
+            label: input.label,
             email: input.email,
             provider: input.provider,
             config: input.config,
@@ -296,6 +319,7 @@ impl From<AccountError> for CommandError {
             }
             AccountError::ColorInvalid => Self::new("backend.errors.accountColorInvalid"),
             AccountError::AvatarInvalid => Self::new("backend.errors.accountAvatarInvalid"),
+            AccountError::NameInvalid => Self::new("backend.errors.accountNameInvalid"),
             AccountError::Persistence(error) => {
                 tracing::error!(error = ?error, "account persistence failed");
                 Self::new("backend.errors.accountPersistenceFailed")

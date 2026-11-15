@@ -1120,7 +1120,7 @@ function announceAfterClose(tone: 'success' | 'info' | 'warning', text: string, 
 }
 
 /** The message as Send hands it over; a mail merge sends the same. */
-function sendPayload(account: { id: string; displayName: string }): BackendSendMessagePayload {
+function sendPayload(account: { id: string; displayName: string; senderName?: string }): BackendSendMessagePayload {
   return {
     accountId: account.id,
     to: to.value,
@@ -1135,7 +1135,7 @@ function sendPayload(account: { id: string; displayName: string }): BackendSendM
     replyToMessageId: replyToMessageId.value,
     attachments: attachments.value,
     fromAddress: fromAddress.value,
-    fromName: account.displayName,
+    fromName: account.senderName ?? account.displayName,
     replyTo: replyTo.value,
     draftId: draftId.value,
     scheduledFor: scheduledFor.value,
@@ -1402,7 +1402,7 @@ function currentDraftState(): ComposerDraftState {
   return {
     accountId: accountId.value,
     fromAddress: fromAddress.value,
-    fromName: activeAccount.value?.displayName ?? null,
+    fromName: activeAccount.value ? (activeAccount.value.senderName ?? activeAccount.value.displayName) : null,
     threadId: contextThreadId.value,
     replyTo: replyTo.value,
     sendOptions: {

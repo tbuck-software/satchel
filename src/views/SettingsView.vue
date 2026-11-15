@@ -38,10 +38,8 @@ const LabsSettings = defineAsyncComponent(() => import('@/components/settings/La
 const MobileSyncSettings = defineAsyncComponent(() => import('@/components/settings/MobileSyncSettings.vue'));
 const NotificationSettings = defineAsyncComponent(() => import('@/components/settings/NotificationSettings.vue'));
 const PluginManager = defineAsyncComponent(() => import('@/components/settings/PluginManager.vue'));
-const ProviderFeaturesEditor = defineAsyncComponent(() => import('@/components/settings/ProviderFeaturesEditor.vue'));
 const RemoteImageAllowlist = defineAsyncComponent(() => import('@/components/settings/RemoteImageAllowlist.vue'));
 const RuleBuilder = defineAsyncComponent(() => import('@/components/settings/RuleBuilder.vue'));
-const ServerRulesSettings = defineAsyncComponent(() => import('@/components/settings/ServerRulesSettings.vue'));
 const SweepRulesEditor = defineAsyncComponent(() => import('@/components/settings/SweepRulesEditor.vue'));
 const SignaturesEditor = defineAsyncComponent(() => import('@/components/settings/SignaturesEditor.vue'));
 const SmartFoldersEditor = defineAsyncComponent(() => import('@/components/settings/SmartFoldersEditor.vue'));
@@ -71,7 +69,7 @@ const overviewGroups = computed(() => (
       items: group.items.map((item) => ({ ...item, hint: null as string | null })),
     }))
 ));
-const { inDialog, section: locationSection, show: showSection } = useSettingsLocation();
+const { inDialog, section: locationSection, account: locationAccount, show: showSection } = useSettingsLocation();
 const requestedSection = computed(() => {
   const value = locationSection.value;
   if (value === null) return null;
@@ -81,7 +79,11 @@ const requestedSection = computed(() => {
 });
 const showOverview = computed(() => ui.isSinglePane && requestedSection.value === null);
 const activeSection = computed(() => requestedSection.value ?? resolveSettingsSection(undefined));
-const activeLabel = computed(() => t(`settings.sections.${activeSection.value}.label`));
+/** The account whose page is open under Accounts; the list shows otherwise. */
+const openAccount = computed(() => (activeSection.value === 'accounts'
+  ? accounts.emailAccounts.find((account) => account.id === locationAccount.value) ?? null
+  : null));
+const activeLabel = computed(() => openAccount.value?.displayName ?? t(`settings.sections.${activeSection.value}.label`));
 
 function sectionLabel(section: SettingsSection): string {
   return t(`settings.sections.${section}.label`);
@@ -102,10 +104,6 @@ const sectionTones: Record<SettingsSection, string> = {
 
 /** Sections made of several editors get one page header of their own. */
 const COMPOSITE: ReadonlySet<SettingsSection> = new Set(['senders', 'encryption', 'storage']);
-const providerAccounts = computed(() =>
-  accounts.emailAccounts.some((account) => account.provider === 'gmail' || account.provider === 'outlook'));
-/** Server rules (ManageSieve) are an IMAP matter; Gmail and Outlook have their own. */
-const imapAccounts = computed(() => accounts.emailAccounts.some((account) => account.provider === 'imap'));
 
 function openSection(section: SettingsSection) {
   showSection(section, ui.isSinglePane ? 'push' : 'replace');
@@ -199,14 +197,14 @@ onBeforeUnmount(() => unregisterFilter?.());
           v-else-if="activeSection === 'calendar'"
           @manage-accounts="openSection('accounts')"
         />
-        <!-- What comes in and goes out: mail accounts, feeds, webhooks, and the
-             labels Gmail and Outlook keep for an account. -->
+        <!-- What comes in and goes out: mail accounts, feeds and webhooks. An
+             account's own settings (labels, server rules) are on its page. -->
         <template v-else-if="activeSection === 'accounts'">
           <AccountSetup />
-          <section class="settings-subsection"><SourceManager /></section>
-          <section class="settings-subsection"><WebhooksEditor /></section>
-          <section v-if="providerAccounts" class="settings-subsection"><ProviderFeaturesEditor /></section>
-          <section v-if="imapAccounts" class="settings-subsection"><ServerRulesSettings /></section>
+          <template v-if="!openAccount">
+            <section class="settings-subsection"><SourceManager /></section>
+            <section class="settings-subsection"><WebhooksEditor /></section>
+          </template>
         </template>
         <SignaturesEditor v-else-if="activeSection === 'signatures'" />
         <AliasEditor v-else-if="activeSection === 'aliases'" />
