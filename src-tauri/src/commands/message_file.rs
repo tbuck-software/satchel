@@ -12,7 +12,7 @@ use tauri::AppHandle;
 #[cfg(desktop)]
 use tauri::Manager;
 
-use crate::commands::error::CommandResult;
+use crate::commands::error::{CommandError, CommandResult};
 use crate::email::sanitizer::sanitize_email_html;
 use crate::providers::imap::{parse_raw_rfc822, ParsedRawEmail};
 
@@ -148,6 +148,15 @@ impl ViewerFiles {
         }
     }
 
+    /// A viewer window may read only its own file; other windows pass.
+    pub fn check_reader(&self, label: &str, path: &str) -> CommandResult<()> {
+        if !label.starts_with(VIEWER_LABEL_PREFIX) || self.is_bound(label, path) {
+            return Ok(());
+        }
+        Err(CommandError::new("backend.errors.readSourceNotChosen")
+            .with_param("path", path.to_string()))
+    }
+
     /// Whether `path` is the message file the window `label` shows.
     pub fn is_bound(&self, label: &str, path: &str) -> bool {
         is_message_file(std::path::Path::new(path))
@@ -163,7 +172,17 @@ pub const NOT_A_MESSAGE_FILE: &str = "backend.errors.notAMessageFile";
 
 /// Parse a message file for display. Never writes to the database.
 #[tauri::command]
-pub async fn open_message_file(path: String) -> CommandResult<MessageFilePreview> {
+pub async fn open_message_file(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, crate::AppState>,
+    path: String,
+) -> CommandResult<MessageFilePreview> {
+    state.viewer_files.check_reader(window.label(), &path)?;
+    preview_message_file(path).await
+}
+
+/// The parse behind `open_message_file`, without the window check.
+pub async fn preview_message_file(path: String) -> CommandResult<MessageFilePreview> {
     // `is_message_file` existed but only the OS-open path used it. Without it
     // here, an IPC-capable caller could hand over `~/.ssh/id_ed25519`:
     // `parse_raw_rfc822` is lenient about non-MIME input and returns the whole
@@ -242,6 +261,16 @@ fn build_preview(path: String, parsed: ParsedRawEmail) -> MessageFilePreview {
 /// has to be reaped when the viewer closes.
 #[tauri::command]
 pub async fn read_message_file_attachment(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, crate::AppState>,
+    path: String,
+    index: usize,
+) -> CommandResult<MessageFileAttachmentData> {
+    state.viewer_files.check_reader(window.label(), &path)?;
+    message_file_attachment(path, index).await
+}
+
+async fn message_file_attachment(
     path: String,
     index: usize,
 ) -> CommandResult<MessageFileAttachmentData> {
@@ -337,9 +366,25 @@ pub async fn open_message_file_in_window(app: AppHandle, path: String) -> Comman
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_viewer_window_reads_only_its_own_message_file() {
+        let viewers = super::ViewerFiles::default();
+        viewers.bind("message-file-aa", "/mail/own.eml");
+        assert!(viewers
+            .check_reader("message-file-aa", "/mail/own.eml")
+            .is_ok());
+        assert!(viewers
+            .check_reader("message-file-aa", "/mail/other.eml")
+            .is_err());
+        assert!(viewers
+            .check_reader("message-file-bb", "/mail/own.eml")
+            .is_err());
+        assert!(viewers.check_reader("main", "/mail/other.eml").is_ok());
+    }
+
     #[tokio::test]
     async fn attachment_reads_reject_non_message_paths_before_reading() {
-        let error = super::read_message_file_attachment("/missing/secret.txt".into(), 0)
+        let error = super::message_file_attachment("/missing/secret.txt".into(), 0)
             .await
             .unwrap_err();
         assert_eq!(error.key, super::NOT_A_MESSAGE_FILE);
@@ -352,7 +397,7 @@ mod tests {
         let key = directory.path().join("id_ed25519");
         std::fs::write(&key, b"-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n").expect("key file");
 
-        let error = super::open_message_file(key.to_string_lossy().to_string())
+        let error = super::preview_message_file(key.to_string_lossy().to_string())
             .await
             .expect_err("a private key is not a message");
         assert_eq!(error.key, super::NOT_A_MESSAGE_FILE);
@@ -376,16 +421,14 @@ mod tests {
         std::os::unix::fs::symlink(&key, &link).expect("symlink");
         let link = link.to_string_lossy().to_string();
 
-        let error = super::open_message_file(link.clone()).await.unwrap_err();
+        let error = super::preview_message_file(link.clone()).await.unwrap_err();
         assert_eq!(error.key, super::NOT_A_MESSAGE_FILE);
-        let error = super::read_message_file_attachment(link, 0)
-            .await
-            .unwrap_err();
+        let error = super::message_file_attachment(link, 0).await.unwrap_err();
         assert_eq!(error.key, super::NOT_A_MESSAGE_FILE);
 
         let folder = directory.path().join("folder.eml");
         std::fs::create_dir(&folder).expect("dir");
-        let error = super::open_message_file(folder.to_string_lossy().to_string())
+        let error = super::preview_message_file(folder.to_string_lossy().to_string())
             .await
             .unwrap_err();
         assert_eq!(error.key, super::NOT_A_MESSAGE_FILE);
@@ -395,7 +438,7 @@ mod tests {
         std::fs::write(&mail, b"Subject: Hallo\r\n\r\nText\r\n").expect("mail");
         let alias = directory.path().join("alias.eml");
         std::os::unix::fs::symlink(&mail, &alias).expect("symlink");
-        let preview = super::open_message_file(alias.to_string_lossy().to_string())
+        let preview = super::preview_message_file(alias.to_string_lossy().to_string())
             .await
             .expect("message file behind a link");
         assert_eq!(preview.subject, "Hallo");

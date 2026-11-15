@@ -13,7 +13,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use satchel_lib::commands::error::CommandResult;
-use satchel_lib::commands::message_file::{open_message_file, MessageFilePreview};
+use satchel_lib::commands::message_file::{preview_message_file, MessageFilePreview};
 use satchel_lib::utils::mime::decode_bytes_with_declared_charset;
 use serde::Deserialize;
 
@@ -117,7 +117,7 @@ fn load_cases() -> Vec<Case> {
 }
 
 async fn parse(case: &Case) -> CommandResult<MessageFilePreview> {
-    open_message_file(case.path.to_string_lossy().into_owned()).await
+    preview_message_file(case.path.to_string_lossy().into_owned()).await
 }
 
 /// Case-insensitive search for a header line, used only to confirm a fixture

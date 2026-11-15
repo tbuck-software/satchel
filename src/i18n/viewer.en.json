@@ -3,6 +3,7 @@
     "errors": {
       "mailActionFailed": "The mail action could not be saved. Please try again.",
       "notAMessageFile": "Only .eml and .msg files can be opened this way.",
+      "readSourceNotChosen": "Satchel only reads a file or folder chosen in its own dialog. Choose {path} again.",
       "revealTargetBlocked": "This target cannot be opened in the file manager.",
       "unexpected": "An unexpected backend error occurred."
     }
