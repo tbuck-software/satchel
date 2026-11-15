@@ -84,6 +84,28 @@ pub(crate) fn is_message_file(path: &std::path::Path) -> bool {
         .is_some_and(|value| value.eq_ignore_ascii_case("eml") || value.eq_ignore_ascii_case("msg"))
 }
 
+/// The file a message-file path names, after links: its own extension, not a
+/// link's, decides, and only a regular file qualifies.
+async fn resolve_message_file(path: &str) -> CommandResult<String> {
+    let refused = || crate::commands::error::CommandError::new(NOT_A_MESSAGE_FILE);
+    if !is_message_file(std::path::Path::new(path)) {
+        return Err(refused());
+    }
+    let target = tokio::fs::canonicalize(path)
+        .await
+        .map_err(|err| format!("cannot read {path}: {err}"))?;
+    if !is_message_file(&target) {
+        return Err(refused());
+    }
+    let meta = tokio::fs::metadata(&target)
+        .await
+        .map_err(|err| format!("cannot read {path}: {err}"))?;
+    if !meta.is_file() {
+        return Err(refused());
+    }
+    target.into_os_string().into_string().map_err(|_| refused())
+}
+
 async fn read_message_file(path: &str) -> Result<Vec<u8>, String> {
     let meta = tokio::fs::metadata(path)
         .await
@@ -120,14 +142,10 @@ pub async fn open_message_file(path: String) -> CommandResult<MessageFilePreview
     // here, an IPC-capable caller could hand over `~/.ssh/id_ed25519`:
     // `parse_raw_rfc822` is lenient about non-MIME input and returns the whole
     // file as `body_text`, which — unlike `body_html` — is not sanitized.
-    if !is_message_file(std::path::Path::new(&path)) {
-        return Err(crate::commands::error::CommandError::new(
-            NOT_A_MESSAGE_FILE,
-        ));
-    }
-    let bytes = read_message_file(&path).await?;
+    let target = resolve_message_file(&path).await?;
+    let bytes = read_message_file(&target).await?;
     tokio::task::spawn_blocking(move || {
-        let parsed = parse_message_bytes(&path, &bytes)?;
+        let parsed = parse_message_bytes(&target, &bytes)?;
         Ok(build_preview(path, parsed))
     })
     .await
@@ -201,13 +219,9 @@ pub async fn read_message_file_attachment(
     path: String,
     index: usize,
 ) -> CommandResult<MessageFileAttachmentData> {
-    if !is_message_file(std::path::Path::new(&path)) {
-        return Err(crate::commands::error::CommandError::new(
-            NOT_A_MESSAGE_FILE,
-        ));
-    }
-    let bytes = read_message_file(&path).await?;
-    let parsed = parse_message_bytes(&path, &bytes)?;
+    let target = resolve_message_file(&path).await?;
+    let bytes = read_message_file(&target).await?;
+    let parsed = parse_message_bytes(&target, &bytes)?;
     let attachment = parsed
         .attachments
         .get(index)
@@ -282,9 +296,7 @@ pub(crate) fn open_message_file_window(app: &AppHandle, path: &str) -> Result<()
 /// arrived as attachments and are already sitting in the attachment cache.
 #[tauri::command]
 pub async fn open_message_file_in_window(app: AppHandle, path: String) -> CommandResult<()> {
-    if !tokio::fs::try_exists(&path).await.unwrap_or(false) {
-        return Err(format!("{path} does not exist").into());
-    }
+    resolve_message_file(&path).await?;
     #[cfg(desktop)]
     return open_message_file_window(&app, &path).map_err(Into::into);
     #[cfg(mobile)]
@@ -324,6 +336,42 @@ mod tests {
             "mail.eml.exe"
         )));
     }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_link_named_like_a_message_file_is_judged_by_its_target() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let key = directory.path().join("id_ed25519");
+        std::fs::write(&key, b"-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n").expect("key file");
+        let link = directory.path().join("mail.eml");
+        std::os::unix::fs::symlink(&key, &link).expect("symlink");
+        let link = link.to_string_lossy().to_string();
+
+        let error = super::open_message_file(link.clone()).await.unwrap_err();
+        assert_eq!(error.key, super::NOT_A_MESSAGE_FILE);
+        let error = super::read_message_file_attachment(link, 0)
+            .await
+            .unwrap_err();
+        assert_eq!(error.key, super::NOT_A_MESSAGE_FILE);
+
+        let folder = directory.path().join("folder.eml");
+        std::fs::create_dir(&folder).expect("dir");
+        let error = super::open_message_file(folder.to_string_lossy().to_string())
+            .await
+            .unwrap_err();
+        assert_eq!(error.key, super::NOT_A_MESSAGE_FILE);
+
+        // A link to a real message file still opens.
+        let mail = directory.path().join("real.eml");
+        std::fs::write(&mail, b"Subject: Hallo\r\n\r\nText\r\n").expect("mail");
+        let alias = directory.path().join("alias.eml");
+        std::os::unix::fs::symlink(&mail, &alias).expect("symlink");
+        let preview = super::open_message_file(alias.to_string_lossy().to_string())
+            .await
+            .expect("message file behind a link");
+        assert_eq!(preview.subject, "Hallo");
+    }
+
     #[cfg(desktop)]
     use super::viewer_window_label;
     use super::{build_preview, is_message_file, parse_message_bytes};
