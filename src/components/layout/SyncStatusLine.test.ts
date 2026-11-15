@@ -135,18 +135,14 @@ it('does not invent a percentage before a total is known', () => {
   wrapper.unmount();
 });
 
-it('keeps short background polls out of the desktop footer', async () => {
+it('leaves ordinary runs to the header button on desktop, however long they take', async () => {
   vi.useFakeTimers();
   setActivePinia(createPinia());
   const connection = useConnectionStore();
   connection.syncing = true;
   const wrapper = mount(SyncStatusLine, { props: { hideIdle: true, progressOnly: true } });
   try {
-    expect(wrapper.find('[role="status"]').exists()).toBe(false);
-    await vi.advanceTimersByTimeAsync(3000);
-    expect(wrapper.text()).toContain('Syncing…');
-    connection.syncing = false;
-    await wrapper.vm.$nextTick();
+    await vi.advanceTimersByTimeAsync(60_000);
     expect(wrapper.find('[role="status"]').exists()).toBe(false);
   } finally {
     wrapper.unmount();

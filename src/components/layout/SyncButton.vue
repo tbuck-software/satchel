@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref } from 'vue';
+import { computed, defineAsyncComponent, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import IconButton from '@/components/ui/IconButton.vue';
@@ -17,6 +17,19 @@ const connection = useConnectionStore();
 const { syncing, syncMail } = useMailSync();
 const hasHistory = computed(() => connection.syncProgress.some(row => row.backfill_remaining > 0));
 const canInspect = computed(() => syncing.value || hasHistory.value);
+
+// A history import holds `syncing` for hours; its progress line says enough.
+const spinWanted = computed(() => syncing.value && !hasHistory.value);
+const spinning = ref(false);
+// Start after a second, so queue work (an archive, a send) does not flash it. Stop
+// with the turn in progress, or after 1.1 s under reduced motion (one 1 ms turn).
+watch(spinWanted, (wanted, _previous, onCleanup) => {
+  const timer = setTimeout(() => { spinning.value = wanted; }, wanted ? 1000 : 1100);
+  onCleanup(() => clearTimeout(timer));
+}, { immediate: true });
+function finishTurn() {
+  if (!spinWanted.value) spinning.value = false;
+}
 
 const outbox = useOutboxStore();
 const failureCount = computed(() => outbox.attentionCount);
@@ -37,6 +50,7 @@ function activate(event: MouseEvent) {
     (event.currentTarget as HTMLElement).focus();
     progressOpen.value = true;
   } else {
+    spinning.value = connection.online;
     void syncMail();
   }
 }
@@ -58,7 +72,7 @@ const title = computed(() => failureCount.value > 0 ? t('app.sync.failures.label
     @mousedown.stop
     @click="activate"
   >
-    <AppIcon>
+    <AppIcon :class="{ 'sync-button__icon--spinning': spinning }" @animationiteration="finishTurn">
       <path d="M13.5 6A5.7 5.7 0 0 0 3.7 3.7L1.5 6m0-4v4h4M2.5 10a5.7 5.7 0 0 0 9.8 2.3l2.2-2.3m0 4v-4h-4" />
     </AppIcon>
     <span v-if="failureCount > 0" class="sync-button__failure" aria-hidden="true" />
@@ -73,6 +87,8 @@ const title = computed(() => failureCount.value > 0 ? t('app.sync.failures.label
 .sync-control { display: inline-flex; }
 .sync-button { position: relative; }
 .sync-button__failure { position: absolute; top: var(--space-xs); right: var(--space-xs); width: var(--space-sm); height: var(--space-sm); border-radius: var(--radius-full); background: var(--accent-red); box-shadow: 0 0 0 2px var(--bg-base); }
+.sync-button__icon--spinning { animation: sync-button-spin 1s linear infinite; }
+@keyframes sync-button-spin { to { transform: rotate(360deg); } }
 .sync-button[aria-busy='true']:disabled {
   opacity: 1;
 }

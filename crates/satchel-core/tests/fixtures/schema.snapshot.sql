@@ -31,6 +31,7 @@ index idx_messages_account: CREATE INDEX idx_messages_account ON messages(accoun
 index idx_messages_account_in_reply_to: CREATE INDEX idx_messages_account_in_reply_to ON messages(account_id, in_reply_to) WHERE in_reply_to IS NOT NULL
 index idx_messages_account_msgid: CREATE INDEX idx_messages_account_msgid ON messages(account_id, message_id_header)
 index idx_messages_account_remote: CREATE INDEX idx_messages_account_remote ON messages(account_id, remote_id)
+index idx_messages_account_remote_draft: CREATE INDEX idx_messages_account_remote_draft ON messages(account_id, remote_draft_id) WHERE remote_draft_id IS NOT NULL
 index idx_messages_category: CREATE INDEX idx_messages_category ON messages(category) WHERE category IS NOT NULL
 index idx_messages_chat_thread: CREATE INDEX idx_messages_chat_thread ON messages(thread_id) WHERE chat_version IS NOT NULL
 index idx_messages_date: CREATE INDEX idx_messages_date ON messages(date DESC)

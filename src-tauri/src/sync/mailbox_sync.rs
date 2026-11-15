@@ -235,6 +235,11 @@ struct ImapSyncState {
     /// drop their summary, so the next full sync reports them, once.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     unreported_holds: HashMap<String, BTreeSet<String>>,
+    /// Folders whose UIDVALIDITY changed between one run's sync and its
+    /// snapshot. GroupWise's virtual folders get a new generation on every
+    /// SELECT, so their snapshot can never apply; each run's reset covers them.
+    #[serde(default, skip_serializing_if = "HashSet::is_empty")]
+    volatile_generations: HashSet<String>,
 }
 
 /// The failed resolutions of one owed ID.
@@ -255,6 +260,25 @@ impl ImapSyncState {
         self.pending_snapshots.contains(folder)
     }
 
+    /// Whether this run owes a folder its snapshot, once its batch is in.
+    fn snapshot_after_batch(
+        &mut self,
+        folder: &str,
+        reset: bool,
+        due: bool,
+        required: bool,
+    ) -> bool {
+        // A run without a reset shows the generation held still.
+        if !reset {
+            self.volatile_generations.remove(folder);
+        }
+        // The reset already reconciled it; a snapshot would meet yet another generation.
+        if self.volatile_generations.contains(folder) {
+            return false;
+        }
+        self.request_snapshot(folder, due, required)
+    }
+
     /// Forget every per-folder entry of folders the provider no longer returns.
     fn retain_folders(&mut self, retained: &HashSet<String>) {
         self.cursors.retain(|folder, _| retained.contains(folder));
@@ -270,6 +294,20 @@ impl ImapSyncState {
             .retain(|folder, _| retained.contains(folder));
         self.unreported_holds
             .retain(|folder, _| retained.contains(folder));
+        self.volatile_generations
+            .retain(|folder| retained.contains(folder));
+    }
+
+    /// Stop snapshotting a folder whose generation changes within a run, and
+    /// drop what its snapshots owed: those UIDs named a void generation.
+    /// Returns whether the folder was not marked yet.
+    fn mark_volatile_generation(&mut self, folder: &str) -> bool {
+        self.pending_snapshots.remove(folder);
+        self.snapshot_resolutions.remove(folder);
+        self.resolved_snapshot_copies.remove(folder);
+        self.snapshot_failures.remove(folder);
+        self.unreported_holds.remove(folder);
+        self.volatile_generations.insert(folder.to_string())
     }
 
     /// Whether ordinary polls owe this folder lookups: IDs a completed
@@ -445,12 +483,16 @@ async fn reconcile_folder_snapshot(
             )
         };
     if skipped_stale_generation {
-        tracing::warn!(
-            account_id,
-            folder = remote_folder_id,
-            snapshot_uidvalidity = ?snapshot.remote_uidvalidity,
-            "folder snapshot named another generation, kept every message"
-        );
+        // This run's sync recorded the folder's generation moments ago.
+        if state.mark_volatile_generation(remote_folder_id) {
+            tracing::info!(
+                account_id,
+                folder = remote_folder_id,
+                snapshot_uidvalidity = ?snapshot.remote_uidvalidity,
+                "folder changed UIDVALIDITY within one run; snapshots paused until it holds still"
+            );
+        }
+        persist_sync_cursors(pool, account_id, state, queue, None).await?;
     } else {
         // Every ID the listing found absent is owed durably by now, so the
         // listing has nothing left to add. Ordinary polls look up what is
@@ -1527,7 +1569,7 @@ pub(crate) async fn sync_mailboxes(
                 };
                 externally_changed_threads.extend(reset_thread_ids.iter().cloned());
 
-                if state.request_snapshot(&folder.id, snapshot_due, batch.snapshot_required) {
+                if state.snapshot_after_batch(&folder.id, batch.reset_folder, snapshot_due, batch.snapshot_required) {
                     snapshot_folders.push((folder_id.clone(), folder.id.clone(), folder.name.clone()));
                 } else if account.provider.eq_ignore_ascii_case("gmail")
                     && state.owes_resolutions(&folder.id)

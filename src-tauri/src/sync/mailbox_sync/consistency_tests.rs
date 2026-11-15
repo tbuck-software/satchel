@@ -2874,3 +2874,106 @@ async fn the_marker_baseline_waits_for_the_inbox_backfill() {
         "download finished"
     );
 }
+
+use satchel_core::sync::errors::SyncResult;
+
+/// GroupWise hands its virtual folders a new UIDVALIDITY on every SELECT.
+struct ShiftingGeneration;
+
+#[async_trait::async_trait]
+impl MailProvider for ShiftingGeneration {
+    async fn sync_folders(&self) -> SyncResult<Vec<crate::providers::traits::RemoteFolder>> {
+        unreachable!()
+    }
+    async fn sync_messages(
+        &self,
+        _: &str,
+        _: crate::providers::traits::SyncCheckpoint,
+    ) -> SyncResult<crate::providers::traits::SyncBatch> {
+        unreachable!()
+    }
+    async fn sync_message_state_snapshot(
+        &self,
+        _: &str,
+    ) -> SyncResult<Option<crate::providers::traits::RemoteMessageStateSnapshot>> {
+        Ok(Some(crate::providers::traits::RemoteMessageStateSnapshot {
+            states: Vec::new(),
+            remote_uidvalidity: Some(1_794_776_192),
+            custom_keywords: None,
+        }))
+    }
+    async fn send(&self, _: crate::providers::traits::OutgoingMessage) -> SyncResult<()> {
+        unreachable!()
+    }
+    async fn set_flags(
+        &self,
+        _: &[crate::providers::traits::MessageRef],
+        _: crate::providers::traits::FlagUpdate,
+    ) -> SyncResult<()> {
+        unreachable!()
+    }
+    async fn move_messages(
+        &self,
+        _: &[crate::providers::traits::MessageRef],
+        _: &str,
+    ) -> SyncResult<()> {
+        unreachable!()
+    }
+    async fn delete_messages(&self, _: &[crate::providers::traits::MessageRef]) -> SyncResult<()> {
+        unreachable!()
+    }
+}
+
+#[tokio::test]
+async fn a_generation_that_shifts_within_a_run_stops_the_snapshot_loop() {
+    let pool = pool().await;
+    sqlx::raw_sql(
+        "UPDATE accounts SET provider = 'imap';
+         INSERT INTO folders (id,account_id,name,full_path,folder_type,remote_id,uidvalidity,created_at,updated_at)
+         VALUES ('aside','account','Aside','Aside','aside','Aside',1794776191,'','');",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let mut account = test_account("account", "Aside");
+    account.provider = "imap".into();
+    let mut state = ImapSyncState::default();
+    state
+        .snapshot_resolutions
+        .insert("Aside".into(), ids(&["41"]));
+    let queue = SyncQueue::new();
+    // This run's sync reset the folder and asked for its snapshot.
+    assert!(state.snapshot_after_batch("Aside", true, true, true));
+
+    reconcile_folder_snapshot(
+        &pool,
+        &ShiftingGeneration,
+        &FolderIngestContext {
+            app: None,
+            events: None,
+            account: &account,
+            config: &config(),
+            folder_id: "aside",
+            folder_remote_id: "Aside",
+            folder_type: "aside",
+        },
+        &mut state,
+        &queue,
+    )
+    .await
+    .unwrap();
+
+    let stored = persisted_state(&pool).await;
+    assert!(stored.volatile_generations.contains("Aside"));
+    assert!(stored.pending_snapshots.is_empty(), "nothing left owed");
+    assert!(
+        stored.snapshot_resolutions.is_empty(),
+        "old-generation UIDs are void"
+    );
+
+    // The next poll resets again and skips the snapshot that cannot apply.
+    assert!(!state.snapshot_after_batch("Aside", true, true, true));
+    // A run that keeps its generation snapshots as usual.
+    assert!(state.snapshot_after_batch("Aside", false, true, true));
+    assert!(state.volatile_generations.is_empty());
+}

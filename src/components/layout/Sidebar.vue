@@ -43,7 +43,7 @@ const router = useRouter();
 const accounts = useAccountsStore();
 const connection = useConnectionStore();
 const syncStatusReady = ref(false);
-watch(() => connection.syncing || connection.syncProgress.length > 0, (active) => {
+watch(() => connection.syncProgress.some(row => row.backfill_remaining > 0), (active) => {
   if (active) syncStatusReady.value = true;
 }, { immediate: true });
 const reauthNeeded = computed(() =>

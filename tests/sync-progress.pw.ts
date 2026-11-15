@@ -23,7 +23,7 @@ test('shows durable import progress, pauses offline and finishes without a perma
   await expect(status.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '20000');
   const sync = page.locator('.sync-button');
   await expect(sync).toBeEnabled();
-  await expect(sync.locator('.animate-spin')).toHaveCount(0);
+  await expect(sync.locator('.sync-button__icon--spinning')).toHaveCount(0);
   // Focus explicitly: WebKit does not focus buttons on pointer activation.
   await status.getByRole('button').focus();
   await status.getByRole('button').click();
