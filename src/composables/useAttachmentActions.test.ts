@@ -141,4 +141,13 @@ describe('useAttachmentActions', () => {
       expect.any(Uint8Array),
     );
   });
+
+  it('writes only the basename of a name that carries a directory part', async () => {
+    const actions = useAttachmentActions();
+    harness.download.mockResolvedValueOnce(downloaded('../../Library/LaunchAgents/a.plist'));
+
+    await actions.saveAttachmentsToDirectory([attachment()], { fallbackFilename: 'attachment' });
+
+    expect(harness.writeFile).toHaveBeenCalledWith('/tmp/attachments/a.plist', expect.any(Uint8Array));
+  });
 });

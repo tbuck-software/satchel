@@ -951,7 +951,7 @@ async fn persist_provider_message(
         )
         .bind(&attachment_id)
         .bind(&message_id)
-        .bind(attachment.filename.as_deref().map(satchel_core::utils::filename::strip_filename_controls))
+        .bind(attachment.filename.as_deref().map(satchel_core::utils::filename::safe_attachment_name))
         .bind(&attachment.content_type)
         .bind(attachment.size)
         .bind(attachment.content_id.as_deref())

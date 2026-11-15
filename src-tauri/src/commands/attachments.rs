@@ -1,5 +1,5 @@
 use base64::Engine;
-use satchel_core::utils::filename::strip_filename_controls;
+use satchel_core::utils::filename::{safe_attachment_name, strip_filename_controls};
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
 use tauri::{AppHandle, Manager};
@@ -19,6 +19,7 @@ use crate::{
 pub struct AttachmentDto {
     pub id: String,
     pub message_id: String,
+    #[serde(serialize_with = "satchel_core::utils::filename::serialize_optional_filename")]
     pub filename: Option<String>,
     pub content_type: String,
     pub size: Option<i64>,
@@ -155,7 +156,7 @@ pub(super) async fn attachments_for_messages(
             {
                 return None;
             }
-            row.filename = row.filename.as_deref().map(strip_filename_controls);
+            row.filename = row.filename.as_deref().map(safe_attachment_name);
             if row
                 .cached_path
                 .as_deref()
@@ -215,6 +216,7 @@ pub struct DownloadAttachmentResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ipc-types", ts(optional = nullable))]
     pub remote_uidvalidity: Option<u32>,
+    #[serde(serialize_with = "satchel_core::utils::filename::serialize_filename")]
     pub filename: String,
     pub mime_type: String,
     /// Base64 payload, only up to [`MAX_BASE64_PAYLOAD_BYTES`]. Above that it
@@ -233,6 +235,7 @@ pub struct PreparedAttachmentResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ipc-types", ts(optional = nullable))]
     pub remote_uidvalidity: Option<u32>,
+    #[serde(serialize_with = "satchel_core::utils::filename::serialize_filename")]
     pub filename: String,
     pub mime_type: String,
     pub size: i64,
@@ -393,7 +396,7 @@ async fn prepare_referenced_attachment(
     if message_id != reference.message_id {
         return Err(reference.changed_error());
     }
-    let filename = strip_filename_controls(&filename.unwrap_or_else(|| "attachment".into()));
+    let filename = safe_attachment_name(&filename.unwrap_or_else(|| "attachment".into()));
     tokio::fs::create_dir_all(cache_dir)
         .await
         .map_err(|err| format!("create attachment cache: {err}"))?;
@@ -453,7 +456,11 @@ async fn prepare_referenced_attachment(
     } else {
         fetched.content_type
     };
-    let final_filename = fetched.filename.unwrap_or(filename.clone());
+    let final_filename = fetched
+        .filename
+        .as_deref()
+        .map(safe_attachment_name)
+        .unwrap_or_else(|| filename.clone());
     // Each request owns its file. A late request must never overwrite a file
     // already published by a replacement row or another fetch.
     let path = attachment_cache_path(
@@ -1507,6 +1514,17 @@ mod tests {
     fn unnamed_attachments_fall_back_to_a_usable_name() {
         assert_eq!(safe_filename("   "), "attachment");
         assert_eq!(safe_filename(""), "attachment");
+    }
+
+    #[test]
+    fn cache_names_drop_directory_parts() {
+        let path = attachment_cache_path(
+            std::path::Path::new("/cache"),
+            "id",
+            "../../Library/LaunchAgents/a.plist",
+        );
+        assert_eq!(path.parent(), Some(std::path::Path::new("/cache")));
+        assert!(path.to_str().unwrap().ends_with("-a.plist"));
     }
 
     #[test]

@@ -33,6 +33,7 @@ const MAX_INLINE_EMBED_BYTES: usize = 4 * 1024 * 1024;
 pub struct MessageFileAttachment {
     /// Position in the parsed part list — the handle for reading the bytes back.
     pub index: usize,
+    #[serde(serialize_with = "satchel_core::utils::filename::serialize_filename")]
     pub filename: String,
     pub content_type: String,
     pub size: i64,
@@ -70,6 +71,7 @@ pub struct MessageFilePreview {
     ts(export, export_to = "app/commands/message_file/")
 )]
 pub struct MessageFileAttachmentData {
+    #[serde(serialize_with = "satchel_core::utils::filename::serialize_filename")]
     pub filename: String,
     pub mime_type: String,
     pub data_base64: String,
@@ -153,7 +155,7 @@ fn build_preview(path: String, parsed: ParsedRawEmail) -> MessageFilePreview {
                 filename: attachment
                     .filename
                     .as_deref()
-                    .map(satchel_core::utils::filename::strip_filename_controls)
+                    .map(satchel_core::utils::filename::safe_attachment_name)
                     .unwrap_or_else(|| "Anhang".to_string()),
                 content_type: content_type.clone(),
                 size: i64::try_from(attachment.bytes.len()).unwrap_or(i64::MAX),
@@ -214,7 +216,7 @@ pub async fn read_message_file_attachment(
         filename: attachment
             .filename
             .as_deref()
-            .map(satchel_core::utils::filename::strip_filename_controls)
+            .map(satchel_core::utils::filename::safe_attachment_name)
             .unwrap_or_else(|| "Anhang".to_string()),
         mime_type: attachment.content_type.clone(),
         data_base64: base64::engine::general_purpose::STANDARD.encode(&attachment.bytes),

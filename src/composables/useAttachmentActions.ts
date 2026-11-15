@@ -6,6 +6,7 @@ import {
   backendOpenMessageFileInWindow,
   backendToggleAttachmentQuickLook,
 } from '@/services/backend';
+import { safeAttachmentFilename } from '@/utils/attachmentFilename';
 import { saveAttachmentWithDialog } from '@/utils/saveAttachment';
 import { attachmentBytes } from '@/utils/attachmentBytes';
 import { backendErrorKey, backendErrorStringParam } from '@/utils/backendErrors';
@@ -129,7 +130,7 @@ export function useAttachmentActions() {
 
   /** Append " (2)", " (3)", … so several parts with the same name survive. */
   function uniqueFilename(name: string, taken: Set<string>, fallbackFilename: string): string {
-    const safe = name.replace(/[/\\:]/g, '_').trim() || fallbackFilename;
+    const safe = safeAttachmentFilename(name, fallbackFilename);
     if (!taken.has(safe)) {
       taken.add(safe);
       return safe;
