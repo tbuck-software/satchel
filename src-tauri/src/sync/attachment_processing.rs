@@ -70,7 +70,7 @@ pub(crate) async fn process_special_attachment(
                 if crate::db::calendar::CalendarRepository::upsert_invite_on_connection(
                     &mut tx,
                     account_id,
-                    Some(local_message_id),
+                    crate::db::calendar::InviteOrigin::MailPart(local_message_id),
                     &invite,
                 )
                 .await
