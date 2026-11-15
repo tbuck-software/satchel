@@ -475,6 +475,28 @@ fn display_name_of(segment: &str) -> Option<String> {
     (!name.is_empty()).then(|| name.to_string())
 }
 
+/// Decode quoted display names from headers and legacy stored contact names.
+pub fn clean_mailbox_display_name(raw: &str) -> Option<String> {
+    let mut decoded = decode_mime_encoded_words(raw);
+    // Some imported headers carry more than one layer of quoted-pair escapes.
+    while decoded.contains("\\\"") {
+        decoded = decoded.replace("\\\"", "\"");
+    }
+    let name = decoded.trim();
+    let cleaned = if name.starts_with('"') {
+        let unquoted = name.trim_matches('"');
+        if let Some((phrase, suffix)) = unquoted.split_once(" (") {
+            format!("{} ({suffix}", phrase.trim_end_matches('"'))
+        } else {
+            unquoted.to_owned()
+        }
+    } else {
+        name.to_owned()
+    };
+    let cleaned = cleaned.trim();
+    (!cleaned.is_empty()).then(|| cleaned.to_owned())
+}
+
 fn bracketed_addresses(raw: &str) -> Vec<String> {
     let mut found = Vec::new();
     let mut quoted = false;

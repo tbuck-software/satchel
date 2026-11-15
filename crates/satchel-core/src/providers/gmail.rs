@@ -9,8 +9,9 @@ use crate::{
     },
     utils::{
         mime::{
-            decode_bytes_with_declared_charset, decode_html_entities, decode_mime_encoded_words,
-            extract_email_address, parse_address_list_tokens, AddressListDecodeStrategy,
+            clean_mailbox_display_name, decode_bytes_with_declared_charset, decode_html_entities,
+            decode_mime_encoded_words, extract_email_address, parse_address_list_tokens,
+            AddressListDecodeStrategy,
         },
         oauth::{OAuthCredentials, OAuthProvider},
     },
@@ -3112,15 +3113,11 @@ fn parse_gmail_address_list(raw: Option<&str>) -> Vec<String> {
 }
 
 fn display_name_from_mailbox(raw: &str, address: &str) -> Option<String> {
-    let cleaned = raw
-        .replace(address, "")
-        .replace(['<', '>', '"'], "")
-        .trim()
-        .to_string();
-    if cleaned.is_empty() {
+    let phrase = raw.split_once('<').map(|(name, _)| name).unwrap_or(raw);
+    if phrase.trim().eq_ignore_ascii_case(address) {
         None
     } else {
-        Some(cleaned)
+        clean_mailbox_display_name(phrase)
     }
 }
 
@@ -4157,6 +4154,31 @@ mod tests {
         assert!(!GmailProvider::history_cursor_expired(
             "gmail history request skipped: rate limited for another 900s"
         ));
+    }
+
+    #[test]
+    fn gmail_mapping_decodes_quoted_sender_names() {
+        let message = map_gmail_message(GmailMessageResponse {
+            id: "message".to_string(),
+            thread_id: None,
+            history_id: None,
+            label_ids: None,
+            snippet: None,
+            internal_date: None,
+            raw: None,
+            payload: Some(payload_with_headers(
+                "text/plain",
+                &[(
+                    "From",
+                    r#""\"Morgan, Alex\" (via Mailing List)" <list@example.test>"#,
+                )],
+            )),
+        });
+        assert_eq!(message.from_address, "list@example.test");
+        assert_eq!(
+            message.from_name.as_deref(),
+            Some("Morgan, Alex (via Mailing List)")
+        );
     }
 
     #[test]

@@ -3,6 +3,7 @@ import { createPersistedSlot, persistence } from '@/persistence';
 import type { BackendAccountQuota, BackendAccountVisibilityPolicy } from './accounts';
 import type { BackendTask, BackendTaskList } from './tasks';
 import { splitSubjectPrefixes } from '@/utils/composerText';
+import { cleanContactName, isContactEmail } from '@/utils/contactIdentity';
 import { bytesToBase64 } from '@/utils/base64';
 import { joinComposerTextHistory, splitComposerTextHistory, splitComposerHtmlHistory } from '@/utils/composerHistory';
 /**
@@ -447,15 +448,15 @@ for (const message of Object.values(messages).flat().filter((message) => !messag
   const sender = { ...message.from, name: account?.displayName || message.from.name };
   for (const person of [sender, ...[...message.to, ...(message.cc ?? [])].map((recipient) => ({ ...recipient, name: '' }))]) {
     const email = person.email.trim().toLowerCase();
-    if (!email.includes('@')) continue;
+    if (!isContactEmail(email)) continue;
     const existing = contacts.find((contact) => contact.email === email);
     if (existing) {
       existing.frequency += 1;
-      if (person.name) existing.display_name = person.name;
+      if (!existing.display_name) existing.display_name = cleanContactName(person.name) || null;
       if (!existing.last_contacted || message.timestamp > existing.last_contacted) existing.last_contacted = message.timestamp;
     } else {
       contacts.push({
-        id: `contact-${email}`, email, display_name: person.name || null,
+        id: `contact-${email}`, email, display_name: cleanContactName(person.name) || null,
         avatar_url: null, avatar_source: null, avatar_locked: 0, avatar_updated_at: null,
         frequency: 1, last_contacted: message.timestamp, notes: null,
         created_at: message.timestamp, updated_at: message.timestamp,
@@ -2718,7 +2719,7 @@ const handlers: Record<string, Handler> = {
   upsert_contact: ({ input: raw }) => {
     const input = raw as { id: string | null; email: string; display_name: string | null; notes: string | null; avatar_url: string | null };
     const email = input.email.trim().toLowerCase();
-    if (!email.includes('@')) throw new Error('contact email is invalid');
+    if (!isContactEmail(email)) throw new Error('backend.errors.contactEmailInvalid');
     const previous = contacts.find((contact) => contact.email === email);
     const now = new Date().toISOString();
     if (previous) {

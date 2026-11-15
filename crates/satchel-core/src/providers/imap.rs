@@ -23,9 +23,9 @@ use crate::providers::{
 };
 use crate::sync::errors::{SyncError, SyncResult};
 use crate::utils::mime::{
-    decode_bytes_with_charset, decode_mime_encoded_words, decode_quoted_printable_bytes,
-    decode_rfc2231_segments, decode_rfc2231_value, extract_email_address,
-    parse_address_list_tokens, AddressListDecodeStrategy,
+    clean_mailbox_display_name, decode_bytes_with_charset, decode_mime_encoded_words,
+    decode_quoted_printable_bytes, decode_rfc2231_segments, decode_rfc2231_value,
+    extract_email_address, parse_address_list_tokens, AddressListDecodeStrategy,
 };
 
 async fn collect_imap_response<F, S, T>(
@@ -2671,9 +2671,8 @@ pub fn parse_from_name(header: &str) -> Option<String> {
     }
 
     if let Some(start) = trimmed.find('<') {
-        let display = trimmed[..start].trim().trim_matches('"').trim();
-        if !display.is_empty() {
-            return Some(display.to_string());
+        if let Some(display) = clean_mailbox_display_name(&trimmed[..start]) {
+            return Some(display);
         }
     }
 
@@ -5230,6 +5229,17 @@ fn strip_parenthesized_comments(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn sender_names_decode_quoted_pairs() {
+        assert_eq!(
+            super::parse_from_name(
+                r#"From: "\"Morgan, Alex\" (via Mailing List)" <list@example.test>"#
+            )
+            .as_deref(),
+            Some("Morgan, Alex (via Mailing List)")
+        );
+    }
+
     #[tokio::test]
     async fn a_fetch_stalled_mid_response_hits_the_operation_deadline() {
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
