@@ -249,8 +249,8 @@ Ein Bundle, drei Plattformen. Was der Shell kann, wird **erfragt**, nicht gerate
 Plattformweise getrennt sind: TLS-Vertrauensanker (Desktop `webpki-roots`,
 Mobile die OS-Trust-Stores über `rustls-platform-verifier`), der Keyring
 (Desktop `keyring`, Mobile `keyring-core` plus Android-Keystore bzw.
-iOS-Keychain) und die Plugins (Tray, Autostart, Single-Instance und die lokale
-HTTP-API bleiben `#[cfg(desktop)]`).
+iOS-Keychain) und die Plugins (Tray, Autostart und Single-Instance bleiben
+`#[cfg(desktop)]`).
 
 `utils::crypto::load_or_create_master_key` fällt auf Mobile **nicht** auf eine
 Schlüsseldatei zurück. Auf dem Desktop ist ein unerreichbarer Schlüsselbund
