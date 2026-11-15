@@ -78,6 +78,178 @@ fn css_url_is_local(inner: &str) -> bool {
     }
 }
 
+/// Names a CSS escape could spell to reach a construct the literal passes in
+/// [`sanitize_css`] look for: `\75 rl(` is a `url(` to the browser.
+const ESCAPED_CSS_NAMES: &[&str] = &[
+    "url",
+    "src",
+    "image",
+    "image-set",
+    "-webkit-image-set",
+    "import",
+    "@import",
+    "expression",
+    "behavior",
+    "-moz-binding",
+];
+/// Functions whose quoted strings are fetched as images.
+const STRING_IMAGE_FUNCTIONS: &[&str] = &["src", "image", "image-set", "-webkit-image-set"];
+
+fn is_css_ident_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || !ch.is_ascii()
+}
+
+/// Decodes the escape whose backslash starts `rest`: the character and the
+/// bytes the escape spans, or `None` when the backslash escapes nothing.
+fn read_css_escape(rest: &str) -> Option<(char, usize)> {
+    let next = rest[1..].chars().next()?;
+    if matches!(next, '\n' | '\r' | '\x0c') {
+        return None;
+    }
+    if !next.is_ascii_hexdigit() {
+        return Some((next, 1 + next.len_utf8()));
+    }
+    let digits = rest[1..]
+        .bytes()
+        .take(6)
+        .take_while(u8::is_ascii_hexdigit)
+        .count();
+    let code = u32::from_str_radix(&rest[1..1 + digits], 16).unwrap_or(0);
+    let mut end = 1 + digits;
+    if rest[end..].starts_with("\r\n") {
+        end += 2;
+    } else if rest[end..].starts_with([' ', '\t', '\n', '\r', '\x0c']) {
+        end += 1;
+    }
+    let decoded = char::from_u32(code)
+        .filter(|_| code != 0)
+        .unwrap_or('\u{fffd}');
+    Some((decoded, end))
+}
+
+/// Spells escaped names from [`ESCAPED_CSS_NAMES`] out, so the passes after it
+/// see them literally. Every other escape stays as written.
+fn normalize_escaped_css_names(css: &str) -> String {
+    if !css.contains('\\') {
+        return css.to_owned();
+    }
+    let mut out = String::with_capacity(css.len());
+    let mut index = 0usize;
+    while let Some(first) = css[index..].chars().next() {
+        let start = index;
+        let mut decoded = String::new();
+        let mut escaped = false;
+        while let Some(ch) = css[index..].chars().next() {
+            if is_css_ident_char(ch) {
+                decoded.push(ch);
+                index += ch.len_utf8();
+                continue;
+            }
+            let Some((ch, len)) = (ch == '\\')
+                .then(|| read_css_escape(&css[index..]))
+                .flatten()
+            else {
+                break;
+            };
+            decoded.push(ch);
+            index += len;
+            escaped = true;
+        }
+        if index == start {
+            out.push(first);
+            index += first.len_utf8();
+            continue;
+        }
+        let name = decoded.to_ascii_lowercase();
+        if escaped && ESCAPED_CSS_NAMES.contains(&name.as_str()) {
+            out.push_str(&name);
+        } else {
+            out.push_str(&css[start..index]);
+        }
+    }
+    out
+}
+
+/// The byte index of the `)` closing the arguments opened at `open` (`None`
+/// when unterminated) and the contents of the quoted strings inside.
+fn css_function_arguments(css: &str, open: usize) -> (Option<usize>, Vec<&str>) {
+    let bytes = css.as_bytes();
+    // Past a backslash and the whole character it escapes.
+    let skip_escape = |at: usize| 1 + css[at + 1..].chars().next().map_or(0, char::len_utf8);
+    let mut strings = Vec::new();
+    let mut depth = 1usize;
+    let mut index = open + 1;
+    while index < bytes.len() {
+        match bytes[index] {
+            quote @ (b'"' | b'\'') => {
+                let mut end = index + 1;
+                while end < bytes.len() && bytes[end] != quote && bytes[end] != b'\n' {
+                    end += if bytes[end] == b'\\' {
+                        skip_escape(end)
+                    } else {
+                        1
+                    };
+                }
+                let end = end.min(bytes.len());
+                strings.push(&css[index + 1..end]);
+                index = end + 1;
+            }
+            b'/' if bytes.get(index + 1) == Some(&b'*') => {
+                index = css[index + 2..]
+                    .find("*/")
+                    .map_or(bytes.len(), |close| index + 2 + close + 2);
+            }
+            b'\\' => index += skip_escape(index),
+            b'(' => {
+                depth += 1;
+                index += 1;
+            }
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return (Some(index), strings);
+                }
+                index += 1;
+            }
+            _ => index += 1,
+        }
+    }
+    (None, strings)
+}
+
+/// `image-set("https://…" 1x)` fetches its strings like `url()` does. A call
+/// with any string that is not local becomes `none`.
+fn neutralize_string_image_functions(css: &str) -> String {
+    let haystack = css.to_ascii_lowercase();
+    let mut out = String::with_capacity(css.len());
+    let mut cursor = 0usize;
+    let mut search = 0usize;
+    while let Some(found) = haystack[search..].find('(') {
+        let open = search + found;
+        search = open + 1;
+        let start = cursor
+            + haystack[cursor..open]
+                .trim_end_matches(is_css_ident_char)
+                .len();
+        if !STRING_IMAGE_FUNCTIONS.contains(&&haystack[start..open]) {
+            continue;
+        }
+        let (close, strings) = css_function_arguments(css, open);
+        if close.is_some() && strings.iter().all(|value| css_url_is_local(value)) {
+            continue;
+        }
+        out.push_str(&css[cursor..start]);
+        out.push_str("none");
+        let Some(close) = close else {
+            return out;
+        };
+        cursor = close + 1;
+        search = cursor;
+    }
+    out.push_str(&css[cursor..]);
+    out
+}
+
 fn replace_case_insensitive(css: &str, needle: &str, replacement: &str) -> String {
     let haystack = css.to_ascii_lowercase();
     let mut out = String::with_capacity(css.len());
@@ -140,7 +312,9 @@ fn neutralize_css_urls(css: &str) -> String {
 /// document verbatim. Strip the constructs that turn a stylesheet into a
 /// network client or a script host and leave the rest, so layout survives.
 fn sanitize_css(css: &str) -> String {
-    let css = strip_at_imports(css);
+    let css = normalize_escaped_css_names(css);
+    let css = strip_at_imports(&css);
+    let css = neutralize_string_image_functions(&css);
     let css = neutralize_css_urls(&css);
     // Renamed rather than cut out: the declaration stays syntactically whole
     // and the CSS parser drops it, and no replacement contains the token it
@@ -1145,6 +1319,50 @@ mod tests {
         assert!(sanitized.contains("url(cid:logo001@satchel)"));
         assert!(sanitized.contains("input[value^=\"a\"]"));
         assert!(sanitized.contains("Body"));
+    }
+
+    #[test]
+    fn escaped_css_names_lose_remote_urls_and_imports() {
+        for css in [
+            r".a { background: \75 rl(https://tracker.example/a) }",
+            r".a { background: u\72l(https://tracker.example/a) }",
+            r".a { background: \55\52\4c(https://tracker.example/a) }",
+            r"@\69mport 'https://tracker.example/a.css';",
+            r"@\69 mport url(https://tracker.example/a.css);",
+            r"\40 import 'https://tracker.example/a.css';",
+            r".a { background: \69mage-set('https://tracker.example/a' 1x) }",
+            r".a { background: \-webkit-image-set('https://tracker.example/a' 1x) }",
+        ] {
+            let cleaned = super::sanitize_css(css);
+            assert!(!cleaned.contains("tracker.example"), "{css} -> {cleaned}");
+        }
+        // Escapes that spell nothing fetchable stay as the sender wrote them.
+        let selector = r".sm\:w-full { width: 100% } .\31 0 { content: '\201C' }";
+        assert_eq!(super::sanitize_css(selector), selector);
+    }
+
+    #[test]
+    fn string_image_functions_lose_remote_strings() {
+        for css in [
+            r#".a { background: image-set("https://tracker.example/a" 1x) }"#,
+            r#".a { background: -webkit-image-set('//tracker.example/a' 1x, "data:image/png;base64,AA" 2x) }"#,
+            r#".a { background: image("https://tracker.example/a") }"#,
+            r#".a { background: src("https://tracker.example/a") }"#,
+            r#".a { background: IMAGE-SET("https://tracker.example/a" 1x) }"#,
+            r#".a { background: image-set("h\74tps://tracker.example/a" 1x) }"#,
+            r#".a { background: image-set("https://tracker.example/a" 1x"#,
+        ] {
+            let cleaned = super::sanitize_css(css);
+            assert!(!cleaned.contains("tracker.example"), "{css} -> {cleaned}");
+        }
+        let local = r##".a { background: image-set("cid:a@x" 1x, 'data:image/png;base64,AA' 2x, url(#f) 3x) }"##;
+        assert_eq!(super::sanitize_css(local), local);
+
+        let sanitized = sanitize_email_html(
+            r#"<p style="background-image: image-set('https://tracker.example/a' 1x); color: red">x</p>"#,
+        );
+        assert!(!sanitized.contains("tracker.example"), "{sanitized}");
+        assert!(sanitized.contains("color: red"), "{sanitized}");
     }
 
     #[test]

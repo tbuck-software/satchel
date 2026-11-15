@@ -455,7 +455,9 @@ function onCopy(event: ClipboardEvent) {
   const text = frameSelectionText();
   if (!text || !event.clipboardData) return;
   const range = frameRef.value?.contentDocument?.getSelection()?.getRangeAt(0);
-  const holder = document.createElement('div');
+  // Serialize in an inert document: nodes adopted into this one would start
+  // loads under the app's CSP instead of the mail's.
+  const holder = document.implementation.createHTMLDocument('').createElement('div');
   if (range) holder.appendChild(range.cloneContents());
   event.clipboardData.setData('text/plain', text);
   if (holder.innerHTML) event.clipboardData.setData('text/html', holder.innerHTML);

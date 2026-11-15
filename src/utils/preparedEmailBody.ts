@@ -1,5 +1,5 @@
 import type { Attachment } from '@/types/mail';
-import { blockRemoteImages } from '@/composables/useImagePolicy';
+import { blockRemoteImagesInDocument } from '@/composables/useImagePolicy';
 import {
   extractHtmlBody,
   extractPlainTextBody,
@@ -171,12 +171,12 @@ function createPreparedBody(input: EmailBodyInput, onGrow: (chars: number) => vo
     document(options) {
       return built(documents, optionKey(options), () => {
         const source = extracted.currentHtml || '';
-        const blocked = source && !options.allowRemoteImages ? blockRemoteImages(source) : null;
-        const safe = blocked?.html ?? source;
-        return {
-          html: safe ? buildIsolatedDocument(safe, options.autoDark, resolveInlineImages) : '',
-          blockedCount: blocked?.blockedCount ?? 0,
-        };
+        let blockedCount = 0;
+        const block = options.allowRemoteImages
+          ? undefined
+          : (doc: Document) => { blockedCount = blockRemoteImagesInDocument(doc); };
+        const html = source ? buildIsolatedDocument(source, options.autoDark, resolveInlineImages, block) : '';
+        return { html, blockedCount };
       }, (prepared) => prepared.html.length);
     },
     quoteDocument(part, options) {
@@ -184,9 +184,10 @@ function createPreparedBody(input: EmailBodyInput, onGrow: (chars: number) => vo
         const source = part.html ?? '';
         return source
           ? buildIsolatedDocument(
-              options.allowRemoteImages ? source : blockRemoteImages(source).html,
+              source,
               options.autoDark,
               resolveInlineImages,
+              options.allowRemoteImages ? undefined : blockRemoteImagesInDocument,
             )
           : '';
       }, (prepared) => prepared.length);
