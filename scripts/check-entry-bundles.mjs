@@ -106,11 +106,14 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
  * Main initial 215 KiB and catalogue after prefetch 35 KiB since 2026-11-12:
  * compact sync progress plus shell status chips measure 106.8 / 214.1 KiB
  * and 34.1 KiB after prefetch. The chip adds its short localized status
- * labels to first paint; the status sheet and its actions load on demand. */
+ * labels to first paint; the status sheet and its actions load on demand.
+ * Viewer 130 KiB since 2026-11-15: the remote image blocker moved onto the
+ * parsed mail document and gained a CSS allowlist (escaped names, image-set
+ * strings), which the viewer renders with too; it measures 129.0 KiB. */
 const budgets = {
   'index.html': { entryGzip: 107 * 1024, initialGzip: 215 * 1024, locales: ['src/i18n/startup.en.json', 'src/i18n/startup.de.json'] },
   'tray.html': { entryGzip: 5 * 1024, initialGzip: 75 * 1024, locales: ['src/i18n/tray.en.json', 'src/i18n/tray.de.json'] },
-  'viewer.html': { entryGzip: 5 * 1024, initialGzip: 129 * 1024, locales: ['src/i18n/viewer.en.json', 'src/i18n/viewer.de.json'] },
+  'viewer.html': { entryGzip: 5 * 1024, initialGzip: 130 * 1024, locales: ['src/i18n/viewer.en.json', 'src/i18n/viewer.de.json'] },
 };
 
 /* The startup catalogue plus the reader's and palette's chunks, which load
