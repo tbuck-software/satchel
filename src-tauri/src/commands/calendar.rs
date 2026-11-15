@@ -5,7 +5,7 @@ use std::{future::Future, pin::Pin};
 use crate::commands::error::{CommandError, CommandResult};
 use crate::commands::messages::{OutgoingAttachmentInput, OutgoingMessageInput};
 use crate::db::accounts::AccountRepository;
-use crate::db::calendar::{CalendarError, CalendarRepository};
+use crate::db::calendar::{CalendarError, CalendarRepository, InviteOrigin};
 pub use crate::db::calendar::{
     CalendarEventRecord as CalendarEventDto, CalendarInviteRecord as CalendarInviteDto,
     CalendarSourceRecord as CalendarSourceDto,
@@ -125,7 +125,7 @@ pub async fn import_ics(
     };
 
     let dto = CalendarRepository::new(pool.inner())
-        .upsert_invite(&account_id, None, &parsed)
+        .upsert_invite(&account_id, InviteOrigin::Import, &parsed)
         .await?;
 
     Ok(with_current_recurrence_metadata(dto))
@@ -146,9 +146,12 @@ fn decode_ics_payload(raw: &str) -> CommandResult<String> {
 
 #[tauri::command]
 pub async fn import_ics_path(
+    state: tauri::State<'_, crate::AppState>,
     pool: tauri::State<'_, SqlitePool>,
     path: String,
 ) -> CommandResult<CalendarInviteDto> {
+    // Paths arrive from "Open with Satchel", which grants them as it buffers them.
+    state.read_grants.file(std::path::Path::new(&path))?;
     crate::commands::file_limits::guard_import_size(std::path::Path::new(&path)).await?;
     let bytes = tokio::fs::read(&path).await.map_err(|error| {
         tracing::warn!(%error, %path, "calendar file could not be read");

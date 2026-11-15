@@ -1,6 +1,7 @@
 //! One-click unsubscribe via the RFC 8058 `List-Unsubscribe` / `List-Unsubscribe-Post`
 //! headers. Supports both the HTTP POST flow (preferred, no UI dance) and the
-//! mailto: fallback (sends an email to the unsub address).
+//! mailto: fallback (sends an email to the unsub address once the user has
+//! confirmed the exact recipient, subject and body).
 //!
 //! The POST target comes straight out of an incoming mail, so it is attacker
 //! chosen. Everything in `plan_unsubscribe` exists to keep that target from
@@ -25,6 +26,22 @@ const UNSUBSCRIBE_TIMEOUT: Duration = Duration::from_secs(10);
 #[cfg_attr(feature = "ipc-types", ts(export, export_to = "app/commands/unsubscribe/", optional_fields = nullable))]
 pub struct UnsubscribeInput {
     pub message_id: String,
+    /// The mail the user confirmed. It is sent only if it still equals what
+    /// the message's header yields; nothing else in the plan runs.
+    pub confirmed_mail: Option<UnsubscribeMail>,
+}
+
+/// The mail a `mailto:` unsubscribe sends, exactly as shown to the user.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ipc-types",
+    ts(export, export_to = "app/commands/unsubscribe/")
+)]
+pub struct UnsubscribeMail {
+    pub to: String,
+    pub subject: String,
+    pub body: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -36,15 +53,22 @@ pub struct UnsubscribeInput {
 pub struct UnsubscribeResult {
     pub method: String,
     pub target: String,
+    /// Set when the next step is a mail: nothing was sent, and the caller
+    /// confirms this mail by passing it back as `confirmed_mail`.
+    pub confirm_mail: Option<UnsubscribeMail>,
 }
 
 /// A step the header allows us to take, in the order we are willing to take it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum UnsubscribeAction {
     OneClickPost(Url),
-    Mailto(String),
+    Mailto(UnsubscribeMail),
     OpenInBrowser(Url),
 }
+
+const MAILTO_SUBJECT_MAX_CHARS: usize = 200;
+const MAILTO_BODY_MAX_CHARS: usize = 2000;
+const MAILTO_DEFAULT_TEXT: &str = "unsubscribe";
 
 fn target_blocked() -> CommandError {
     CommandError::new("backend.errors.unsubscribeTargetBlocked")
@@ -70,6 +94,28 @@ pub async fn unsubscribe(
     };
 
     let plan = plan_unsubscribe(&list_unsub, headers.list_unsubscribe_post.as_deref()).await?;
+    if let Some(confirmed) = input.confirmed_mail {
+        let mail = confirmed_mailto(&plan, &confirmed)?;
+        let outgoing = crate::commands::messages::OutgoingMessageInput {
+            to: vec![mail.to.clone()],
+            subject: mail.subject.clone(),
+            body: mail.body.clone(),
+            ..Default::default()
+        };
+        let mut action = build_send_action(headers.account_id, outgoing, None)?;
+        // build_send_action marks immediate sends as 'sending' because the
+        // send_message command executes them in-line right after persisting.
+        // Here nobody executes the action — it must be 'pending' so the outbox
+        // worker claims it, otherwise the unsubscribe mail never leaves.
+        action.status = "pending".into();
+        state.queue.enqueue(pool.inner(), action).await?;
+        return Ok(UnsubscribeResult {
+            method: "mailto".into(),
+            target: mail.to.clone(),
+            confirm_mail: None,
+        });
+    }
+
     let mut last_error = None;
     for action in plan {
         match action {
@@ -78,6 +124,7 @@ pub async fn unsubscribe(
                     return Ok(UnsubscribeResult {
                         method: "http-one-click".into(),
                         target: url.to_string(),
+                        confirm_mail: None,
                     })
                 }
                 // A non-2xx answer — a redirect included, since the client no
@@ -85,24 +132,11 @@ pub async fn unsubscribe(
                 Ok(false) => {}
                 Err(err) => last_error = Some(err),
             },
-            UnsubscribeAction::Mailto(mailto) => {
-                let parsed = parse_mailto(&mailto);
-                let outgoing = crate::commands::messages::OutgoingMessageInput {
-                    to: vec![parsed.to.clone()],
-                    subject: parsed.subject.unwrap_or_else(|| "unsubscribe".into()),
-                    body: parsed.body.unwrap_or_else(|| "unsubscribe".into()),
-                    ..Default::default()
-                };
-                let mut action = build_send_action(headers.account_id, outgoing, None)?;
-                // build_send_action marks immediate sends as 'sending' because the
-                // send_message command executes them in-line right after persisting.
-                // Here nobody executes the action — it must be 'pending' so the outbox
-                // worker claims it, otherwise the unsubscribe mail never leaves.
-                action.status = "pending".into();
-                state.queue.enqueue(pool.inner(), action).await?;
+            UnsubscribeAction::Mailto(mail) => {
                 return Ok(UnsubscribeResult {
                     method: "mailto".into(),
-                    target: parsed.to,
+                    target: mail.to.clone(),
+                    confirm_mail: Some(mail),
                 });
             }
             UnsubscribeAction::OpenInBrowser(url) => {
@@ -113,6 +147,7 @@ pub async fn unsubscribe(
                 return Ok(UnsubscribeResult {
                     method: "browser".into(),
                     target: url.to_string(),
+                    confirm_mail: None,
                 });
             }
         }
@@ -144,8 +179,12 @@ async fn plan_unsubscribe(
         }
     }
 
+    let mut mailto_error = None;
     if let Some(mailto) = first_mailto(list_unsub) {
-        plan.push(UnsubscribeAction::Mailto(mailto));
+        match parse_mailto(&mailto) {
+            Ok(mail) => plan.push(UnsubscribeAction::Mailto(mail)),
+            Err(err) => mailto_error = Some(err),
+        }
     }
 
     if let Some(url) = url {
@@ -160,10 +199,26 @@ async fn plan_unsubscribe(
     }
 
     if plan.is_empty() {
-        return Err(CommandError::new("backend.errors.unsubscribeNoTarget"));
+        return Err(
+            mailto_error.unwrap_or_else(|| CommandError::new("backend.errors.unsubscribeNoTarget"))
+        );
     }
 
     Ok(plan)
+}
+
+/// The mail to send for a confirmed unsubscribe: the header must still yield
+/// exactly the mail the user saw.
+fn confirmed_mailto(
+    plan: &[UnsubscribeAction],
+    confirmed: &UnsubscribeMail,
+) -> Result<UnsubscribeMail, CommandError> {
+    plan.iter()
+        .find_map(|action| match action {
+            UnsubscribeAction::Mailto(mail) if mail == confirmed => Some(mail.clone()),
+            _ => None,
+        })
+        .ok_or_else(|| CommandError::new("backend.errors.unsubscribeConfirmationStale"))
 }
 
 /// Sends the one-click POST. `true` means the list server accepted it.
@@ -208,72 +263,125 @@ fn first_url(header: &str) -> Option<Url> {
         .find(|url| matches!(url.scheme(), "http" | "https"))
 }
 
+/// The first `<mailto:…>` entry, without brackets and scheme. RFC 2369 puts
+/// every entry in angle brackets, so commas inside one do not split it.
 fn first_mailto(header: &str) -> Option<String> {
-    header
-        .split(',')
-        .map(str::trim)
-        .find(|part| part.to_ascii_lowercase().starts_with("<mailto:"))
-        .map(|p| {
-            p.trim_start_matches('<')
-                .trim_end_matches('>')
-                .trim_start_matches("mailto:")
-                .to_string()
-        })
+    let mut rest = header;
+    while let Some(open) = rest.find('<') {
+        let after = &rest[open + 1..];
+        let close = after.find('>')?;
+        let entry = after[..close].trim();
+        if let Some(scheme) = entry.get(..7).filter(|s| s.eq_ignore_ascii_case("mailto:")) {
+            return Some(entry[scheme.len()..].to_string());
+        }
+        rest = &after[close + 1..];
+    }
+    None
 }
 
-#[derive(Debug, Default)]
-struct MailtoParts {
-    to: String,
-    subject: Option<String>,
-    body: Option<String>,
-}
-
-fn parse_mailto(value: &str) -> MailtoParts {
+/// Parses the `mailto:` body into the one mail it may send. `to`, `cc` and
+/// `bcc` fields are ignored; the address part must be exactly one address.
+fn parse_mailto(value: &str) -> Result<UnsubscribeMail, CommandError> {
     let (address, query) = value.split_once('?').unwrap_or((value, ""));
-    let mut parts = MailtoParts {
-        to: address.to_string(),
-        ..Default::default()
-    };
+    // `+` is literal in an address (`leave+123@list.example`).
+    let to = percent_decode(address, false).trim().to_string();
+    if !is_single_address(&to) {
+        return Err(CommandError::new("backend.errors.unsubscribeMailtoInvalid"));
+    }
+
+    let mut subject = None;
+    let mut body = None;
     for kv in query.split('&') {
         if let Some((key, val)) = kv.split_once('=') {
-            let decoded = urlencoding_decode(val);
             match key.to_ascii_lowercase().as_str() {
-                "subject" => parts.subject = Some(decoded),
-                "body" => parts.body = Some(decoded),
+                "subject" if subject.is_none() => subject = Some(percent_decode(val, true)),
+                "body" if body.is_none() => body = Some(percent_decode(val, true)),
                 _ => {}
             }
         }
     }
-    parts
+
+    let subject = subject
+        .map(|value| single_line(&value))
+        .map(|value| truncate_chars(&value, MAILTO_SUBJECT_MAX_CHARS))
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| MAILTO_DEFAULT_TEXT.into());
+    let body = body
+        .map(|value| clean_body(&value))
+        .map(|value| truncate_chars(&value, MAILTO_BODY_MAX_CHARS))
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| MAILTO_DEFAULT_TEXT.into());
+
+    Ok(UnsubscribeMail { to, subject, body })
 }
 
-fn urlencoding_decode(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '+' {
-            out.push(' ');
-        } else if ch == '%' {
-            let h1 = chars.next();
-            let h2 = chars.next();
-            if let (Some(h1), Some(h2)) = (h1, h2) {
-                if let Ok(byte) = u8::from_str_radix(&format!("{h1}{h2}"), 16) {
-                    out.push(byte as char);
-                    continue;
-                }
-            }
-            out.push('%');
-            if let Some(h1) = h1 {
-                out.push(h1);
-            }
-            if let Some(h2) = h2 {
-                out.push(h2);
-            }
-        } else {
-            out.push(ch);
-        }
+/// One plain `local@domain`: dot-atom local part, dotted domain, nothing that
+/// a recipient parser could read as a second address.
+fn is_single_address(value: &str) -> bool {
+    let Some((local, domain)) = value.split_once('@') else {
+        return false;
+    };
+    if local.is_empty() || local.len() > 64 || domain.is_empty() || value.len() > 254 {
+        return false;
     }
-    out
+    let atext = |ch: char| ch.is_ascii_alphanumeric() || "!#$%&'*+-/=?^_`{|}~".contains(ch);
+    let dot_atom = |part: &str, allowed: &dyn Fn(char) -> bool| {
+        part.split('.')
+            .all(|atom| !atom.is_empty() && atom.chars().all(allowed))
+    };
+    let label = |ch: char| ch.is_alphanumeric() || ch == '-';
+    dot_atom(local, &atext)
+        && domain.contains('.')
+        && dot_atom(domain, &label)
+        && domain
+            .split('.')
+            .all(|part| !part.starts_with('-') && !part.ends_with('-'))
+}
+
+fn single_line(value: &str) -> String {
+    value
+        .split(|ch: char| ch.is_control())
+        .filter(|part| !part.trim().is_empty())
+        .map(str::trim)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn clean_body(value: &str) -> String {
+    value
+        .replace("\r\n", "\n")
+        .chars()
+        .map(|ch| if ch == '\r' { '\n' } else { ch })
+        .filter(|ch| !ch.is_control() || matches!(ch, '\n' | '\t'))
+        .collect()
+}
+
+fn truncate_chars(value: &str, max: usize) -> String {
+    value.chars().take(max).collect()
+}
+
+fn percent_decode(input: &str, plus_is_space: bool) -> String {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if byte == b'+' && plus_is_space {
+            out.push(b' ');
+        } else if byte == b'%' {
+            let hex = input.get(index + 1..index + 3);
+            if let Some(value) = hex.and_then(|hex| u8::from_str_radix(hex, 16).ok()) {
+                out.push(value);
+                index += 3;
+                continue;
+            }
+            out.push(byte);
+        } else {
+            out.push(byte);
+        }
+        index += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 #[cfg(test)]
@@ -356,7 +464,11 @@ mod tests {
 
         assert_eq!(
             plan,
-            vec![UnsubscribeAction::Mailto("leave@list.example".into())]
+            vec![UnsubscribeAction::Mailto(UnsubscribeMail {
+                to: "leave@list.example".into(),
+                subject: "unsubscribe".into(),
+                body: "unsubscribe".into(),
+            })]
         );
     }
 
@@ -407,9 +519,118 @@ mod tests {
 
     #[test]
     fn mailto_parsing_survives_the_header_forms() {
-        let parts = parse_mailto("leave@list.example?subject=Un%20sub&body=stop+it");
-        assert_eq!(parts.to, "leave@list.example");
-        assert_eq!(parts.subject.as_deref(), Some("Un sub"));
-        assert_eq!(parts.body.as_deref(), Some("stop it"));
+        let mail = parse_mailto("leave@list.example?subject=Un%20sub&body=stop+it").unwrap();
+        assert_eq!(mail.to, "leave@list.example");
+        assert_eq!(mail.subject, "Un sub");
+        assert_eq!(mail.body, "stop it");
+
+        let mail = parse_mailto("leave+t0k3n@list.example").unwrap();
+        assert_eq!(mail.to, "leave+t0k3n@list.example");
+        assert_eq!(mail.subject, "unsubscribe");
+        assert_eq!(mail.body, "unsubscribe");
+
+        let mail = parse_mailto("leave%40list.example?subject=%C3%84nderung").unwrap();
+        assert_eq!(mail.to, "leave@list.example");
+        assert_eq!(mail.subject, "Änderung");
+    }
+
+    #[test]
+    fn mailto_must_name_exactly_one_address() {
+        for rejected in [
+            "a@list.example;b@other.example",
+            "a@list.example%3Bb@other.example",
+            "a@list.example,b@other.example",
+            "a@list.example%2Cb@other.example",
+            "a@list.example%20b@other.example",
+            "a@list.example%0Ab@other.example",
+            "Name%20%3Ca@list.example%3E",
+            "",
+            "list.example",
+            "a@localhost",
+            "a@@list.example",
+            "a@list..example",
+        ] {
+            let Err(error) = parse_mailto(rejected) else {
+                panic!("{rejected} must not be accepted as one address");
+            };
+            assert_eq!(error.key, "backend.errors.unsubscribeMailtoInvalid");
+        }
+    }
+
+    #[test]
+    fn mailto_recipient_fields_in_the_query_are_ignored() {
+        let mail = parse_mailto(
+            "leave@list.example?to=x@other.example&cc=y@other.example&bcc=z@other.example&subject=go",
+        )
+        .unwrap();
+        assert_eq!(mail.to, "leave@list.example");
+        assert_eq!(mail.subject, "go");
+    }
+
+    #[test]
+    fn mailto_subject_and_body_are_bounded() {
+        let long = "x".repeat(5000);
+        let mail = parse_mailto(&format!(
+            "leave@list.example?subject=a%0D%0ABcc:%20y@other.example%0A{long}&body={long}"
+        ))
+        .unwrap();
+        assert!(!mail.subject.contains(['\r', '\n']));
+        assert!(mail.subject.starts_with("a Bcc: y@other.example x"));
+        assert_eq!(mail.subject.chars().count(), MAILTO_SUBJECT_MAX_CHARS);
+        assert_eq!(mail.body.chars().count(), MAILTO_BODY_MAX_CHARS);
+
+        let mail = parse_mailto("leave@list.example?subject=%0A&body=%20").unwrap();
+        assert_eq!(mail.subject, "unsubscribe");
+        assert_eq!(mail.body, "unsubscribe");
+    }
+
+    #[test]
+    fn the_mailto_entry_is_read_from_angle_brackets() {
+        assert_eq!(
+            first_mailto("<https://x.example/u>, <MAILTO:leave@list.example?subject=a,b>")
+                .as_deref(),
+            Some("leave@list.example?subject=a,b")
+        );
+        assert_eq!(first_mailto("<https://x.example/u>"), None);
+    }
+
+    #[tokio::test]
+    async fn an_invalid_mailto_alone_is_refused_with_its_own_key() {
+        let error = plan_unsubscribe("<mailto:a@list.example;b@other.example>", None)
+            .await
+            .expect_err("two recipients must not be planned");
+        assert_eq!(error.key, "backend.errors.unsubscribeMailtoInvalid");
+    }
+
+    #[tokio::test]
+    async fn only_the_mail_the_header_yields_can_be_confirmed() {
+        let plan = plan_unsubscribe("<mailto:leave@list.example?subject=tok>", None)
+            .await
+            .unwrap();
+        let shown = UnsubscribeMail {
+            to: "leave@list.example".into(),
+            subject: "tok".into(),
+            body: "unsubscribe".into(),
+        };
+        assert_eq!(confirmed_mailto(&plan, &shown).unwrap(), shown);
+
+        for altered in [
+            UnsubscribeMail {
+                to: "x@other.example".into(),
+                ..shown.clone()
+            },
+            UnsubscribeMail {
+                subject: "other".into(),
+                ..shown.clone()
+            },
+            UnsubscribeMail {
+                body: "other".into(),
+                ..shown.clone()
+            },
+        ] {
+            let error =
+                confirmed_mailto(&plan, &altered).expect_err("altered mail must be refused");
+            assert_eq!(error.key, "backend.errors.unsubscribeConfirmationStale");
+        }
     }
 }

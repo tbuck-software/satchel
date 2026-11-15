@@ -21,6 +21,9 @@ import { visibleLinkText } from '@/utils/linkLabel';
  * sanitisation and marks each anchor by verdict, so the click handler in the
  * component never has to re-derive whether a destination was trusted.
  *
+ * `prepare` sees the parsed tree first; the image blocker runs there, so it
+ * reads attributes exactly as the frame will.
+ *
  * `resolveInlineImages` swaps `cid:` references for loadable sources in the
  * finished tree, right before serialization, so the inline images never pass
  * through the passes above as text.
@@ -29,9 +32,11 @@ export function buildIsolatedDocument(
   html: string,
   autoDark: boolean,
   resolveInlineImages?: (roots: Element[]) => void,
+  prepare?: (doc: Document) => void,
 ): string {
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, 'text/html');
+  prepare?.(doc);
   doc.querySelectorAll('link, meta').forEach((node) => node.remove());
 
   // The backend sanitizer works on fragments, whose parser drops attributes

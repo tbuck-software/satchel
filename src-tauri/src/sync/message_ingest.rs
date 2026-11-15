@@ -951,7 +951,7 @@ async fn persist_provider_message(
         )
         .bind(&attachment_id)
         .bind(&message_id)
-        .bind(attachment.filename.as_deref().map(satchel_core::utils::filename::strip_filename_controls))
+        .bind(attachment.filename.as_deref().map(satchel_core::utils::filename::safe_attachment_name))
         .bind(&attachment.content_type)
         .bind(attachment.size)
         .bind(attachment.content_id.as_deref())
@@ -1376,16 +1376,19 @@ async fn finish_provider_message(
     // Detect calendar invitations: prefer the standalone text/calendar part if
     // the IMAP parser pulled one out, otherwise scan body text/html (Outlook/Gmail
     // often inline the invite).
-    let invite_source = message.body_calendar.clone().or_else(|| {
-        crate::email::calendar::extract_ics_block(
+    use crate::db::calendar::InviteOrigin;
+    let invite_source = match message.body_calendar.clone() {
+        Some(raw) => Some((raw, InviteOrigin::MailPart(&message_id))),
+        None => crate::email::calendar::extract_ics_block(
             message.body_text.as_deref(),
             message.body_html.as_deref(),
         )
-    });
-    if let Some(raw_ics) = invite_source {
+        .map(|raw| (raw, InviteOrigin::MailBody(&message_id))),
+    };
+    if let Some((raw_ics, origin)) = invite_source {
         if let Some(invite) = crate::email::calendar::parse_invite(&raw_ics) {
             let _ = crate::db::calendar::CalendarRepository::new(pool)
-                .upsert_invite(account_id, Some(&message_id), &invite)
+                .upsert_invite(account_id, origin, &invite)
                 .await;
         }
     }

@@ -7,6 +7,7 @@ import type { ConfirmRequest } from '@/composables/useConfirm';
 const backend = vi.hoisted(() => ({
   backendCancelPendingRestore: vi.fn(),
   backendChooseDirectory: vi.fn(),
+  backendChooseOpenFile: vi.fn(),
   backendChooseSavePath: vi.fn(),
   backendCreateBackup: vi.fn(),
   backendCredentialsStatus: vi.fn(),
@@ -21,13 +22,11 @@ const backend = vi.hoisted(() => ({
   backendCommandsAvailable: vi.fn(() => true),
   backendSupportsNativeCommands: vi.fn(() => true),
 }));
-const dialog = vi.hoisted(() => ({ open: vi.fn(), save: vi.fn() }));
 const events = vi.hoisted(() => ({
   listenToBackend: vi.fn(),
   handlers: new Map<string, (payload: unknown) => void>(),
 }));
 vi.mock('@/services/backend', () => backend);
-vi.mock('@tauri-apps/plugin-dialog', () => dialog);
 vi.mock('@/services/appEvents', () => ({
   listenToBackend: (name: string, handler: (payload: unknown) => void) => {
     events.handlers.set(name, handler);
@@ -92,7 +91,6 @@ beforeEach(() => {
     message_count: 1500,
     master_key_files: 1,
   });
-  dialog.open.mockResolvedValue('/backups');
   backend.backendChooseDirectory.mockResolvedValue('/backups');
   backend.backendChooseSavePath.mockResolvedValue('/export.mbox');
   events.handlers.clear();
@@ -169,6 +167,9 @@ describe('database backup section', () => {
     const wrapper = mount(BackupExport);
     await button(wrapper, 'Show backups').trigger('click');
     await vi.waitFor(() => expect(wrapper.text()).toContain('satchel-20260828-101500'));
+    // The backend opens the folder dialog, so list, restore and prune read a folder it granted.
+    expect(backend.backendChooseDirectory).toHaveBeenCalled();
+    expect(backend.backendListBackups).toHaveBeenCalledWith('/backups');
 
     await button(wrapper, 'Restore').trigger('click');
 
@@ -326,7 +327,7 @@ describe('mbox import progress', () => {
       skipped: 3,
       cancelled: true,
     });
-    dialog.open.mockResolvedValue('/archive.mbox');
+    backend.backendChooseOpenFile.mockResolvedValue('/archive.mbox');
     accountsState.emailAccounts = [{ id: 'a1', email: 'a@example.test', displayName: 'A' }];
     const wrapper = mount(BackupExport);
     await vi.waitFor(() => expect(events.handlers.has('import:progress')).toBe(true));
@@ -348,20 +349,22 @@ describe('mbox import progress', () => {
       skipped: 0,
       cancelled: false,
     });
-    dialog.open.mockResolvedValue('/archive.mbox');
+    backend.backendChooseOpenFile.mockResolvedValue('/archive.mbox');
     accountsState.emailAccounts = [{ id: 'a1', email: 'a@example.test', displayName: 'A' }];
     const wrapper = mount(BackupExport);
 
     await button(wrapper, 'Import mbox').trigger('click');
 
     await vi.waitFor(() => expect(wrapper.text()).toContain('Imported: 5 messages'));
+    // The backend opens the file dialog, so the import reads a path it granted.
+    expect(backend.backendImportMbox).toHaveBeenCalledWith({ path: '/archive.mbox', accountId: 'a1' });
     expect(wrapper.find('[role="progressbar"]').exists()).toBe(false);
     expect(button(wrapper, 'Import mbox').attributes('disabled')).toBeUndefined();
   });
 
   it('reports a failed import as an alert, not a grey line', async () => {
     backend.backendImportMbox.mockRejectedValue(new Error('mbox unreadable'));
-    dialog.open.mockResolvedValue('/archive.mbox');
+    backend.backendChooseOpenFile.mockResolvedValue('/archive.mbox');
     accountsState.emailAccounts = [{ id: 'a1', email: 'a@example.test', displayName: 'A' }];
     const wrapper = mount(BackupExport);
 

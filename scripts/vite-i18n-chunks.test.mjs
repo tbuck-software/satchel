@@ -37,7 +37,7 @@ describe('i18n chunk plugin', () => {
   });
 
   it('leaves imports alone whose code needs nothing beyond startup', () => {
-    const file = path.join(repoRoot, 'src', 'services', 'fileDialog.ts');
+    const file = path.join(repoRoot, 'src', 'services', 'appEvents.ts');
     expect(hook(wrap, 'transform').call(context, readFileSync(file, 'utf8'), file)).toBeNull();
   });
 

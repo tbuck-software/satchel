@@ -1,6 +1,7 @@
 import { reactive } from 'vue';
 import { imagePolicyPersistence } from '@/persistence/imagePolicy';
 import type { ImagePolicyMode } from '@/types/settings';
+import { isLocalResourceUrl, neutralizeRemoteCss } from '@/utils/remoteCss';
 import { normalizeDomain, senderDomain } from '@/utils/senderDomains';
 
 /**
@@ -60,20 +61,13 @@ export function useImagePolicy() {
   return { state, isAllowed, allow, revoke, allowDomain, revokeDomain, setMode };
 }
 
-function isLocalResourceUrl(url: string): boolean {
-  const lower = url.trim().toLowerCase();
-  return lower.startsWith('data:')
-    || lower.startsWith('cid:')
-    || lower.startsWith('blob:')
-    || lower.startsWith('asset:')
-    || lower.startsWith('http://asset.localhost/')
-    || lower.startsWith('https://asset.localhost/');
-}
-
-const BLOCKED_IMG_TAG = /<img\b[^>]*\sdata-blocked-src(?:set)?\s*=[^>]*>/gi;
-const SIZE_ATTR = (name: string) => new RegExp(`\\s${name}\\s*=\\s*(['"]?)(\\d+(?:\\.\\d+)?)(?:px)?\\1(?=[\\s/>])`, 'i');
-const STYLE_ATTR = /\sstyle\s*=\s*(['"])/i;
 const MIN_PLACEHOLDER_SIDE = 24;
+const PIXEL_SIZE = /^\s*(\d+(?:\.\d+)?)(?:px)?\s*$/i;
+const DOCUMENT_TAG = /<(?:!doctype|html|head|body)[\s>/]/i;
+
+function pixelSize(value: string | null): number {
+  return Number(PIXEL_SIZE.exec(value ?? '')?.[1]);
+}
 
 /**
  * A blocked image keeps the box its width and height attributes promise.
@@ -83,92 +77,82 @@ const MIN_PLACEHOLDER_SIDE = 24;
  * and two products side by side got boxes of different heights. An
  * `aspect-ratio` from the attributes holds the shape the sender laid out.
  */
-function keepBlockedImageShape(html: string): string {
-  return html.replace(BLOCKED_IMG_TAG, (tag) => {
-    const width = Number(SIZE_ATTR('width').exec(tag)?.[2]);
-    const height = Number(SIZE_ATTR('height').exec(tag)?.[2]);
-    // A tracking pixel stays a pixel; only a picture gets a placeholder.
-    if (!(width >= MIN_PLACEHOLDER_SIDE && height >= MIN_PLACEHOLDER_SIDE)) return tag;
-    const ratio = `aspect-ratio:${width}/${height};`;
-    const marked = tag.replace(/^<img\b/i, '<img data-blocked-shape');
-    if (STYLE_ATTR.test(marked)) return marked.replace(STYLE_ATTR, (attr) => `${attr}${ratio}`);
-    return marked.replace(/^<img\b/i, `<img style="${ratio}"`);
-  });
+function keepBlockedImageShape(image: Element) {
+  const width = pixelSize(image.getAttribute('width'));
+  const height = pixelSize(image.getAttribute('height'));
+  // A tracking pixel stays a pixel; only a picture gets a placeholder.
+  if (!(width >= MIN_PLACEHOLDER_SIDE && height >= MIN_PLACEHOLDER_SIDE)) return;
+  if (image.hasAttribute('data-blocked-shape')) return;
+  image.setAttribute('data-blocked-shape', '');
+  image.setAttribute('style', `aspect-ratio:${width}/${height};${image.getAttribute('style') ?? ''}`);
+}
+
+function isLocalSrcset(value: string): boolean {
+  // srcset can't be split on commas: data: URLs contain commas. Local iff
+  // nothing remains after removing local URLs and width/density descriptors.
+  const remainder = value
+    .replace(/data:\S+/gi, '')
+    .replace(/(?:cid|blob):[^\s,]+/gi, '')
+    .replace(/\b\d+(?:\.\d+)?[wx]\b/gi, '')
+    .replace(/[,\s]+/g, '');
+  return !remainder;
+}
+
+function blockAttribute(element: Element, name: string, isLocal: (value: string) => boolean): boolean {
+  const value = element.getAttribute(name);
+  if (value === null || !value.trim() || isLocal(value)) return false;
+  element.removeAttribute(name);
+  element.setAttribute(`data-blocked-${name}`, value);
+  return true;
 }
 
 /**
  * Rewrite remote resource references (`img src`, `img srcset`, the legacy
- * `background` attribute, `background: url(...)` in style attrs) into inert
- * data-blocked-* placeholders so no network request fires. Inline data:/cid:/
- * blob: references are kept (these aren't tracking pixels).
+ * `background` attribute, `url()` and friends in style attributes and style
+ * blocks) into inert data-blocked-* placeholders so no network request fires.
+ * Inline data:/cid:/blob: references are kept (these aren't tracking pixels).
  *
- * The renderer uses an isolated mail document, so this function is also the
- * enforcement layer for stylesheet URLs and @import rules.
+ * Works on a parsed, inert document, so attribute values are read the way the
+ * renderer reads them, whatever quotes or `>` they contain. Returns how many
+ * references it blocked.
  */
-export function blockRemoteImages(html: string): { html: string; blockedCount: number } {
+export function blockRemoteImagesInDocument(doc: Document): number {
   let blockedCount = 0;
-  const next = html
-    .replace(
-      /<img\b([^>]*?)\ssrc\s*=\s*(['"])([^'"]+)\2/gi,
-      (full, attrs: string, quote: string, url: string) => {
-        if (isLocalResourceUrl(url)) {
-          return full;
-        }
-        blockedCount += 1;
-        return `<img${attrs} data-blocked-src=${quote}${url}${quote}`;
-      },
-    )
-    // srcset is allowed through the sanitizer and loads independently of src.
-    // Note: srcset can't be split on commas — data: URLs contain commas. Local
-    // iff nothing remains after removing local URLs and width/density descriptors.
-    .replace(
-      /<img\b([^>]*?)\ssrcset\s*=\s*(['"])([^'"]+)\2/gi,
-      (full, attrs: string, quote: string, value: string) => {
-        const remainder = value
-          .replace(/data:\S+/gi, '')
-          .replace(/(?:cid|blob):[^\s,]+/gi, '')
-          .replace(/\b\d+(?:\.\d+)?[wx]\b/gi, '')
-          .replace(/[,\s]+/g, '');
-        if (!remainder) {
-          return full;
-        }
-        blockedCount += 1;
-        return `<img${attrs} data-blocked-srcset=${quote}${value}${quote}`;
-      },
-    )
-    // Legacy HTML background attribute (<table background="https://...">).
-    .replace(
-      /\sbackground\s*=\s*(['"])([^'"]+)\1/gi,
-      (full, quote: string, url: string) => {
-        if (isLocalResourceUrl(url)) {
-          return full;
-        }
-        blockedCount += 1;
-        return ` data-blocked-background=${quote}${url}${quote}`;
-      },
-    );
-  // Also strip background-image: url(...) on style attrs to avoid pixel loaders.
-  const stripped = keepBlockedImageShape(next).replace(
-    /style\s*=\s*(['"])([^'"]*background[^'"]*url\([^'"]*?\)[^'"]*?)\1/gi,
-    (_full, quote: string, body: string) => {
-      const cleaned = body.replace(/background[^;]*url\([^)]*\)\s*;?/gi, '');
-      return `style=${quote}${cleaned}${quote}`;
-    },
-  );
-  // `(?:https?:)?\/\/` also catches protocol-relative URLs (`url(//host/p.gif)`),
-  // which resolve against the document base and would otherwise slip through.
-  const remoteImportPattern = /@import\s+(?:url\()?\s*['"]?(?:https?:)?\/\/[^;)]*(?:\))?\s*;?/gi;
-  const remoteUrlPattern = /url\(\s*['"]?(?:https?:)?\/\/[^)]*\)/gi;
-  const withoutRemoteStyles = stripped.replace(
-    /<style\b([^>]*)>([\s\S]*?)<\/style>/gi,
-    (_full, attrs: string, css: string) => {
-      const imports = css.match(remoteImportPattern)?.length ?? 0;
-      const withoutImports = css.replace(remoteImportPattern, '');
-      const urls = withoutImports.match(remoteUrlPattern)?.length ?? 0;
-      blockedCount += imports + urls;
-      const cleaned = withoutImports.replace(remoteUrlPattern, 'none');
-      return `<style${attrs}>${cleaned}</style>`;
-    },
-  );
-  return { html: withoutRemoteStyles, blockedCount };
+  for (const image of Array.from(doc.querySelectorAll('img'))) {
+    const src = blockAttribute(image, 'src', isLocalResourceUrl);
+    // srcset loads independently of src.
+    const srcset = blockAttribute(image, 'srcset', isLocalSrcset);
+    blockedCount += Number(src) + Number(srcset);
+    if (src || srcset) keepBlockedImageShape(image);
+  }
+  // Legacy HTML background attribute (<table background="https://...">).
+  for (const element of Array.from(doc.querySelectorAll('[background]'))) {
+    if (blockAttribute(element, 'background', isLocalResourceUrl)) blockedCount += 1;
+  }
+  for (const element of Array.from(doc.querySelectorAll('[style]'))) {
+    const style = element.getAttribute('style') ?? '';
+    const cleaned = neutralizeRemoteCss(style);
+    if (cleaned.css !== style) element.setAttribute('style', cleaned.css);
+    blockedCount += cleaned.blocked;
+  }
+  for (const style of Array.from(doc.querySelectorAll('style'))) {
+    const css = style.textContent ?? '';
+    const cleaned = neutralizeRemoteCss(css);
+    // Cutting `@import;` out of `</sty@import;le>` must not close the element
+    // once it is serialized; `\/` is the same character to CSS.
+    if (cleaned.css !== css) style.textContent = cleaned.css.replace(/<\/(style)/gi, '<\\/$1');
+    blockedCount += cleaned.blocked;
+  }
+  return blockedCount;
+}
+
+/** `blockRemoteImagesInDocument` for markup, returned as the parser read it. */
+export function blockRemoteImages(html: string): { html: string; blockedCount: number } {
+  if (!html) return { html, blockedCount: 0 };
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const blockedCount = blockRemoteImagesInDocument(doc);
+  const serialized = DOCUMENT_TAG.test(html)
+    ? doc.documentElement.outerHTML
+    : `${doc.head.innerHTML}${doc.body.innerHTML}`;
+  return { html: serialized, blockedCount };
 }

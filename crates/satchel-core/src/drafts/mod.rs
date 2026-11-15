@@ -1101,7 +1101,7 @@ async fn hydrate_imported_draft_attachments(
             })
             .unwrap_or(row.content_type);
         attachments.push(OutgoingAttachmentInput {
-            filename: crate::utils::filename::strip_filename_controls(
+            filename: crate::utils::filename::safe_attachment_name(
                 &fetched_filename
                     .or(row.filename)
                     .unwrap_or_else(|| "attachment".to_string()),

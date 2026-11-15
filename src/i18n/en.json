@@ -255,6 +255,7 @@
       "attachmentExecutableNotConfirmed": "\"{filename}\" is a program (.{extension}), not a document. Satchel will not hand it to the operating system without your confirmation.",
       "attachmentNotBase64": "\"{filename}\" could not be attached: its data is damaged. Remove the attachment and add the file again.",
       "attachmentPayloadMissing": "The attachment could not be read: Satchel received neither its content nor a path to it.",
+      "attachmentTypeNotConfirmed": "Satchel does not know what opens \"{filename}\". It will not hand it to the operating system without your confirmation.",
       "availabilityDurationInvalid": "Choose a meeting length between 5 minutes and 24 hours.",
       "availabilityRangeInvalid": "That time range cannot be checked for free time.",
       "availabilityTimeZoneInvalid": "This device's time zone is not known to Satchel.",
@@ -442,6 +443,7 @@
       "queueRejected": "The server rejected this action. Review its details before trying again.",
       "queueTemporary": "The server is temporarily unavailable. Satchel will try again automatically.",
       "queuedDraftNotRestorable": "This message can no longer be reopened as a draft because its draft changed after it was queued. It is still in the Outbox, where you can view it or discard it before it is sent.",
+      "readSourceNotChosen": "Satchel only reads a file or folder chosen in its own dialog. Choose {path} again.",
       "recipientAddressInvalid": "This is not a valid recipient address: {value}",
       "replyContextLoadFailed": "The reply context could not be loaded. The message has not been sent yet.",
       "replyThreadNotFound": "The conversation for this reply is no longer available.",
@@ -591,7 +593,9 @@
       "trayThreadInvalid": "This tray email reference is invalid.",
       "unexpected": "An unexpected backend error occurred.",
       "unsubscribeBrowserOpenFailed": "The unsubscribe page could not be opened: {message}",
+      "unsubscribeConfirmationStale": "The unsubscribe mail no longer matches what was confirmed. Nothing was sent.",
       "unsubscribeHeaderMissing": "This email carries no unsubscribe address.",
+      "unsubscribeMailtoInvalid": "The unsubscribe address in this email is not a single valid address. Satchel will not send to it.",
       "unsubscribeMessageNotFound": "This email is no longer available.",
       "unsubscribeNoTarget": "This email carries no usable unsubscribe address.",
       "unsubscribePostFailed": "The unsubscribe request failed: {message}",
@@ -1587,6 +1591,9 @@
       "showInFolder": "Show in folder",
       "tooLarge": "“{name}” is larger than {limit}.",
       "totalExceeded": "Total size exceeded: “{name}” no longer fits the {limit} budget ({used} already in use).",
+      "unknownTypeBody": "Satchel does not know the file type .{extension}. Opening it hands it to the operating system, which may run it. Check the full name below before you decide.",
+      "unknownTypeNoExtensionBody": "This file has no extension, so Satchel cannot tell what it is. Opening it hands it to the operating system, which may run it.",
+      "unknownTypeTitle": "Open this attachment?",
       "useAsAttachment": "Send image as a regular attachment",
       "viewInSatchel": "View in Satchel",
       "viewInSatchelNamed": "View {filename} in Satchel"
@@ -1862,6 +1869,14 @@
     "unsubscribe": {
       "action": "Unsubscribe",
       "banner": "Newsletter — unsubscribe in one click",
+      "confirm": {
+        "body": "This newsletter unsubscribes by email. Satchel sends this message from your account:",
+        "message": "Message",
+        "send": "Send unsubscribe email",
+        "subject": "Subject",
+        "title": "Send an unsubscribe email?",
+        "to": "To"
+      },
       "failed": "Unsubscribe failed: {error}",
       "sending": "Sending…",
       "success": "Unsubscribed via {method}"

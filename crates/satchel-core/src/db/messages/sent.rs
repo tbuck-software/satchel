@@ -237,7 +237,7 @@ impl<'a> SentMessageRepository<'a> {
             )
             .bind(&attachment_id)
             .bind(&message_id)
-            .bind(crate::utils::filename::strip_filename_controls(&attachment.filename))
+            .bind(crate::utils::filename::safe_attachment_name(&attachment.filename))
             .bind(&attachment.mime_type)
             .bind(attachment.size)
             .bind(attachment.content_id.as_deref())
