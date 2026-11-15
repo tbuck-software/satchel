@@ -29,10 +29,10 @@ import { useThreadActions, type SenderSweepAction } from '@/composables/useThrea
 import { useSenderSweep } from '@/composables/useSenderSweep';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
+import { useUnsubscribe } from '@/composables/useUnsubscribe';
 import { useShortcutHints } from '@/composables/useShortcutHints';
 import { pageKeyBlocked } from '@/composables/pageKeys';
 import { useAccountsStore } from '@/stores/accounts';
-import { useMessagesStore } from '@/stores/messages';
 import { useSettingsStore } from '@/stores/settings';
 import { useSweepRulesStore } from '@/stores/sweepRules';
 import { useUiStore } from '@/stores/ui';
@@ -51,9 +51,9 @@ const actions = useThreadActions();
 const sweep = useSenderSweep();
 const toast = useToast();
 const confirm = useConfirm();
+const { unsubscribe: runUnsubscribe } = useUnsubscribe();
 const { hint } = useShortcutHints();
 const accounts = useAccountsStore();
-const messages = useMessagesStore();
 const settings = useSettingsStore();
 const rules = useSweepRulesStore();
 const ui = useUiStore();
@@ -157,7 +157,8 @@ async function unsubscribe(sender: BackendCleanupSender) {
   const key = keyOf(sender);
   busyKey.value = key;
   try {
-    const result = await messages.unsubscribe(messageId);
+    const result = await runUnsubscribe(messageId);
+    if (!result) return;
     unsubscribed.value = new Set([...unsubscribed.value, key]);
     toast.success(t('mail.unsubscribe.success', { method: result.method }), {
       action: {

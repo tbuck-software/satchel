@@ -5,7 +5,7 @@ use std::{future::Future, pin::Pin};
 use crate::commands::error::{CommandError, CommandResult};
 use crate::commands::messages::{OutgoingAttachmentInput, OutgoingMessageInput};
 use crate::db::accounts::AccountRepository;
-use crate::db::calendar::{CalendarError, CalendarRepository};
+use crate::db::calendar::{CalendarError, CalendarRepository, InviteOrigin};
 pub use crate::db::calendar::{
     CalendarEventRecord as CalendarEventDto, CalendarInviteRecord as CalendarInviteDto,
     CalendarSourceRecord as CalendarSourceDto,
@@ -125,7 +125,7 @@ pub async fn import_ics(
     };
 
     let dto = CalendarRepository::new(pool.inner())
-        .upsert_invite(&account_id, None, &parsed)
+        .upsert_invite(&account_id, InviteOrigin::Import, &parsed)
         .await?;
 
     Ok(with_current_recurrence_metadata(dto))

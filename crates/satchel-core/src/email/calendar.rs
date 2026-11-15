@@ -103,7 +103,7 @@ pub fn parse_invite(raw_ics: &str) -> Option<ParsedInvite> {
     for component in calendar.components.iter() {
         if let CalendarComponent::Event(event) = component {
             let uid = event.get_uid().unwrap_or("").to_string();
-            if uid.is_empty() {
+            if uid.trim().is_empty() {
                 continue;
             }
 

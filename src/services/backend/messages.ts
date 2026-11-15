@@ -11,6 +11,7 @@ import type {
   BackendOpenedThread,
   BackendSearchListScope,
   BackendServerSearchHit,
+  BackendUnsubscribeMail,
   BackendUnsubscribeResult,
 } from '@/types/messages';
 
@@ -28,6 +29,7 @@ export type {
   BackendSearchListScope,
   BackendSearchWarning,
   BackendServerSearchHit,
+  BackendUnsubscribeMail,
   BackendUnsubscribeResult,
 } from '@/types/messages';
 
@@ -82,9 +84,16 @@ export async function backendSearchMessageHits(
 }
 
 
-export async function backendUnsubscribe(messageId: string): Promise<BackendUnsubscribeResult> {
+/**
+ * Without `confirmedMail` a mailto route sends nothing and comes back with
+ * `confirm_mail`; passing that mail back sends it.
+ */
+export async function backendUnsubscribe(
+  messageId: string,
+  confirmedMail?: BackendUnsubscribeMail,
+): Promise<BackendUnsubscribeResult> {
   return invoke<BackendUnsubscribeResult>('unsubscribe', {
-    input: { message_id: messageId },
+    input: { message_id: messageId, confirmed_mail: confirmedMail ?? null },
   });
 }
 

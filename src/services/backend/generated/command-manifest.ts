@@ -6508,7 +6508,40 @@ export default {
         "app::commands::unsubscribe::UnsubscribeInput": {
             "kind": "object",
             "fields": {
+                "confirmed_mail": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "ref",
+                            "name": "app::commands::unsubscribe::UnsubscribeMail"
+                        }
+                    }
+                },
                 "message_id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "app::commands::unsubscribe::UnsubscribeMail": {
+            "kind": "object",
+            "fields": {
+                "body": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "subject": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "to": {
                     "required": true,
                     "shape": {
                         "kind": "value"

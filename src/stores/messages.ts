@@ -34,6 +34,7 @@ import {
   type BackendMessage,
   type BackendMessageBody,
   type BackendMessageSource,
+  type BackendUnsubscribeMail,
   type BackendUnsubscribeResult,
 } from '@/services/backend';
 import { perfLog, perfStart } from '@/utils/perf';
@@ -901,8 +902,11 @@ export const useMessagesStore = defineStore('messages', () => {
     return true;
   }
 
-  async function unsubscribe(messageId: string): Promise<BackendUnsubscribeResult> {
-    return backendUnsubscribe(messageId);
+  async function unsubscribe(
+    messageId: string,
+    confirmedMail?: BackendUnsubscribeMail,
+  ): Promise<BackendUnsubscribeResult> {
+    return backendUnsubscribe(messageId, confirmedMail);
   }
 
   async function hydrateMessageBodies(

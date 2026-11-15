@@ -4,7 +4,7 @@ import AppIcon from '@/components/ui/AppIcon.vue';
 import { ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useToast } from '@/composables/useToast';
-import { useMessagesStore } from '@/stores/messages';
+import { useUnsubscribe } from '@/composables/useUnsubscribe';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
 
 const { t } = useI18n();
@@ -16,12 +16,13 @@ const props = defineProps<{
 const dismissed = ref(false);
 const busy = ref(false);
 const toast = useToast();
-const messages = useMessagesStore();
+const { unsubscribe: runUnsubscribe } = useUnsubscribe();
 
 async function unsubscribe() {
   busy.value = true;
   try {
-    const result = await messages.unsubscribe(props.messageId);
+    const result = await runUnsubscribe(props.messageId);
+    if (!result) return;
     toast.success(t('mail.unsubscribe.success', { method: result.method }));
     dismissed.value = true;
   } catch (err) {

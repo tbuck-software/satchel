@@ -34,7 +34,7 @@ import {
 import type { Account, Message, Thread } from '@/types/mail';
 import type { BackendContact } from '@/types/contacts';
 import type { BackendDraft, BackendSignature, BackendResolvedSignature } from '@/types/composer';
-import type { BackendMessage, BackendMessageBody } from '@/types/messages';
+import type { BackendMessage, BackendMessageBody, BackendUnsubscribeMail } from '@/types/messages';
 import type { BackendCalendarEvent, BackendCalendarInvite, BackendCalendarSource } from '@/types/calendar';
 import type { BackendBusyBlock, BackendFreeBusyInput, BackendFreeSlotsInput } from './availability';
 import type { BackendOutboxItem } from '@/types/outbox';
@@ -3161,8 +3161,34 @@ const handlers: Record<string, Handler> = {
     const message = Object.values(messages).flat().find((entry) => entry.id === messageId);
     if (!message) throw new Error('backend.errors.unsubscribeMessageNotFound');
     if (!message.listUnsubscribe?.trim()) throw new Error('backend.errors.unsubscribeHeaderMissing');
-    const target = /<(https?:[^>]+)>/.exec(message.listUnsubscribe)?.[1] ?? message.listUnsubscribe;
-    return { method: target.startsWith('mailto:') ? 'mailto' : 'http-one-click', target };
+    const header = message.listUnsubscribe;
+    const url = /<(https?:[^>]+)>/i.exec(header)?.[1];
+    const confirmed = (input(payload).confirmed_mail ?? null) as BackendUnsubscribeMail | null;
+    if (url && !confirmed && message.listUnsubscribePost?.includes('List-Unsubscribe=One-Click')) {
+      return { method: 'http-one-click', target: url, confirm_mail: null };
+    }
+    // Like the backend: a mailto route sends only the exact mail the user confirmed.
+    const mailto = /<mailto:([^>]+)>/i.exec(header)?.[1];
+    if (mailto) {
+      const [address = '', query = ''] = mailto.split('?');
+      const params = new URLSearchParams(query);
+      const mail: BackendUnsubscribeMail = {
+        to: decodeURIComponent(address),
+        subject: params.get('subject')?.trim() || 'unsubscribe',
+        body: params.get('body')?.trim() || 'unsubscribe',
+      };
+      if (!/^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$/.test(mail.to)) {
+        throw new Error('backend.errors.unsubscribeMailtoInvalid');
+      }
+      if (!confirmed) return { method: 'mailto', target: mail.to, confirm_mail: mail };
+      if (confirmed.to !== mail.to || confirmed.subject !== mail.subject || confirmed.body !== mail.body) {
+        throw new Error('backend.errors.unsubscribeConfirmationStale');
+      }
+      return { method: 'mailto', target: mail.to, confirm_mail: null };
+    }
+    if (confirmed) throw new Error('backend.errors.unsubscribeConfirmationStale');
+    if (!url) throw new Error('backend.errors.unsubscribeNoTarget');
+    return { method: 'browser', target: url, confirm_mail: null };
   },
   list_blocked_senders: () => [],
   list_rules: () => mockRules.map((rule) => ({ ...rule, actions: [...rule.actions] })),
