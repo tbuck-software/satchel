@@ -132,6 +132,32 @@ fn parse_message_bytes(path: &str, bytes: &[u8]) -> Result<ParsedRawEmail, Strin
     parse_raw_rfc822(bytes)
 }
 
+/// Label prefix of the viewer windows; `capabilities/message-viewer.json` matches it.
+pub const VIEWER_LABEL_PREFIX: &str = "message-file-";
+
+/// The file each viewer window was opened for, by window label.
+#[derive(Default)]
+pub struct ViewerFiles {
+    by_label: std::sync::Mutex<std::collections::HashMap<String, String>>,
+}
+
+impl ViewerFiles {
+    pub fn bind(&self, label: &str, path: &str) {
+        if let Ok(mut bound) = self.by_label.lock() {
+            bound.insert(label.to_string(), path.to_string());
+        }
+    }
+
+    /// Whether `path` is the message file the window `label` shows.
+    pub fn is_bound(&self, label: &str, path: &str) -> bool {
+        is_message_file(std::path::Path::new(path))
+            && self
+                .by_label
+                .lock()
+                .is_ok_and(|bound| bound.get(label).is_some_and(|own| own == path))
+    }
+}
+
 /// Message key for a path that is not a message file.
 pub const NOT_A_MESSAGE_FILE: &str = "backend.errors.notAMessageFile";
 
@@ -248,7 +274,7 @@ fn viewer_window_label(path: &str) -> String {
         .take(8)
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    format!("message-file-{hex}")
+    format!("{VIEWER_LABEL_PREFIX}{hex}")
 }
 
 /// Open the viewer for `path`.
@@ -263,6 +289,9 @@ fn viewer_window_label(path: &str) -> String {
 #[cfg(desktop)]
 pub(crate) fn open_message_file_window(app: &AppHandle, path: &str) -> Result<(), String> {
     let label = viewer_window_label(path);
+    if let Some(state) = app.try_state::<crate::AppState>() {
+        state.viewer_files.bind(&label, path);
+    }
     if let Some(existing) = app.get_webview_window(&label) {
         let _ = existing.unminimize();
         let _ = existing.show();

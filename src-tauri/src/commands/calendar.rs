@@ -146,9 +146,12 @@ fn decode_ics_payload(raw: &str) -> CommandResult<String> {
 
 #[tauri::command]
 pub async fn import_ics_path(
+    state: tauri::State<'_, crate::AppState>,
     pool: tauri::State<'_, SqlitePool>,
     path: String,
 ) -> CommandResult<CalendarInviteDto> {
+    // Paths arrive from "Open with Satchel", which grants them as it buffers them.
+    state.read_grants.file(std::path::Path::new(&path))?;
     crate::commands::file_limits::guard_import_size(std::path::Path::new(&path)).await?;
     let bytes = tokio::fs::read(&path).await.map_err(|error| {
         tracing::warn!(%error, %path, "calendar file could not be read");

@@ -168,6 +168,24 @@ fn the_tray_popover_stays_at_its_four_commands() {
     );
 }
 
+/// Tauri delivers an event to every listener that subscribed to "any target",
+/// whatever `emit_to` names, so a window that may listen hears mail events.
+#[test]
+fn the_narrow_windows_cannot_listen_to_app_events() {
+    for capability in ["message-viewer", "tray-popover"] {
+        let listening: Vec<_> = capability_permissions(capability)
+            .into_iter()
+            .filter(|permission| {
+                permission.starts_with("core:event:") || permission.starts_with("core:default")
+            })
+            .collect();
+        assert!(
+            listening.is_empty(),
+            "{capability} can subscribe to app events: {listening:?}"
+        );
+    }
+}
+
 /// The windows running the full client are the ones allowed to have it.
 #[test]
 fn the_full_command_set_goes_only_to_full_client_windows() {
@@ -287,8 +305,6 @@ fn narrow_windows_have_only_the_resolved_commands_they_need() {
             .collect();
     let viewer = BTreeSet::from_iter(
         [
-            "plugin:event|listen",
-            "plugin:event|unlisten",
             "plugin:window|close",
             "plugin:window|set_focus",
             "plugin:dialog|save",
@@ -307,8 +323,6 @@ fn narrow_windows_have_only_the_resolved_commands_they_need() {
     );
     let tray = BTreeSet::from_iter(
         [
-            "plugin:event|listen",
-            "plugin:event|unlisten",
             "plugin:window|hide",
             "plugin:window|set_focus",
             "tray_snapshot",
@@ -333,8 +347,9 @@ fn narrow_windows_have_only_the_resolved_commands_they_need() {
                 .map(|(command, _)| command.clone())
                 .collect::<BTreeSet<_>>();
             assert_eq!(&commands, expected, "resolved ACL for {label} on {target}");
-            assert!(!commands.contains("plugin:event|emit"));
-            assert!(!commands.contains("plugin:event|emit_to"));
+            assert!(!commands
+                .iter()
+                .any(|command| command.starts_with("plugin:event|")));
         }
     }
 }
