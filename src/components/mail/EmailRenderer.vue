@@ -488,6 +488,7 @@ const hasPgpSegments = computed(() =>
           :allow-remote-images="imagesEffectivelyAllowed"
           :zoom="settings.readerZoom"
           :flush="ui.isMobile"
+          :frameless="viewMode === 'auto-dark'"
           @open-link="requestExternalLink"
           @link-hover="handleLinkHover"
         />
@@ -708,8 +709,13 @@ const hasPgpSegments = computed(() =>
   }
 }
 
+/* The adapted view has no sheet to draw: the document lies on the reader's
+   surface, and its text starts on the same line as the sender's name (the
+   frame's inner gutter goes with it, see IsolatedEmailDocument `frameless`).
+   A transparent border would still have set the text one pixel in. */
 .html-document-shell--auto-dark {
-  border-color: transparent;
+  border: 0;
+  border-radius: 0;
   background: var(--bg-surface);
 }
 
