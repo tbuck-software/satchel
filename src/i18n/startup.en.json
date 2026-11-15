@@ -181,8 +181,8 @@
       "decryptedAttachmentUnavailable": "This attachment comes from an encrypted message, and its decrypted copy is no longer stored. Open the message to decrypt it again.",
       "desktopUnavailable": "The desktop backend is unavailable. Start Satchel with `pnpm tauri:dev`.",
       "directorySelectionUnavailable": "Folder selection is not available on this platform.",
-      "draftChangedElsewhere": "This draft was changed in another window. Your text here is not saved.",
-      "draftGoneElsewhere": "This draft was sent or discarded in another window. Your text here is not saved.",
+      "draftChangedElsewhere": "This draft was changed elsewhere, so your latest edits are not saved yet.",
+      "draftGoneElsewhere": "This draft was sent or deleted elsewhere, so your latest edits are not saved yet.",
       "draftSendPending": "This draft has an active send. Open it from Drafts to cancel sending before editing.",
       "draftSyncQueueInvalid": "The saved draft sync request is invalid.",
       "draftSyncTimedOut": "The provider did not finish syncing the draft in time.",
@@ -757,6 +757,9 @@
     "viewList": "List"
   },
   "mail": {
+    "attachment": {
+      "attachment": "Attachment"
+    },
     "message": {
       "source": "Source",
       "sourceTitle": "Show the headers and raw data of this message"

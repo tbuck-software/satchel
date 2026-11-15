@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import AppButton from '@/components/ui/AppButton.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
+import IconButton from '@/components/ui/IconButton.vue';
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { BackendOutgoingAttachment } from '@/types/composer';
@@ -37,6 +39,13 @@ const visibleAttachments = computed(() =>
 );
 
 const usedBytes = computed(() => attachmentsSize(props.modelValue));
+
+/** The extension as a short badge, so a row of chips still tells mail from image. */
+function fileKind(filename: string): string {
+  const dot = filename.lastIndexOf('.');
+  const extension = dot > 0 ? filename.slice(dot + 1) : '';
+  return /^[a-z0-9]{1,4}$/i.test(extension) ? extension.toUpperCase() : '·';
+}
 
 async function readFile(file: File, alreadyUsed: number): Promise<BackendOutgoingAttachment | null> {
   if (file.size > MAX_BYTES) {
@@ -175,19 +184,21 @@ defineExpose({ openPicker: onPick });
       <span>{{ $t('mail.attachment.dropHere') }}</span>
       <AppButton class="link" @click="onPick" variant="link" size="sm">{{ $t('mail.attachment.chooseFile') }}</AppButton>
     </div>
-    <div v-else class="list">
-      <div v-for="entry in visibleAttachments" :key="entry.index" class="item">
+    <!-- Chips, not full-width rows: four forwarded mails used to take most of
+         the composer's height and left two lines to write in. -->
+    <ul v-else class="list">
+      <li v-for="entry in visibleAttachments" :key="entry.index" class="item" :title="entry.attachment.filename">
+        <span class="kind" aria-hidden="true">{{ fileKind(entry.attachment.filename) }}</span>
         <span class="name">{{ entry.attachment.filename }}</span>
         <span class="size">{{ formatBytes(encodedSize(entry.attachment)) }}</span>
-        <span v-if="entry.attachment.inline" class="mode">{{ $t('mail.attachment.inline') }}</span>
         <AppButton
           v-if="props.inlineEnabled && entry.attachment.inline"
-          class="inline"
+          class="mode"
           :title="$t('mail.attachment.useAsAttachment')"
           @click="moveToAttachment(entry.index)"
           variant="link"
           size="sm"
-        >{{ $t('mail.attachment.attachment') }}</AppButton>
+        >{{ $t('mail.attachment.inline') }}</AppButton>
         <AppButton
           v-else-if="props.inlineEnabled && entry.attachment.mime_type.startsWith('image/')"
           class="inline"
@@ -196,10 +207,20 @@ defineExpose({ openPicker: onPick });
           variant="link"
           size="sm"
         >{{ $t('mail.attachment.inline') }}</AppButton>
-        <AppButton class="remove" @click="remove(entry.index)" variant="link" size="sm">{{ $t('common.remove') }}</AppButton>
-      </div>
-      <AppButton class="add" @click="onPick" variant="link" size="sm">{{ $t('mail.attachment.moreFiles') }}</AppButton>
-    </div>
+        <IconButton
+          class="remove"
+          size="sm"
+          tone="danger"
+          :title="$t('mail.attachment.removeNamed', { name: entry.attachment.filename })"
+          @click="remove(entry.index)"
+        >
+          <AppIcon size="sm"><path d="m4.5 4.5 7 7M11.5 4.5l-7 7" /></AppIcon>
+        </IconButton>
+      </li>
+      <li class="add-item">
+        <AppButton class="add" @click="onPick" variant="link" size="sm">{{ $t('mail.attachment.moreFiles') }}</AppButton>
+      </li>
+    </ul>
     <p v-if="errorText" class="error">{{ errorText }}</p>
     <input ref="fileInput" type="file" multiple style="display: none" @change="onChange" />
   </div>
@@ -227,24 +248,47 @@ defineExpose({ openPicker: onPick });
   font-size: var(--font-size-sm);
 }
 
+/* A grid of equal chips: two side by side in the floating composer, more on
+   a wide page, each as wide as its column allows. */
 .list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 13rem), 1fr));
+  align-items: center;
+  gap: var(--space-xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  background: var(--bg-raised);
-  padding: 6px 10px;
+  gap: var(--space-xs);
+  min-width: 0;
+  height: 30px;
+  padding: 0 2px 0 4px;
+  border: 1px solid var(--border-color-muted);
   border-radius: var(--radius-sm);
+  background: var(--bg-raised);
   font-size: var(--font-size-sm);
 }
 
+.kind {
+  flex: none;
+  min-width: 30px;
+  padding: 1px 4px;
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
+  color: var(--accent-primary);
+  font-size: var(--font-size-3xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.02em;
+  text-align: center;
+}
+
 .name {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -252,20 +296,27 @@ defineExpose({ openPicker: onPick });
 }
 
 .size {
+  flex: none;
   color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.item :deep(.inline),
+.item :deep(.mode) {
+  flex: none;
   font-size: var(--font-size-xs);
 }
 
-.mode {
+.item :deep(.mode) {
   border-radius: var(--radius-full);
   background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
-  color: var(--accent-primary);
-  font-size: var(--font-size-3xs);
-  line-height: 18px;
-  padding: 0 7px;
+  padding-inline: 7px;
 }
 
-.add { align-self:flex-start; }
+.remove { flex: none; }
+
+.add-item { display: inline-flex; }
 
 .error {
   margin: 6px 0 0;

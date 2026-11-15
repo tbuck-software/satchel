@@ -53,6 +53,7 @@
       "previewUnavailable": "No preview available for {mime}.",
       "quickLookFailed": "Could not open Quick Look: {error}",
       "readFailed": "“{name}” could not be read.",
+      "removeNamed": "Remove {name}",
       "save": "Save attachment",
       "saveEllipsis": "Save…",
       "saveFailed": "Could not save the attachment: {error}",
