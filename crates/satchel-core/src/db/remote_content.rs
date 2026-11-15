@@ -357,7 +357,7 @@ pub const MAX_CACHE_NAME_BYTES: usize = 120;
 
 pub fn safe_filename(value: &str) -> String {
     // Every branch yields ASCII, so byte and char lengths agree below.
-    let sanitized = crate::utils::filename::strip_filename_controls(value)
+    let sanitized = crate::utils::filename::safe_attachment_name(value)
         .chars()
         .map(|ch| {
             if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {

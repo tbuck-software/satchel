@@ -59,6 +59,9 @@
       "showInFolder": "Im Ordner zeigen",
       "tooLarge": "„{name}\" ist größer als {limit}.",
       "totalExceeded": "Gesamtgröße überschritten: „{name}\" passt nicht mehr in das Limit von {limit} (bereits {used} belegt).",
+      "unknownTypeBody": "Satchel kennt den Dateityp .{extension} nicht. Beim Öffnen übergibt Satchel die Datei dem Betriebssystem, das sie womöglich ausführt. Prüfe unten den vollständigen Namen, bevor du entscheidest.",
+      "unknownTypeNoExtensionBody": "Diese Datei hat keine Endung, Satchel kann also nicht erkennen, was sie ist. Beim Öffnen übergibt Satchel sie dem Betriebssystem, das sie womöglich ausführt.",
+      "unknownTypeTitle": "Diesen Anhang öffnen?",
       "useAsAttachment": "Bild als normalen Anhang verwenden",
       "viewInSatchel": "In Satchel ansehen",
       "viewInSatchelNamed": "{filename} in Satchel ansehen"

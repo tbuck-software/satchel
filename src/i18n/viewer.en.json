@@ -59,6 +59,9 @@
       "showInFolder": "Show in folder",
       "tooLarge": "“{name}” is larger than {limit}.",
       "totalExceeded": "Total size exceeded: “{name}” no longer fits the {limit} budget ({used} already in use).",
+      "unknownTypeBody": "Satchel does not know the file type .{extension}. Opening it hands it to the operating system, which may run it. Check the full name below before you decide.",
+      "unknownTypeNoExtensionBody": "This file has no extension, so Satchel cannot tell what it is. Opening it hands it to the operating system, which may run it.",
+      "unknownTypeTitle": "Open this attachment?",
       "useAsAttachment": "Send image as a regular attachment",
       "viewInSatchel": "View in Satchel",
       "viewInSatchelNamed": "View {filename} in Satchel"

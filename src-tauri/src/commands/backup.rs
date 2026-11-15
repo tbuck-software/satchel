@@ -1526,7 +1526,7 @@ async fn import_parsed_message_inner(
         )
         .bind(&cached.id)
         .bind(&message_id)
-        .bind(cached.filename.as_deref().map(satchel_core::utils::filename::strip_filename_controls))
+        .bind(cached.filename.as_deref().map(satchel_core::utils::filename::safe_attachment_name))
         .bind(&cached.content_type)
         .bind(cached.size)
         .bind(cached.content_id.as_deref())
