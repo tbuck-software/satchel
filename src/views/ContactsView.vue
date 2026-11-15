@@ -24,6 +24,7 @@ import { useThreadsStore } from '@/stores/threads';
 import { useComposerStore } from '@/stores/composer';
 import { useI18n } from 'vue-i18n';
 import { startContactDrag } from '@/utils/contactDrag';
+import { contactFallbackName, contactLabel, isContactEmail } from '@/utils/contactIdentity';
 
 interface ContactRow {
   email: string;
@@ -56,10 +57,10 @@ const rowsByEmail = computed(() => {
 
   for (const contact of addressBook.contacts) {
     const email = contact.email.trim().toLowerCase();
-    if (!email) continue;
+    if (!isContactEmail(email)) continue;
     rows.set(email, {
-      email: contact.email,
-      name: contact.display_name?.trim() || contact.email,
+      email,
+      name: contactLabel(contact.display_name, email),
       context: contact.notes?.trim() || '',
       meta: t('contacts.meta.addressBook'),
       pinned: settings.pinnedContacts.includes(email),
@@ -68,11 +69,13 @@ const rowsByEmail = computed(() => {
 
   for (const contact of frequentContacts.value) {
     const email = contact.email.trim().toLowerCase();
-    if (!email) continue;
+    if (!isContactEmail(email)) continue;
     const previous = rows.get(email);
     rows.set(email, {
-      email: contact.email,
-      name: previous?.name && previous.name !== previous.email ? previous.name : contact.name,
+      email,
+      name: previous?.name && previous.name !== contactFallbackName(email)
+        ? previous.name
+        : contactLabel(contact.name, email),
       context: previous?.context || contact.previewText,
       meta: t('contacts.meta.conversations', contact.threadCount),
       pinned: settings.pinnedContacts.includes(email),
@@ -80,10 +83,11 @@ const rowsByEmail = computed(() => {
   }
 
   for (const pinnedEmail of settings.pinnedContacts) {
-    if (rows.has(pinnedEmail)) continue;
-    rows.set(pinnedEmail, {
-      email: pinnedEmail,
-      name: pinnedEmail,
+    const email = pinnedEmail.trim().toLowerCase();
+    if (!isContactEmail(email) || rows.has(email)) continue;
+    rows.set(email, {
+      email,
+      name: contactFallbackName(email),
       context: '',
       meta: t('contacts.meta.pinned'),
       pinned: true,
@@ -260,6 +264,7 @@ function openContact(email: string) {
             v-for="contact in group.contacts"
             class="contact-row"
             :key="contact.email"
+            :title="[contact.name, contact.email, contact.context].filter(Boolean).join('\n')"
             :draggable="!ui.isMobile"
             @dragstart="startContactDrag($event, [{ email: contact.email, name: contact.name }])"
             @click="openContact(contact.email)"
@@ -267,10 +272,7 @@ function openContact(email: string) {
             <Avatar :name="contact.name" :email="contact.email" :size="36" />
             <span class="copy">
               <strong>{{ contact.name }}</strong>
-              <span v-if="contact.name.trim().toLowerCase() !== contact.email.trim().toLowerCase()">
-                {{ contact.email }}
-              </span>
-              <span v-if="contact.context" class="context">{{ contact.context }}</span>
+              <span class="contact-email">{{ contact.email }}</span>
             </span>
             <span v-if="contact.pinned || showSource" class="row-meta">
               <span v-if="contact.pinned" :aria-label="t('nav.contactPinned')">
@@ -385,11 +387,6 @@ function openContact(email: string) {
   font-weight: var(--weight-medium);
 }
 
-.copy .context {
-  color: var(--text-tertiary);
-  font-size: var(--font-size-xs);
-}
-
 .row-meta {
   display: inline-flex;
   align-items: center;
@@ -401,25 +398,16 @@ function openContact(email: string) {
   font-size: var(--font-size-xs);
   font-weight: var(--weight-regular);
   text-align: right;
-  overflow-wrap: anywhere;
+}
+
+.source-tag {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .row-meta :deep(svg) {
   color: var(--accent-amber);
-}
-
-@media (max-width: 700px) {
-  .contact-group .contact-row {
-    grid-template-columns: var(--list-avatar-size) minmax(0, 1fr);
-    row-gap: var(--space-2xs);
-  }
-  .row-meta {
-    grid-column: 2;
-    justify-self: start;
-    flex-wrap: wrap;
-    justify-content: flex-start;
-    margin-left: 0;
-    text-align: left;
-  }
 }
 </style>

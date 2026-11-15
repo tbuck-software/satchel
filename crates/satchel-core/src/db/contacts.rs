@@ -9,6 +9,8 @@ use std::fmt::Write as _;
 use sqlx::{FromRow, SqlitePool};
 use thiserror::Error;
 
+use crate::utils::mime::clean_mailbox_display_name;
+
 const CONTACT_LIST_LIMIT: i64 = 500;
 const AVATAR_TARGET_LIMIT: i64 = 500;
 const FALLBACK_AVATAR_TARGET_LIMIT: i64 = 300;
@@ -143,6 +145,7 @@ impl<'a> ContactRepository<'a> {
         ))
         .fetch_all(self.pool)
         .await
+        .map(|rows| rows.into_iter().filter_map(directory_contact).collect())
         .map_err(Into::into)
     }
 
@@ -165,6 +168,7 @@ impl<'a> ContactRepository<'a> {
         .bind(limit)
         .fetch_all(self.pool)
         .await
+        .map(|rows| rows.into_iter().filter_map(directory_contact).collect())
         .map_err(Into::into)
     }
 
@@ -298,22 +302,21 @@ impl<'a> ContactRepository<'a> {
 
     /// Best-effort caller operation: malformed addresses deliberately do
     /// nothing, while a database failure remains observable to the caller for
-    /// structured diagnostics.
+    /// structured diagnostics. Mail traffic only fills a missing display name;
+    /// an existing name is replaced through profile or address-book operations.
     pub async fn touch(&self, email: &str, display_name: Option<&str>) -> Result<(), ContactError> {
         let Some(email) = normalize_email(email) else {
             return Ok(());
         };
         let now = chrono::Utc::now().to_rfc3339();
         let id = format!("contact-{}", uuid::Uuid::new_v4());
-        let display_name = display_name
-            .map(|value| value.to_owned())
-            .and_then(|value| clean_optional(Some(value)));
+        let display_name = display_name.and_then(clean_mailbox_display_name);
 
         sqlx::query(
             "INSERT INTO contacts (id, email, display_name, avatar_url, frequency, last_contacted, notes, created_at, updated_at)
              VALUES (?, ?, ?, NULL, 1, ?, NULL, ?, ?)
              ON CONFLICT(email) DO UPDATE SET
-                display_name = COALESCE(excluded.display_name, contacts.display_name),
+                display_name = COALESCE(contacts.display_name, excluded.display_name),
                 frequency = contacts.frequency + 1,
                 last_contacted = excluded.last_contacted,
                 updated_at = excluded.updated_at",
@@ -488,7 +491,7 @@ pub async fn touch_contacts_tx(
         };
         let entry = touches.entry(email).or_default();
         entry.1 += 1;
-        if let Some(name) = name.and_then(|value| clean_optional(Some(value.to_owned()))) {
+        if let Some(name) = name.and_then(clean_mailbox_display_name) {
             entry.0 = Some(name);
         }
     }
@@ -507,24 +510,37 @@ pub async fn touch_contacts_tx(
                 .push_bind(&now)
                 .push_bind(&now);
         });
-        query.push(" ON CONFLICT(email) DO UPDATE SET display_name = COALESCE(excluded.display_name, contacts.display_name), frequency = contacts.frequency + excluded.frequency, last_contacted = excluded.last_contacted, updated_at = excluded.updated_at");
+        query.push(" ON CONFLICT(email) DO UPDATE SET display_name = COALESCE(contacts.display_name, excluded.display_name), frequency = contacts.frequency + excluded.frequency, last_contacted = excluded.last_contacted, updated_at = excluded.updated_at");
         query.build().execute(&mut **tx).await?;
     }
     Ok(())
 }
 
+/// Contact mailboxes exclude URI values and inline-image filenames that happen to contain `@`.
 pub fn normalize_email(value: &str) -> Option<String> {
     let cleaned = value.trim().trim_matches(['<', '>']).to_ascii_lowercase();
-    if cleaned.contains('@') {
-        Some(cleaned)
-    } else {
-        None
+    let address = cleaned.parse::<lettre::Address>().ok()?;
+    let extension = address.domain().rsplit('.').next().unwrap_or_default();
+    if matches!(
+        extension,
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "ico" | "bmp" | "tif" | "tiff"
+    ) {
+        return None;
     }
+    Some(cleaned)
 }
 
 fn normalize_carddav_email(value: &str) -> Option<String> {
-    let cleaned = value.trim().to_ascii_lowercase();
-    cleaned.contains('@').then_some(cleaned)
+    normalize_email(value)
+}
+
+fn directory_contact(mut contact: ContactRecord) -> Option<ContactRecord> {
+    contact.email = normalize_email(&contact.email)?;
+    contact.display_name = contact
+        .display_name
+        .as_deref()
+        .and_then(clean_mailbox_display_name);
+    Some(contact)
 }
 
 pub fn clean_optional(value: Option<String>) -> Option<String> {
@@ -917,6 +933,71 @@ mod tests {
                 .as_deref(),
             Some("locked")
         );
+    }
+
+    #[tokio::test]
+    async fn directory_reads_hide_legacy_inline_images_and_clean_escaped_names() {
+        let pool = pool().await;
+        let repo = ContactRepository::new(&pool);
+        for (email, name) in [
+            ("logo@2x.png", None),
+            ("data:image/png;base64,abc@def.png", None),
+            (
+                "person@example.test",
+                Some(r#"\\"Morgan, Alex\\"" (via Mailing List)"#),
+            ),
+        ] {
+            sqlx::query("INSERT INTO contacts (id, email, display_name, frequency, created_at, updated_at) VALUES (?, ?, ?, 1, '2026-01-01', '2026-01-01')")
+                .bind(email).bind(email).bind(name).execute(&pool).await.unwrap();
+        }
+        let rows = repo.list().await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].display_name.as_deref(),
+            Some("Morgan, Alex (via Mailing List)")
+        );
+        assert!(repo.search("png", None).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn message_touches_preserve_saved_names_and_reject_inline_images() {
+        let pool = pool().await;
+        let repo = ContactRepository::new(&pool);
+        let mut profile = input("person@example.test");
+        profile.display_name = Some("Alex Morgan".into());
+        repo.upsert(profile).await.unwrap();
+        repo.touch("person@example.test", Some("(über Google Docs)"))
+            .await
+            .unwrap();
+        assert_eq!(
+            repo.get_by_email("person@example.test")
+                .await
+                .unwrap()
+                .display_name
+                .as_deref(),
+            Some("Alex Morgan")
+        );
+        let mut tx = pool.begin().await.unwrap();
+        touch_contacts_tx(
+            &mut tx,
+            &[
+                ("person@example.test", Some("(über Google Docs)")),
+                ("signature@2x.png", None),
+                ("data:image/png;base64,abc@def.png", None),
+            ],
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+        assert_eq!(
+            repo.get_by_email("person@example.test")
+                .await
+                .unwrap()
+                .display_name
+                .as_deref(),
+            Some("Alex Morgan")
+        );
+        assert_eq!(repo.list().await.unwrap().len(), 1);
     }
 
     #[tokio::test]
