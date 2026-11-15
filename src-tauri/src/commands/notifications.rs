@@ -361,9 +361,38 @@ pub async fn record_android_worker_outcomes(
 pub const MAIL_ACTION_TYPE: &str = "satchel.mail";
 /// Group key so a morning's mail stacks instead of filling the shade.
 pub const MAIL_GROUP: &str = "satchel.mail.incoming";
+/// Freedesktop notification servers read the body as markup (the summary is
+/// plain text), and the plugin passes it through unescaped.
+fn notification_body(text: &str) -> String {
+    if cfg!(any(
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    )) {
+        escape_body_markup(text)
+    } else {
+        text.to_string()
+    }
+}
+
+fn escape_body_markup(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            other => escaped.push(other),
+        }
+    }
+    escaped
+}
+
 pub fn show_notification(app: &AppHandle, title: &str, body: &str) {
     let title = decode_html_entities(title);
-    let body = decode_html_entities(body);
+    let body = notification_body(&decode_html_entities(body));
     if let Err(err) = app
         .notification()
         .builder()
@@ -463,6 +492,7 @@ pub async fn show_mail_notification(
             }
         };
 
+        let body = notification_body(&body);
         // The category the frontend registered its actions under, the thread id the
         // action needs to act on, and a group so the system stacks a morning's mail
         // instead of listing it. Ignored by backends that do not support them.
@@ -1193,6 +1223,20 @@ async fn set_setting(pool: &SqlitePool, key: &str, value: &str, now: &str) -> Re
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn notification_body_markup_is_escaped_after_entity_decoding() {
+        let decoded = super::decode_html_entities("&lt;a href=x&gt;Tom &amp; Jerry&lt;/a&gt;");
+        assert_eq!(
+            super::escape_body_markup(&decoded),
+            "&lt;a href=x&gt;Tom &amp; Jerry&lt;/a&gt;"
+        );
+        assert_eq!(super::escape_body_markup("Größe 5 € "), "Größe 5 € ");
+        #[cfg(target_os = "linux")]
+        assert_eq!(super::notification_body("<b>x</b>"), "&lt;b&gt;x&lt;/b&gt;");
+        #[cfg(target_os = "macos")]
+        assert_eq!(super::notification_body("<b>x</b>"), "<b>x</b>");
+    }
+
     use super::*;
     use satchel_core::db::blocked_senders::BlockedSenderRepository;
     use sqlx::sqlite::SqlitePoolOptions;
