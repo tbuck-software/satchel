@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import IconButton from '@/components/ui/IconButton.vue';
@@ -7,9 +7,6 @@ import { useMailSync } from '@/composables/useMailSync';
 import { useConnectionStore } from '@/stores/connection';
 import { useOutboxStore } from '@/stores/outbox';
 import { formatListTime } from '@/utils/listTime';
-
-const SPIN_MS = 1000;
-const SPIN_DELAY_MS = 1000;
 
 const SyncFailures = defineAsyncComponent(() => import('./SyncFailures.vue'));
 const failuresOpen = ref(false);
@@ -24,23 +21,14 @@ const canInspect = computed(() => syncing.value || hasHistory.value);
 // A history import holds `syncing` for hours; its progress line says enough.
 const spinWanted = computed(() => syncing.value && !hasHistory.value);
 const spinning = ref(false);
-let stopFallback: ReturnType<typeof setTimeout> | undefined;
+// Start after a second, so queue work (an archive, a send) does not flash it. Stop
+// with the turn in progress, or after 1.1 s under reduced motion (one 1 ms turn).
 watch(spinWanted, (wanted, _previous, onCleanup) => {
-  clearTimeout(stopFallback);
-  if (!wanted) {
-    // Normally the turn in progress ends it; reduced motion runs a single 1 ms turn.
-    if (spinning.value) stopFallback = setTimeout(() => { spinning.value = false; }, SPIN_MS + 100);
-    return;
-  }
-  // Queue work (an archive, a send) holds `syncing` for a moment; don't flash for it.
-  const timer = setTimeout(() => { spinning.value = true; }, SPIN_DELAY_MS);
+  const timer = setTimeout(() => { spinning.value = wanted; }, wanted ? 1000 : 1100);
   onCleanup(() => clearTimeout(timer));
 }, { immediate: true });
-onBeforeUnmount(() => clearTimeout(stopFallback));
 function finishTurn() {
-  if (spinWanted.value) return;
-  clearTimeout(stopFallback);
-  spinning.value = false;
+  if (!spinWanted.value) spinning.value = false;
 }
 
 const outbox = useOutboxStore();

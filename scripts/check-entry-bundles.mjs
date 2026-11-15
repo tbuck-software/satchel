@@ -109,9 +109,12 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
  * labels to first paint; the status sheet and its actions load on demand.
  * Viewer 130 KiB since 2026-11-15: the remote image blocker moved onto the
  * parsed mail document and gained a CSS allowlist (escaped names, image-set
- * strings), which the viewer renders with too; it measures 129.0 KiB. */
+ * strings), which the viewer renders with too; it measures 129.0 KiB.
+ * Main entry 108 KiB since 2026-11-15: the header sync button turns while a
+ * sync runs, instead of a footer line (+107 B); main measured 109,537 B, 31 B
+ * under the old 107 KiB. */
 const budgets = {
-  'index.html': { entryGzip: 107 * 1024, initialGzip: 215 * 1024, locales: ['src/i18n/startup.en.json', 'src/i18n/startup.de.json'] },
+  'index.html': { entryGzip: 108 * 1024, initialGzip: 215 * 1024, locales: ['src/i18n/startup.en.json', 'src/i18n/startup.de.json'] },
   'tray.html': { entryGzip: 5 * 1024, initialGzip: 75 * 1024, locales: ['src/i18n/tray.en.json', 'src/i18n/tray.de.json'] },
   'viewer.html': { entryGzip: 5 * 1024, initialGzip: 130 * 1024, locales: ['src/i18n/viewer.en.json', 'src/i18n/viewer.de.json'] },
 };
