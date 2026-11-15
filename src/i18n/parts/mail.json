@@ -312,6 +312,14 @@
       "unsubscribe": {
         "action": "Unsubscribe",
         "banner": "Newsletter — unsubscribe in one click",
+        "confirm": {
+          "body": "This newsletter unsubscribes by email. Satchel sends this message from your account:",
+          "message": "Message",
+          "send": "Send unsubscribe email",
+          "subject": "Subject",
+          "title": "Send an unsubscribe email?",
+          "to": "To"
+        },
         "failed": "Unsubscribe failed: {error}",
         "sending": "Sending…",
         "success": "Unsubscribed via {method}"
@@ -665,6 +673,14 @@
       "unsubscribe": {
         "action": "Abmelden",
         "banner": "Newsletter — mit einem Klick abmelden",
+        "confirm": {
+          "body": "Dieser Newsletter meldet per E-Mail ab. Satchel sendet diese Nachricht von deinem Konto:",
+          "message": "Nachricht",
+          "send": "Abmelde-E-Mail senden",
+          "subject": "Betreff",
+          "title": "Abmelde-E-Mail senden?",
+          "to": "An"
+        },
         "failed": "Abmelden fehlgeschlagen: {error}",
         "sending": "Sende…",
         "success": "Abgemeldet via {method}"

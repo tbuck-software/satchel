@@ -591,7 +591,9 @@
       "trayThreadInvalid": "Diese Tray-E-Mail-Referenz ist ungültig.",
       "unexpected": "Ein unerwarteter Backend-Fehler ist aufgetreten.",
       "unsubscribeBrowserOpenFailed": "Die Abmeldeseite konnte nicht geöffnet werden: {message}",
+      "unsubscribeConfirmationStale": "Die Abmelde-Mail entspricht nicht mehr dem, was bestätigt wurde. Es wurde nichts gesendet.",
       "unsubscribeHeaderMissing": "Diese E-Mail enthält keine Abmeldeadresse.",
+      "unsubscribeMailtoInvalid": "Die Abmeldeadresse dieser E-Mail ist keine einzelne gültige Adresse. Satchel sendet nicht an sie.",
       "unsubscribeMessageNotFound": "Diese E-Mail ist nicht mehr verfügbar.",
       "unsubscribeNoTarget": "Diese E-Mail enthält keine verwendbare Abmeldeadresse.",
       "unsubscribePostFailed": "Die Abmeldung ist fehlgeschlagen: {message}",
@@ -1862,6 +1864,14 @@
     "unsubscribe": {
       "action": "Abmelden",
       "banner": "Newsletter — mit einem Klick abmelden",
+      "confirm": {
+        "body": "Dieser Newsletter meldet per E-Mail ab. Satchel sendet diese Nachricht von deinem Konto:",
+        "message": "Nachricht",
+        "send": "Abmelde-E-Mail senden",
+        "subject": "Betreff",
+        "title": "Abmelde-E-Mail senden?",
+        "to": "An"
+      },
       "failed": "Abmelden fehlgeschlagen: {error}",
       "sending": "Sende…",
       "success": "Abgemeldet via {method}"

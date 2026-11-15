@@ -591,7 +591,9 @@
       "trayThreadInvalid": "This tray email reference is invalid.",
       "unexpected": "An unexpected backend error occurred.",
       "unsubscribeBrowserOpenFailed": "The unsubscribe page could not be opened: {message}",
+      "unsubscribeConfirmationStale": "The unsubscribe mail no longer matches what was confirmed. Nothing was sent.",
       "unsubscribeHeaderMissing": "This email carries no unsubscribe address.",
+      "unsubscribeMailtoInvalid": "The unsubscribe address in this email is not a single valid address. Satchel will not send to it.",
       "unsubscribeMessageNotFound": "This email is no longer available.",
       "unsubscribeNoTarget": "This email carries no usable unsubscribe address.",
       "unsubscribePostFailed": "The unsubscribe request failed: {message}",
@@ -1862,6 +1864,14 @@
     "unsubscribe": {
       "action": "Unsubscribe",
       "banner": "Newsletter — unsubscribe in one click",
+      "confirm": {
+        "body": "This newsletter unsubscribes by email. Satchel sends this message from your account:",
+        "message": "Message",
+        "send": "Send unsubscribe email",
+        "subject": "Subject",
+        "title": "Send an unsubscribe email?",
+        "to": "To"
+      },
       "failed": "Unsubscribe failed: {error}",
       "sending": "Sending…",
       "success": "Unsubscribed via {method}"

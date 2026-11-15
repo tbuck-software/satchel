@@ -14,7 +14,9 @@ const harness = vi.hoisted(() => ({
   replace: vi.fn(),
   query: {} as Record<string, string>,
   sweepSender: vi.fn(async () => 1),
-  unsubscribe: vi.fn(async () => ({ method: 'http-one-click', target: 'https://shop.example/u' })),
+  unsubscribe: vi.fn<(id: string, mail?: unknown) => Promise<{ method: string; target: string; confirm_mail: unknown }>>(
+    async () => ({ method: 'http-one-click', target: 'https://shop.example/u', confirm_mail: null }),
+  ),
   senders: [] as BackendCleanupSender[],
   listInputs: [] as unknown[],
 }));
@@ -148,6 +150,43 @@ describe('cleanup view', () => {
 
     press('R');
     expect(useSenderSweep().state.request).toMatchObject({ email: 'news@shop.example', focus: 'rule' });
+  });
+
+  it('sends a mailto unsubscribe only after the exact mail is confirmed', async () => {
+    const mail = { to: 'leave@shop.example', subject: 'unsub-token', body: 'unsubscribe' };
+    harness.unsubscribe
+      .mockResolvedValueOnce({ method: 'mailto', target: mail.to, confirm_mail: mail })
+      .mockResolvedValueOnce({ method: 'mailto', target: mail.to, confirm_mail: null });
+    const wrapper = await mountView();
+
+    press('U');
+    await flushPromises();
+
+    expect(confirms.asked).toHaveBeenCalledTimes(1);
+    expect(confirms.asked.mock.calls[0]![0].fields).toEqual([
+      { label: 'To', value: 'leave@shop.example' },
+      { label: 'Subject', value: 'unsub-token' },
+      { label: 'Message', value: 'unsubscribe' },
+    ]);
+    expect(harness.unsubscribe).toHaveBeenNthCalledWith(1, 'm-1');
+    expect(harness.unsubscribe).toHaveBeenNthCalledWith(2, 'm-1', mail);
+    expect(wrapper.text()).toContain('Unsubscribed');
+  });
+
+  it('sends nothing when the mailto unsubscribe is declined', async () => {
+    confirms.reply(false);
+    harness.unsubscribe.mockResolvedValueOnce({
+      method: 'mailto', target: 'leave@shop.example',
+      confirm_mail: { to: 'leave@shop.example', subject: 'unsubscribe', body: 'unsubscribe' },
+    });
+    const wrapper = await mountView();
+
+    press('U');
+    await flushPromises();
+
+    expect(confirms.asked).toHaveBeenCalledTimes(1);
+    expect(harness.unsubscribe).toHaveBeenCalledTimes(1);
+    expect(wrapper.find('.cleanup-row').text()).not.toContain('Unsubscribed');
   });
 
   it('leaves the keys alone while a dialog covers the page', async () => {

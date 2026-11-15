@@ -32,6 +32,12 @@ useDismissableOnTop(
         <h2 class="confirm__title">{{ state.pending.title }}</h2>
         <p v-if="state.pending.body" class="confirm__body">{{ state.pending.body }}</p>
         <p v-if="state.pending.detail" class="confirm__detail">{{ state.pending.detail }}</p>
+        <dl v-if="state.pending.fields?.length" class="confirm__fields">
+          <template v-for="field in state.pending.fields" :key="field.label">
+            <dt>{{ field.label }}</dt>
+            <dd>{{ field.value }}</dd>
+          </template>
+        </dl>
         <footer class="confirm__actions">
           <AppButton variant="ghost" autofocus @click="answer(false)">
             {{ $t('common.cancel') }}
@@ -72,6 +78,26 @@ useDismissableOnTop(
   color: var(--text-tertiary);
   font-size: var(--font-size-xs);
   overflow-wrap: anywhere;
+}
+
+.confirm__fields {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-xs) var(--space-sm);
+  margin: 0;
+  font-size: var(--font-size-sm);
+}
+
+.confirm__fields dt {
+  color: var(--text-tertiary);
+}
+
+.confirm__fields dd {
+  max-height: 10rem;
+  margin: 0;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .confirm__actions {
