@@ -230,6 +230,23 @@ pub(crate) async fn reconcile_gmail_snapshot_deletion(
             SnapshotDeferral::PendingMutation,
         ));
     }
+    // Gmail replaces a draft's message on every update, so a missing message
+    // of a draft this device's editor wrote (`draft_revision > 0`) is an old
+    // version: the upload that replaced it may have landed between this run's
+    // draft listing and its snapshot. The draft itself lives on under its
+    // draft id; it only loses the stale message reference, and the next draft
+    // listing attaches the current one. Deleting it here took the draft out
+    // from under an open composer.
+    sqlx::query(
+        "UPDATE messages SET remote_id = NULL, remote_uid = NULL
+         WHERE account_id = ? AND remote_id = ? AND is_draft = 1 AND draft_revision > 0
+           AND NULLIF(TRIM(remote_draft_id), '') IS NOT NULL",
+    )
+    .bind(account_id)
+    .bind(remote_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| error.to_string())?;
     let rows: Vec<(String, String)> =
         sqlx::query_as("SELECT id, thread_id FROM messages WHERE account_id = ? AND remote_id = ?")
             .bind(account_id)
@@ -711,5 +728,78 @@ mod tests {
             .expect("remaining attachments");
         assert_eq!(remaining, vec!["copy-sent"]);
         assert_eq!(attachments, 0);
+    }
+
+    /// Gmail gives a draft a new message on every update. The sync ingests
+    /// message A into the draft the composer is editing, the next autosave
+    /// uploads and replaces A with B, and the snapshot later in the same run
+    /// finds A gone. That is an old version, not the draft: deleting the row
+    /// made the composer's next save fail with "sent or discarded elsewhere".
+    #[tokio::test]
+    async fn a_superseded_message_does_not_delete_the_draft_being_edited() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("pool");
+        sqlx::migrate!("../crates/satchel-core/src/db/migrations")
+            .run(&pool)
+            .await
+            .expect("migrations");
+        sqlx::query(
+            "INSERT INTO accounts
+             (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+             VALUES ('account', 'Me', 'me@example.test', 'gmail', '{}', '', '', '');
+             INSERT INTO folders (id, account_id, remote_id, folder_type, name, full_path, created_at, updated_at)
+             VALUES ('drafts', 'account', 'DRAFT', 'drafts', 'DRAFT', 'DRAFT', '', '')",
+        )
+        .execute(&pool)
+        .await
+        .expect("fixture");
+        // `draft-local`: written by this device's editor (revision 2), last
+        // seen on the server as message `version-a`. `provider-draft`: another
+        // client's draft, never edited here. `plain`: an ordinary message.
+        for (id, remote_id, remote_draft_id, is_draft, revision) in [
+            ("draft-local", "version-a", Some("r-local"), 1, 2),
+            ("provider-draft", "version-p", Some("r-provider"), 1, 0),
+            ("plain", "version-m", None, 0, 0),
+        ] {
+            sqlx::query(
+                "INSERT INTO messages (id, account_id, folder_id, thread_id, remote_id, remote_draft_id, is_draft, draft_revision, from_address, to_addresses, subject, body_text, date, created_at, updated_at)
+                 VALUES (?, 'account', 'drafts', 'thread', ?, ?, ?, ?, 'me@example.test', '[]', 'Subject', 'Work in progress', '', '', '')",
+            )
+            .bind(id)
+            .bind(remote_id)
+            .bind(remote_draft_id)
+            .bind(is_draft)
+            .bind(revision)
+            .execute(&pool)
+            .await
+            .expect("message");
+        }
+
+        for remote_id in ["version-a", "version-p", "version-m"] {
+            super::reconcile_gmail_snapshot_deletion(&pool, "account", remote_id)
+                .await
+                .expect("deletion");
+        }
+
+        let remaining: Vec<(String, Option<String>, Option<String>, i64, String)> = sqlx::query_as(
+            "SELECT id, remote_id, remote_draft_id, draft_revision, body_text
+                 FROM messages ORDER BY id",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("remaining");
+        assert_eq!(
+            remaining,
+            vec![(
+                "draft-local".to_string(),
+                None,
+                Some("r-local".to_string()),
+                2,
+                "Work in progress".to_string(),
+            )],
+        );
     }
 }
