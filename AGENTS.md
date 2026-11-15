@@ -150,6 +150,12 @@ bekommen das generierte Set `allow-app-commands`. Die schmalen Fenster
 (`message-file-*`, `tray-popover`) zählen ihre Kommandos einzeln auf — das ist
 dort die Sicherheitsgrenze, nicht bloß eine Beschreibung.
 
+Ein Kommando, das einen Pfad vom Frontend schreibt, verlangt eine Freigabe aus
+`write_grants`; eines, das ihn liest (Import, Restore, Prune), eine aus
+`read_grants`. Freigaben entstehen nur in Dialogen, die das Backend selbst
+öffnet (`choose_save_path`, `choose_directory`, `choose_open_file`), oder wenn
+das Betriebssystem den Pfad übergibt („Öffnen mit“).
+
 ### Nachrichten-Viewer (`.eml` / `.msg`)
 
 Doppelklick auf eine Mail-Datei öffnet ein eigenes Fenster, nicht den Client.
@@ -161,8 +167,12 @@ Drei Teile hängen zusammen und brechen einzeln lautlos:
 - Die Fenster heißen `message-file-<hash>`. Die Capability
   `capabilities/message-viewer.json` greift über genau dieses Präfix; ein
   anderer Name lässt das Fenster ohne Rechte laufen (kein Speichern-Dialog).
-  Sie listet die sieben Kommandos auf, die der Viewer braucht — alles andere
-  ist aus diesem Fenster nicht erreichbar.
+  Sie listet die sieben App-Kommandos auf, die der Viewer braucht — alles
+  andere ist aus diesem Fenster nicht erreichbar. `import_mbox` nimmt dort nur
+  die Datei an, für die das Fenster geöffnet wurde (`ViewerFiles`, beim Bau
+  des Fensters gesetzt). Viewer und Tray-Popover haben **kein**
+  `core:event:allow-listen`: Tauri liefert ein Event an jeden Listener mit
+  Ziel „Any“, egal was `emit_to` nennt — wer hören darf, hört Mail-Events mit.
 - Der Dateipfad reist base64url-kodiert als `?p=` — Mail-Dateien heißen mit
   Leerzeichen, Umlauten und `#`.
 

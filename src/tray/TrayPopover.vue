@@ -24,7 +24,6 @@ const loading = ref(true);
 const loadError = ref('');
 const actingThreadId = ref<string | null>(null);
 const actionError = ref('');
-let focusUnlisten: (() => void) | null = null;
 let loadPromise: Promise<void> | null = null;
 
 const native = backendSupportsNativeCommands();
@@ -236,21 +235,23 @@ function onKeydown(event: KeyboardEvent) {
   void hidePopover();
 }
 
+// No backend events reach this window: its capability cannot listen. Rust hides
+// the popover when it loses focus; showing it focuses the page, which reloads.
+function onFocus() {
+  void loadSnapshot();
+}
+
+function onVisibilityChange() {
+  if (document.visibilityState === 'visible') void loadSnapshot();
+}
+
 onMounted(async () => {
   window.addEventListener('keydown', onKeydown);
   if (native) {
-    const { getCurrentWindow } = await import('@tauri-apps/api/window');
-    const currentWindow = getCurrentWindow();
-    focusUnlisten = await currentWindow.onFocusChanged(({ payload }) => {
-      if (payload) {
-        void loadSnapshot();
-      } else {
-        void currentWindow.hide();
-      }
-    });
-    // The webview is normally created hidden. If it was opened before its
-    // listener finished registering, visibility is the reliable fallback.
-    if (await currentWindow.isVisible()) await loadSnapshot();
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    // The webview is created hidden; if it was shown before mounting, load now.
+    if (document.hasFocus()) await loadSnapshot();
   } else {
     await loadSnapshot();
   }
@@ -258,7 +259,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown);
-  focusUnlisten?.();
+  window.removeEventListener('focus', onFocus);
+  document.removeEventListener('visibilitychange', onVisibilityChange);
 });
 </script>
 
