@@ -132,6 +132,16 @@ jobs:
       - name: Smoke tests
         run: pnpm run test:smoke
 
+      # Flaky attempts pass on retry and leave no trace in the log; keep their context.
+      - name: Keep smoke test output
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-output
+          path: output/playwright/smoke
+          if-no-files-found: ignore
+          retention-days: 7
+
       # Verifies the production CSP against the real build. A policy that
       # blocks the app's own assets otherwise only shows up in the desktop app.
       - name: CSP tests
