@@ -11,7 +11,7 @@
  * `status`, never `alert`: being offline is a state the user usually caused,
  * not a failure that interrupts them.
  */
-import { computed, defineAsyncComponent, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useConnectionStore } from '@/stores/connection';
 import { useOutboxStore } from '@/stores/outbox';
@@ -25,7 +25,10 @@ import { formatListTime } from '@/utils/listTime';
 const props = withDefaults(defineProps<{
   /** Drop the resting "last synced" sentence, for places that are not a footer. */
   hideIdle?: boolean;
-  /** Desktop sidebar: report progress while failures retain their existing affordances. */
+  /**
+   * Desktop sidebar: only a history import. Ordinary runs spin the header's
+   * sync button instead; failures keep their existing affordances.
+   */
   progressOnly?: boolean;
   /**
    * Show failed items as a banner with a way in, for the phone, where this
@@ -39,14 +42,6 @@ const SyncProgressDetails = defineAsyncComponent(() => import('./SyncProgressDet
 const progressOpen = ref(false);
 const connection = useConnectionStore();
 const progress = useSyncProgress();
-const slowSync = ref(false);
-// Routine polls should not make the sidebar footer jump in and out.
-watch(() => props.progressOnly && connection.syncing && !progress.history.value, (defer, _previous, onCleanup) => {
-  slowSync.value = false;
-  if (!defer) return;
-  const timer = setTimeout(() => { slowSync.value = true; }, 3000);
-  onCleanup(() => clearTimeout(timer));
-}, { immediate: true });
 let progressTrigger: HTMLElement | null = null;
 function openProgress(event: MouseEvent) {
   progressTrigger = event.currentTarget as HTMLElement;
@@ -95,7 +90,7 @@ const progressTitle = computed(() => [progress.counts.value, progress.phase.valu
 
 const visible = computed(() => {
   if (connection.syncStatus === 'error') return false;
-  if (props.progressOnly) return progress.history.value || slowSync.value;
+  if (props.progressOnly) return progress.history.value;
   return !(props.hideIdle && connection.syncStatus === 'idle' && !progress.history.value);
 });
 

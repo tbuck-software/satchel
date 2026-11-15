@@ -47,7 +47,7 @@ describe('SyncButton', () => {
     await wrapper.vm.$nextTick();
     expect(wrapper.get('button').element).toBe(button);
     expect(wrapper.get('button').attributes('aria-busy')).toBe('true');
-    expect(wrapper.get('svg').classes()).not.toContain('animate-spin');
+    expect(wrapper.get('svg').classes()).not.toContain('sync-button__icon--spinning');
     await wrapper.get('button').trigger('click');
     expect(backendRunImapSync).not.toHaveBeenCalled();
 
@@ -57,7 +57,7 @@ describe('SyncButton', () => {
     expect(wrapper.get('button').element).toBe(button);
     expect(wrapper.get('button').attributes('title')).toContain('Offline');
     expect(wrapper.get('button').attributes('disabled')).toBeDefined();
-    expect(wrapper.get('svg').classes()).not.toContain('animate-spin');
+    expect(wrapper.get('svg').classes()).not.toContain('sync-button__icon--spinning');
   });
 
   it('shares a pending click with the palette and applies the backfill summary', async () => {
@@ -110,6 +110,58 @@ describe('SyncButton', () => {
     await wrapper.get('button').trigger('click');
     await flushPromises();
     expect(backendRunImapSync).toHaveBeenCalledTimes(2);
+  });
+
+  it('spins for a run that lasts, but not for a moment of queue work or a history import', async () => {
+    vi.useFakeTimers();
+    const connection = useConnectionStore();
+    const wrapper = mountSyncButton();
+    const spinning = () => wrapper.get('svg').classes().includes('sync-button__icon--spinning');
+    try {
+      connection.syncing = true;
+      await vi.advanceTimersByTimeAsync(500);
+      expect(spinning()).toBe(false);
+      connection.syncing = false;
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(spinning()).toBe(false);
+
+      connection.syncing = true;
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(spinning()).toBe(true);
+      connection.syncing = false;
+      await wrapper.vm.$nextTick();
+      // The turn in progress finishes first.
+      expect(spinning()).toBe(true);
+      await wrapper.get('svg').trigger('animationiteration');
+      expect(spinning()).toBe(false);
+
+      connection.syncProgress = [{ account_id: 'work', account_name: 'Work', email: 'me@example.test', phase: 'folder',
+        folder: 'Archive', folder_index: 1, folder_total: 3, backfill_total: 1000, backfill_remaining: 200,
+        updated_at: '2026-11-12T12:00:00Z' }];
+      connection.syncing = true;
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(spinning()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('spins at once on a click and stops without animation events', async () => {
+    vi.useFakeTimers();
+    let finish!: (result: typeof summary) => void;
+    vi.mocked(backendRunImapSync).mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    const wrapper = mountSyncButton();
+    try {
+      await wrapper.get('button').trigger('click');
+      expect(wrapper.get('svg').classes()).toContain('sync-button__icon--spinning');
+      finish(summary);
+      await flushPromises();
+      // No animationiteration under reduced motion (one 1 ms turn); the fallback ends it.
+      await vi.advanceTimersByTimeAsync(1100);
+      expect(wrapper.get('svg').classes()).not.toContain('sync-button__icon--spinning');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does not start window dragging on mousedown', async () => {
