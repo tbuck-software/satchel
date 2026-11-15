@@ -22,7 +22,7 @@ async function discardActiveDraft(page: Page) {
 
 test('opens a reply composer for the active conversation once its draft is discarded', async ({ page }) => {
   await discardActiveDraft(page);
-  await page.locator('.reply-bar').getByRole('button', { name: 'Reply', exact: true }).click();
+  await page.locator('.reply-bar').getByRole('button', { name: /^Reply to / }).click();
   const composer = page.getByRole('dialog', { name: 'Compose email' });
   await expect(composer).toBeVisible();
   await expect(composer.getByText('Reply', { exact: true })).toBeVisible();
@@ -387,7 +387,7 @@ test('normalizes localized reply chains for display while retaining reply spelli
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Staging login 500 after deployment', exact: true })).toBeVisible();
   await discardActiveDraft(page);
-  await page.locator('.reply-bar').getByRole('button', { name: 'Reply', exact: true }).click();
+  await page.locator('.reply-bar').getByRole('button', { name: /^Reply to / }).click();
   await expect(page.getByRole('dialog', { name: 'Compose email' }).getByLabel('Subject', { exact: true }))
     .toHaveValue('SV: Staging login 500 after deployment');
 });
@@ -461,7 +461,7 @@ test('keeps error toasts off the draft card, the reply bar and the send button',
 test('keeps error toasts off the reply bar of a thread without a draft', async ({ page }) => {
   await page.goto('/thread/th-2');
   await expect(page.locator('.toast--error').first()).toBeVisible();
-  await expect.poll(() => isUncovered(page.locator('.reply-bar').getByRole('button', { name: 'Reply', exact: true }))).toBe(true);
+  await expect.poll(() => isUncovered(page.locator('.reply-bar').getByRole('button', { name: /^Reply to / }))).toBe(true);
 });
 
 /**

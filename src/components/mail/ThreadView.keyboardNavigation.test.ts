@@ -33,7 +33,7 @@ vi.mock('@/stores/messages', () => ({
   }),
 }));
 vi.mock('@/stores/settings', () => ({
-  useSettingsStore: () => ({ readerZoom: 100, setReaderZoom: vi.fn() }),
+  useSettingsStore: () => ({ readerZoom: 100, setReaderZoom: vi.fn(), keybindings: {}, singleKeyShortcuts: true }),
 }));
 vi.mock('@/stores/mailboxes', () => ({
   useMailboxesStore: () => ({ mailboxes: [], load: vi.fn() }),

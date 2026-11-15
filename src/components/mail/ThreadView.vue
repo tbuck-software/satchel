@@ -1205,6 +1205,7 @@ function showEntireThread() {
           :draft-recipient="draftRecipientName"
           :draft-identity="threadAccount?.displayName ?? ''"
           :draft-identity-color="threadAccount?.color ?? null"
+          :draft-identity-avatar="threadAccount?.avatar ?? null"
           :collapsed-message-ids="collapsedMessageIds"
           :body-mounted-ids="bodyMountedIds"
           :focused-message-id="focusedMessageId"
@@ -1228,6 +1229,7 @@ function showEntireThread() {
             :recipient="replyRecipientName"
             :identity="threadAccount?.displayName ?? ''"
             :identity-color="threadAccount?.color ?? null"
+            :identity-avatar="threadAccount?.avatar ?? null"
             @reply="replyThread"
           />
         </div>
@@ -1310,7 +1312,7 @@ function showEntireThread() {
 }
 
 /*
- * 48rem leaves the body (the column less the 52px avatar indent) at about
+ * 48rem leaves the body (the column less the 54px avatar indent) at about
  * 716px, so the 640–700px tables a lot of HTML mail is built on still fit
  * without sideways scrolling. Plain text keeps its own 60ch measure inside it.
  */
