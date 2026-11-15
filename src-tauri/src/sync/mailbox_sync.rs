@@ -11,7 +11,7 @@ use tauri::{AppHandle, Manager};
 use crate::events::bus::{AppEvent, EventBus};
 use crate::providers::{
     cursor::{backfill_pending, backfill_stats},
-    folder_mapping::provider_folder_type,
+    folder_mapping::{kind_folder_type, provider_folder_type},
     imap::imap_checkpoint,
     pop3::POP3_FOLDER,
     provider_for_stored_account,
@@ -1274,24 +1274,19 @@ pub(crate) async fn sync_mailboxes(
             // (the Graph adapter also resolves six well-known folders) and
             // defeats the point of a lightweight freshness check.
             let cached_inbox = if folder_selection == FolderSelection::Inbox {
-                sqlx::query_as::<_, (String, String)>(
-                    "SELECT COALESCE(NULLIF(remote_id, ''), full_path), name
-                     FROM folders
-                     WHERE account_id = ? AND folder_type = 'inbox'
-                     LIMIT 1",
-                )
-                .bind(&account.id)
-                .fetch_optional(pool)
-                .await
-                .map_err(|err| err.to_string())?
-                .map(|(id, name)| RemoteFolder {
-                    id,
-                    name,
-                    kind: Some("inbox".to_string()),
-                })
+                satchel_core::db::folders::preferred_folder_of_type(pool, &account.id, "inbox")
+                    .await
+                    .map_err(|err| err.to_string())?
+                    .map(|folder| RemoteFolder {
+                        id: folder.remote_path,
+                        name: folder.name,
+                        kind: Some("inbox".to_string()),
+                    })
             } else {
                 None
             };
+            // Only a real listing says what the server declares (SPECIAL-USE).
+            let folders_listed = cached_inbox.is_none();
             let mut folders = match cached_inbox {
                 Some(folder) => vec![folder],
                 None => list_folders_and_pace_quota(pool, &account.id, provider.as_ref())
@@ -1438,13 +1433,14 @@ pub(crate) async fn sync_mailboxes(
                 .await;
 
                 sqlx::query(
-                    "INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, uidvalidity, message_count, unread_count, sync_enabled, sort_order, created_at, updated_at)
-                     VALUES (?, ?, ?, ?, ?, ?, NULL, 0, 0, 1, 0, ?, ?)
+                    "INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, uidvalidity, message_count, unread_count, sync_enabled, sort_order, special_use, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, NULL, 0, 0, 1, 0, ?, ?, ?)
                      ON CONFLICT(id) DO UPDATE SET
                         name = excluded.name,
                         full_path = excluded.full_path,
                         folder_type = excluded.folder_type,
                         remote_id = excluded.remote_id,
+                        special_use = CASE WHEN ? THEN excluded.special_use ELSE folders.special_use END,
                         updated_at = excluded.updated_at",
                 )
                 .bind(&folder_id)
@@ -1453,8 +1449,10 @@ pub(crate) async fn sync_mailboxes(
                 .bind(&folder.id)
                 .bind(folder_type)
                 .bind(&folder.id)
+                .bind(folders_listed && kind_folder_type(folder.kind.as_deref()) == Some(folder_type))
                 .bind(&now)
                 .bind(&now)
+                .bind(folders_listed)
                 .execute(pool)
                 .await
                 .map_err(|err| err.to_string())?;

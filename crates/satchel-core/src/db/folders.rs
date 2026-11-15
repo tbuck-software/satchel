@@ -35,6 +35,67 @@ pub async fn resolve_provider_folder_id<'e>(
     Ok(existing.unwrap_or_else(|| folder_db_id(account_id, remote_folder_id)))
 }
 
+/// The folder a type resolves to when something files mail into it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FolderChoice {
+    pub id: String,
+    /// The mailbox name provider operations (APPEND, MOVE) target.
+    pub remote_path: String,
+    pub name: String,
+}
+
+/// Plain names per type, compared against the last path segment.
+fn canonical_folder_names(folder_type: &str) -> &'static [&'static str] {
+    match folder_type {
+        "sent" => &["sent", "gesendet"],
+        "drafts" => &["drafts", "entwürfe"],
+        "trash" => &["trash", "papierkorb"],
+        "archive" => &["archive", "archiv"],
+        "spam" => &["spam", "junk"],
+        "inbox" => &["inbox"],
+        _ => &[],
+    }
+}
+
+/// The one folder of `folder_type` every path files into.
+///
+/// Accounts often have several (`Sent` next to Apple Mail's `Sent Messages`,
+/// `Archive` next to `Archiv`). Every remote operation and its local
+/// projection must agree, or mail lands in one folder and its local copy in
+/// another. Order: declared by the server (RFC 6154 SPECIAL-USE), then the
+/// one with the most threads, then a plain name, then the oldest row.
+/// `updated_at` must not decide: every folder listing rewrites it.
+pub async fn preferred_folder_of_type<'e>(
+    executor: impl Executor<'e, Database = Sqlite>,
+    account_id: &str,
+    folder_type: &str,
+) -> Result<Option<FolderChoice>, sqlx::Error> {
+    let folder_type = folder_type.trim().to_ascii_lowercase();
+    let names = serde_json::to_string(canonical_folder_names(&folder_type))
+        .unwrap_or_else(|_| "[]".to_string());
+    let row: Option<(String, String, String)> = sqlx::query_as(
+        "SELECT f.id, COALESCE(NULLIF(TRIM(f.remote_id), ''), f.full_path), f.name FROM folders f
+         WHERE f.account_id = ? AND LOWER(TRIM(f.folder_type)) = ?
+         ORDER BY f.special_use DESC, f.thread_count DESC,
+                  EXISTS (SELECT 1 FROM json_each(?) canonical
+                          WHERE LOWER(f.name) = canonical.value
+                             OR LOWER(f.name) LIKE '%.' || canonical.value
+                             OR LOWER(f.name) LIKE '%/' || canonical.value) DESC,
+                  f.created_at ASC, f.id ASC
+         LIMIT 1",
+    )
+    .bind(account_id)
+    .bind(&folder_type)
+    .bind(names)
+    .fetch_optional(executor)
+    .await?;
+    Ok(row.map(|(id, remote_path, name)| FolderChoice {
+        id,
+        remote_path,
+        name,
+    }))
+}
+
 const PROTECTED_FOLDER_TYPES: &[&str] = &[
     "inbox", "sent", "drafts", "trash", "archive", "spam", "aside",
 ];
@@ -505,6 +566,45 @@ mod tests {
         .await
         .expect("account");
         pool
+    }
+
+    async fn preferred(pool: &SqlitePool, folder_type: &str) -> String {
+        super::preferred_folder_of_type(pool, "account", folder_type)
+            .await
+            .expect("query")
+            .expect("folder")
+            .remote_path
+    }
+
+    /// Four archive folders, as on a real account. The newest `updated_at`
+    /// (the last one a listing touched) used to win in one path and index
+    /// order in another, so a move and its projection disagreed.
+    #[tokio::test]
+    async fn the_preferred_folder_of_a_type_ignores_listing_order() {
+        let pool = fresh_pool().await;
+        sqlx::query(
+            "INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, thread_count, created_at, updated_at) VALUES
+             ('a1', 'account', 'INBOX.Archiv', 'INBOX.Archiv', 'archive', 'INBOX.Archiv', 7, '2026-03-08T01', '2026-11-15T03'),
+             ('a2', 'account', 'INBOX.Archive', 'INBOX.Archive', 'archive', 'INBOX.Archive', 3275, '2026-03-08T02', '2026-11-15T01'),
+             ('a3', 'account', 'INBOX.Archives', 'INBOX.Archives', 'archive', 'INBOX.Archives', 45, '2026-03-08T00', '2026-11-15T02'),
+             ('t1', 'account', 'INBOX.Deleted Messages', 'INBOX.Deleted Messages', 'trash', 'INBOX.Deleted Messages', 0, '2026-03-08T00', '2026-11-15T09'),
+             ('t2', 'account', 'INBOX.Trash', 'INBOX.Trash', 'trash', 'INBOX.Trash', 0, '2026-03-08T01', '2026-11-15T00')",
+        )
+        .execute(&pool)
+        .await
+        .expect("folders");
+
+        assert_eq!(preferred(&pool, "archive").await, "INBOX.Archive");
+        // No mail either side: the plain name beats the older row.
+        assert_eq!(preferred(&pool, "trash").await, "INBOX.Trash");
+
+        // The server's own SPECIAL-USE flag decides over both.
+        sqlx::query("UPDATE folders SET special_use = 1 WHERE id IN ('a3', 't1')")
+            .execute(&pool)
+            .await
+            .expect("flag");
+        assert_eq!(preferred(&pool, "archive").await, "INBOX.Archives");
+        assert_eq!(preferred(&pool, "trash").await, "INBOX.Deleted Messages");
     }
 
     #[tokio::test]

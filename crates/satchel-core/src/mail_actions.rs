@@ -1265,9 +1265,11 @@ async fn resolve_target(
         MoveTarget::Inbox => "inbox",
         MoveTarget::Folder(_) => unreachable!(),
     };
-    if let Some(row) = sqlx::query_as("SELECT id, COALESCE(remote_id, full_path), folder_type FROM folders WHERE account_id = ? AND folder_type = ? LIMIT 1")
-        .bind(account).bind(kind).fetch_optional(&mut **tx).await.map_err(|e| e.to_string())? {
-        return Ok(row);
+    if let Some(folder) = crate::db::folders::preferred_folder_of_type(&mut **tx, account, kind)
+        .await
+        .map_err(|e| e.to_string())?
+    {
+        return Ok((folder.id, folder.remote_path, kind.into()));
     }
     let remote = provisioned_remote_folder(provider, kind).to_string();
     let id = crate::db::folders::resolve_provider_folder_id(&mut **tx, account, &remote)

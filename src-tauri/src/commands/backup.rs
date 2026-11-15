@@ -1337,15 +1337,12 @@ pub async fn import_mbox(
 }
 
 async fn ensure_import_folder(pool: &SqlitePool, account_id: &str) -> Result<String, String> {
-    if let Some(row) = sqlx::query_as::<_, (String,)>(
-        "SELECT id FROM folders WHERE account_id = ? AND folder_type = 'archive' ORDER BY created_at ASC LIMIT 1",
-    )
-    .bind(account_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|err| err.to_string())?
+    if let Some(folder) =
+        satchel_core::db::folders::preferred_folder_of_type(pool, account_id, "archive")
+            .await
+            .map_err(|err| err.to_string())?
     {
-        return Ok(row.0);
+        return Ok(folder.id);
     }
     let now = chrono::Utc::now().to_rfc3339();
     let id = satchel_core::db::folders::resolve_provider_folder_id(pool, account_id, "Imported")

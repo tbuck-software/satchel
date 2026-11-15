@@ -1,5 +1,20 @@
 use crate::workflow::states::is_aside_folder;
 
+/// The folder type the provider itself declares: IMAP SPECIAL-USE (RFC 6154),
+/// Gmail system labels, Outlook well-known names. `None` leaves it to the name.
+pub fn kind_folder_type(kind: Option<&str>) -> Option<&'static str> {
+    let kind = kind.map(str::trim).filter(|value| !value.is_empty())?;
+    match kind.to_ascii_lowercase().as_str() {
+        "inbox" => Some("inbox"),
+        "sent" | "sentitems" => Some("sent"),
+        "draft" | "drafts" => Some("drafts"),
+        "trash" | "deleted" | "deleteditems" => Some("trash"),
+        "archive" => Some("archive"),
+        "spam" | "junk" | "junkemail" => Some("spam"),
+        _ => None,
+    }
+}
+
 /// Map a provider folder to Satchel's semantic folder type.
 pub fn provider_folder_type(
     provider: &str,
@@ -10,16 +25,8 @@ pub fn provider_folder_type(
     if is_aside_folder(name) {
         return "aside";
     }
-    if let Some(kind) = kind.map(str::trim).filter(|value| !value.is_empty()) {
-        match kind.to_ascii_lowercase().as_str() {
-            "inbox" => return "inbox",
-            "sent" | "sentitems" => return "sent",
-            "draft" | "drafts" => return "drafts",
-            "trash" | "deleted" | "deleteditems" => return "trash",
-            "archive" => return "archive",
-            "spam" | "junk" | "junkemail" => return "spam",
-            _ => {}
-        }
+    if let Some(folder_type) = kind_folder_type(kind) {
+        return folder_type;
     }
 
     let lower = name.to_ascii_lowercase();
