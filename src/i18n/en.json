@@ -255,6 +255,7 @@
       "attachmentExecutableNotConfirmed": "\"{filename}\" is a program (.{extension}), not a document. Satchel will not hand it to the operating system without your confirmation.",
       "attachmentNotBase64": "\"{filename}\" could not be attached: its data is damaged. Remove the attachment and add the file again.",
       "attachmentPayloadMissing": "The attachment could not be read: Satchel received neither its content nor a path to it.",
+      "attachmentTypeNotConfirmed": "Satchel does not know what opens \"{filename}\". It will not hand it to the operating system without your confirmation.",
       "availabilityDurationInvalid": "Choose a meeting length between 5 minutes and 24 hours.",
       "availabilityRangeInvalid": "That time range cannot be checked for free time.",
       "availabilityTimeZoneInvalid": "This device's time zone is not known to Satchel.",
@@ -1587,6 +1588,9 @@
       "showInFolder": "Show in folder",
       "tooLarge": "“{name}” is larger than {limit}.",
       "totalExceeded": "Total size exceeded: “{name}” no longer fits the {limit} budget ({used} already in use).",
+      "unknownTypeBody": "Satchel does not know the file type .{extension}. Opening it hands it to the operating system, which may run it. Check the full name below before you decide.",
+      "unknownTypeNoExtensionBody": "This file has no extension, so Satchel cannot tell what it is. Opening it hands it to the operating system, which may run it.",
+      "unknownTypeTitle": "Open this attachment?",
       "useAsAttachment": "Send image as a regular attachment",
       "viewInSatchel": "View in Satchel",
       "viewInSatchelNamed": "View {filename} in Satchel"

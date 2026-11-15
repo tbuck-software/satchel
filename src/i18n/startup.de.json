@@ -134,6 +134,7 @@
       "attachmentExecutableNotConfirmed": "\"{filename}\" ist ein Programm (.{extension}), kein Dokument. Satchel übergibt es ohne deine Bestätigung nicht an das Betriebssystem.",
       "attachmentNotBase64": "\"{filename}\" ließ sich nicht anhängen: Die Daten sind beschädigt. Den Anhang entfernen und die Datei erneut hinzufügen.",
       "attachmentPayloadMissing": "Der Anhang ließ sich nicht lesen: Satchel hat weder seinen Inhalt noch einen Pfad dorthin bekommen.",
+      "attachmentTypeNotConfirmed": "Satchel weiß nicht, womit \"{filename}\" geöffnet wird, und übergibt es ohne deine Bestätigung nicht an das Betriebssystem.",
       "availabilityDurationInvalid": "Wähle eine Termindauer zwischen 5 Minuten und 24 Stunden.",
       "availabilityRangeInvalid": "Dieser Zeitraum lässt sich nicht auf freie Zeit prüfen.",
       "availabilityTimeZoneInvalid": "Die Zeitzone dieses Geräts kennt Satchel nicht.",
