@@ -1,7 +1,10 @@
 import { t } from '@/i18n/runtime';
 import { senderDomain } from './senderDomains';
 import { toUnicode } from './punycodeDecode';
-import confusables from './data/confusablesAscii.json';
+import confusablesJson from './data/confusablesAscii.json?raw';
+
+// Unicode keys are data, not export identifiers for WebKit to parse.
+const confusables: Record<string, string> = JSON.parse(confusablesJson);
 
 interface BrandEntry {
   label: string;
