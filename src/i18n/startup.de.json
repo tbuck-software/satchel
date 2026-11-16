@@ -181,8 +181,8 @@
       "decryptedAttachmentUnavailable": "Dieser Anhang stammt aus einer verschlüsselten Nachricht, und seine entschlüsselte Kopie ist nicht mehr gespeichert. Öffne die Nachricht, um ihn erneut zu entschlüsseln.",
       "desktopUnavailable": "Das Desktop-Backend ist nicht verfügbar. Starte Satchel mit `pnpm tauri:dev`.",
       "directorySelectionUnavailable": "Die Ordnerauswahl ist auf dieser Plattform nicht verfügbar.",
-      "draftChangedElsewhere": "Dieser Entwurf wurde in einem anderen Fenster geändert. Dein Text hier ist nicht gespeichert.",
-      "draftGoneElsewhere": "Dieser Entwurf wurde in einem anderen Fenster gesendet oder verworfen. Dein Text hier ist nicht gespeichert.",
+      "draftChangedElsewhere": "Der Entwurf wurde anderswo geändert, deine letzten Änderungen sind noch nicht gespeichert.",
+      "draftGoneElsewhere": "Der Entwurf wurde anderswo gesendet oder gelöscht, deine letzten Änderungen sind noch nicht gespeichert.",
       "draftSendPending": "Dieser Entwurf hat einen aktiven Versand. Öffne ihn unter Entwürfe, um den Versand vor dem Bearbeiten abzubrechen.",
       "draftSyncQueueInvalid": "Der gespeicherte Auftrag zur Entwurfssynchronisierung ist ungültig.",
       "draftSyncTimedOut": "Der Anbieter hat die Entwurfssynchronisierung nicht rechtzeitig abgeschlossen.",
@@ -757,6 +757,9 @@
     "viewList": "Liste"
   },
   "mail": {
+    "attachment": {
+      "attachment": "Anhang"
+    },
     "message": {
       "source": "Quelltext",
       "sourceTitle": "Kopfzeilen und Rohdaten dieser Nachricht anzeigen"

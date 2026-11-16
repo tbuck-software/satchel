@@ -57,6 +57,7 @@ mod cost {
     pub const HISTORY_LIST: f64 = 2.0;
     pub const MESSAGES_LIST: f64 = 5.0;
     pub const DRAFTS_LIST: f64 = 5.0;
+    pub const DRAFTS_GET: f64 = 5.0;
     pub const MESSAGES_GET: f64 = 20.0;
     pub const MESSAGES_TRASH: f64 = 20.0;
     pub const ATTACHMENTS_GET: f64 = 20.0;
@@ -2443,6 +2444,41 @@ impl MailProvider for GmailProvider {
                 .find(|message| message.remote_id == message_remote_id)
                 .and_then(|message| message.remote_draft_id),
         )
+    }
+
+    async fn remote_draft_exists(
+        &self,
+        remote_draft_id: &str,
+    ) -> crate::sync::errors::SyncResult<bool> {
+        let token = self.access_token().await?;
+        let client = crate::utils::http::client();
+        let response = send_with_rate_limit_retry(
+            || {
+                client
+                    .get(format!(
+                        "{}/drafts/{remote_draft_id}?format=minimal",
+                        gmail_api_base()
+                    ))
+                    .bearer_auth(&token)
+            },
+            "draft lookup",
+            cost::DRAFTS_GET,
+        )
+        .await?;
+        let status = response.status();
+        if status.as_u16() == 404 {
+            return Ok(false);
+        }
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(crate::sync::errors::http_failure(
+                "gmail",
+                "draft lookup",
+                status.as_u16(),
+                &body,
+            ));
+        }
+        Ok(true)
     }
 
     async fn delete_draft(&self, remote_draft_id: &str) -> crate::sync::errors::SyncResult<()> {

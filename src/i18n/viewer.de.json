@@ -53,6 +53,7 @@
       "previewUnavailable": "Vorschau für {mime} nicht verfügbar.",
       "quickLookFailed": "Schnellansicht konnte nicht geöffnet werden: {error}",
       "readFailed": "„{name}\" konnte nicht gelesen werden.",
+      "removeNamed": "{name} entfernen",
       "save": "Anhang speichern",
       "saveEllipsis": "Speichern…",
       "saveFailed": "Anhang konnte nicht gespeichert werden: {error}",
