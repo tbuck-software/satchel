@@ -557,12 +557,8 @@ export function isNewSenderThread(
   })(thread);
 }
 
-/**
- * Screening new senders belongs to the Inbox. Spam is full of unknown senders
- * by nature, and Sent, Trash, Done and the folders hold mail that is already
- * filed: offering to allow or block its senders there makes no sense.
- */
-export function senderReviewInScope(scope: {
+/** Category folders belong to the Inbox, not filed mail or other workflow lists. */
+export function inboxGroupingInScope(scope: {
   workflow: WorkflowFilter;
   mailbox: MailboxFilter;
   contactEmail: string;
@@ -572,6 +568,13 @@ export function senderReviewInScope(scope: {
     && scope.mailbox.kind === 'section'
     && scope.mailbox.value === 'inbox';
 }
+
+/**
+ * Screening new senders belongs to the Inbox. Spam is full of unknown senders
+ * by nature, and Sent, Trash, Done and the folders hold mail that is already
+ * filed: offering to allow or block its senders there makes no sense.
+ */
+export const senderReviewInScope = inboxGroupingInScope;
 
 /**
  * Ids of the threads that belong in the new-sender review.
