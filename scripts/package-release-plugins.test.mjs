@@ -10,7 +10,7 @@ const script = fileURLToPath(new URL('./package-release-plugins.mjs', import.met
 const manifest = '[package]\nname = "satchel-plugin-calendar-sync"\nversion = "0.1.0"\n\n[package.metadata.satchel]\napi_version = "1.0"\ncapabilities = ["read_threads"]\ntrust = "local_unsigned"\n\n[lib]\ncrate-type = ["cdylib"]\n';
 const component = Buffer.from([0, 97, 115, 109, 13, 0, 1, 0]);
 
-/** @param {(context: {root: string, key: import('node:crypto').KeyPairKeyObjectResult, execute: (value?: string) => Buffer}) => void} run */
+/** @param {(context: {root: string, key: { publicKey: import('node:crypto').KeyObject, privateKey: import('node:crypto').KeyObject }, execute: (value?: string) => Buffer}) => void} run */
 function fixture(run) {
   const root = mkdtempSync(join(tmpdir(), 'satchel-signed-plugins-'));
   const key = generateKeyPairSync('ed25519');
