@@ -17,6 +17,7 @@ use crate::{
 };
 
 mod batch;
+pub mod calendar;
 
 const GRAPH_BASE_DEFAULT: &str = "https://graph.microsoft.com/v1.0";
 
@@ -1134,6 +1135,7 @@ impl MailProvider for OutlookProvider {
                             flag.flag_status
                                 .map(|status| status.eq_ignore_ascii_case("flagged"))
                         }),
+                        workflow_marker: None,
                     }),
             );
             next = page.next_link.filter(|value| !value.trim().is_empty());
@@ -1142,6 +1144,7 @@ impl MailProvider for OutlookProvider {
             states,
             // Graph immutable ids are account-wide and never renumber.
             remote_uidvalidity: None,
+            custom_keywords: None,
         }))
     }
 
@@ -1717,6 +1720,15 @@ fn map_graph_message(message: GraphMessage) -> MessageEnvelope {
         .unwrap_or_default();
     let list_unsubscribe = header_value("List-Unsubscribe");
     let list_unsubscribe_post = header_value("List-Unsubscribe-Post");
+    let chat = crate::chat::chat_headers_from(header_value);
+    let autocrypt_headers = message
+        .internet_message_headers
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .filter(|header| header.name.eq_ignore_ascii_case("Autocrypt"))
+        .map(|header| header.value.trim().to_string())
+        .collect();
     let (auth_spf, auth_dkim, auth_dmarc) = header_value("Authentication-Results")
         .map(|value| crate::providers::traits::trusted_authentication_results(&value, "outlook"))
         .unwrap_or((None, None, None));
@@ -1833,6 +1845,7 @@ fn map_graph_message(message: GraphMessage) -> MessageEnvelope {
             .and_then(|flag| flag.flag_status.as_deref())
             .map(|status| status.eq_ignore_ascii_case("flagged"))
             .unwrap_or(false),
+        workflow_marker: None,
         body_calendar: None,
         smime_encrypted,
         smime_signed,
@@ -1843,19 +1856,34 @@ fn map_graph_message(message: GraphMessage) -> MessageEnvelope {
         auth_spf,
         auth_dkim,
         auth_dmarc,
+        spam_hint_headers: None,
+        satchel_marks: Vec::new(),
+        chat,
+        autocrypt_headers,
+        autocrypt_eligible: crate::chat::autocrypt_eligible(
+            header_value("From").as_deref(),
+            header_value("Content-Type").as_deref(),
+        ),
         attachments,
     }
 }
 
+/// The plain text of a Graph HTML body, for mail previews and calendar
+/// descriptions. Elements that show nothing — `<style>`, `<script>`,
+/// `<title>` — go with their contents: OWA puts a style block in its bodies,
+/// and stripping only the tags left the CSS in the text. Paragraphs and line
+/// breaks become newlines, entities are decoded and `&nbsp;` reads as a space.
 fn graph_html_body_to_text(input: &str) -> String {
-    let without_tags = input
+    let visible = ammonia::Builder::default()
+        .add_clean_content_tags(&["title"])
+        .clean(input)
+        .to_string();
+    let with_breaks = visible
         .replace("<br>", "\n")
-        .replace("<br/>", "\n")
-        .replace("<br />", "\n")
         .replace("</p>", "\n")
         .replace("</div>", "\n");
-
-    strip_html_tags(&without_tags)
+    crate::utils::mime::decode_html_entities(&strip_html_tags(&with_breaks))
+        .replace('\u{a0}', " ")
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
@@ -2051,6 +2079,26 @@ mod tests {
             super::map_graph_message(message).attachments[0].content_type,
             "application/octet-stream"
         );
+    }
+
+    #[test]
+    fn html_bodies_read_as_their_visible_text() {
+        // As OWA writes them: a style block in the head, entities in the text.
+        let owa = r#"<html><head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css" style="display:none;"> P {margin-top:0;margin-bottom:0;} </style>
+<title>Ignored</title>
+</head>
+<body dir="ltr">
+<div class="elementToProof" style="font-family: Aptos; font-size: 12pt;">Agenda&nbsp;&amp; notes</div>
+<div>Q&amp;A &lt;open&gt;<br>Caf&#233; at 10</div>
+<p>&nbsp;</p>
+</body></html>"#;
+        assert_eq!(
+            super::graph_html_body_to_text(owa),
+            "Agenda & notes\nQ&A <open>\nCafé at 10"
+        );
+        assert_eq!(super::graph_html_body_to_text("<p>A</p><p>B</p>"), "A\nB");
     }
 
     #[test]

@@ -7,6 +7,7 @@ import { mount, type VueWrapper } from '@vue/test-utils';
 import ModalShell from './ModalShell.vue';
 import BottomSheet from './BottomSheet.vue';
 import { useUiStore } from '@/stores/ui';
+import { pointer } from '@/test/pointer';
 
 // The shell counts its scroll locks across instances, so a shell left mounted
 // by one test would hold the page for the next one.
@@ -221,15 +222,15 @@ describe('bottom sheet', () => {
     });
     const sheet = wrapper.find('.sheet-panel');
 
-    await sheet.trigger('pointerdown', {
+    await pointer(sheet, 'pointerdown', {
       pointerType: 'mouse', pointerId: 1, button: 0, clientX: 160, clientY: 220,
     });
-    await sheet.trigger('pointermove', {
+    await pointer(sheet, 'pointermove', {
       pointerType: 'mouse', pointerId: 1, clientX: 160, clientY: 320,
     });
     expect(sheet.attributes('style')).toContain('--sheet-drag-y: 100px');
 
-    await sheet.trigger('pointerup', {
+    await pointer(sheet, 'pointerup', {
       pointerType: 'mouse', pointerId: 1, clientX: 160, clientY: 320,
     });
     expect(wrapper.emitted('dismiss')).toHaveLength(1);
@@ -241,13 +242,13 @@ describe('bottom sheet', () => {
     const sheet = wrapper.find('.sheet-panel');
     Object.defineProperty(sheet.element, 'scrollTop', { value: 40, writable: true });
 
-    await sheet.trigger('pointerdown', {
+    await pointer(sheet, 'pointerdown', {
       pointerType: 'mouse', pointerId: 1, button: 0, clientX: 160, clientY: 220,
     });
-    await sheet.trigger('pointermove', {
+    await pointer(sheet, 'pointermove', {
       pointerType: 'mouse', pointerId: 1, clientX: 160, clientY: 320,
     });
-    await sheet.trigger('pointerup', {
+    await pointer(sheet, 'pointerup', {
       pointerType: 'mouse', pointerId: 1, clientX: 160, clientY: 320,
     });
 

@@ -46,7 +46,14 @@ pub(crate) async fn release(
     let eligible = format!(
         "SELECT m.id FROM {FROM} WHERE {RECOVERABLE} AND m.id IN (SELECT value FROM json_each(?))"
     );
-    // Attachments first: the message update below must not change eligibility.
+    // Translations and attachments first: the message update below must not
+    // change eligibility. A translation is a copy of the body; it goes with it.
+    sqlx::query(&format!(
+        "DELETE FROM message_translations WHERE message_id IN ({eligible})"
+    ))
+    .bind(&ids)
+    .execute(&mut *connection)
+    .await?;
     sqlx::query(&format!(
         "UPDATE attachments SET cached_path = NULL, content_base64 = NULL
          WHERE (cached_path IS NOT NULL OR content_base64 IS NOT NULL)
@@ -210,6 +217,32 @@ mod tests {
         tx.commit().await.unwrap();
         assert_eq!(released(&pool).await, ["gmail-remote"]);
         assert!(intact(&pool).await.contains(&"imap-verified".to_string()));
+    }
+
+    #[tokio::test]
+    async fn a_released_body_takes_its_translations_along() {
+        let pool = pool().await;
+        for id in ["imap-verified", "imap-stale"] {
+            sqlx::query(
+                "INSERT INTO message_translations
+                    (message_id, target_language, engine, source_hash, body_text, created_at)
+                 VALUES (?, 'DE', 'deepl', 'h', 'Text', '')",
+            )
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        let ids = ["imap-verified".to_string(), "imap-stale".to_string()];
+        assert_eq!(release(&mut tx, &ids).await.unwrap(), 1);
+        tx.commit().await.unwrap();
+        let left: Vec<String> = sqlx::query_scalar("SELECT message_id FROM message_translations")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        // The stale generation kept its body, so it keeps its translation.
+        assert_eq!(left, ["imap-stale"]);
     }
 
     #[tokio::test]

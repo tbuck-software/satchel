@@ -1,5 +1,7 @@
 import { config } from '@vue/test-utils';
 import { i18n, i18nReady } from '@/i18n';
+import de from '@/i18n/de.json';
+import en from '@/i18n/en.json';
 
 /*
  * Node 26 exposes an undefined `localStorage` unless `--localstorage-file` is
@@ -39,3 +41,10 @@ if (typeof window !== 'undefined' && !window.localStorage) {
 config.global.plugins = [...(config.global.plugins ?? []), i18n];
 
 await i18nReady;
+/*
+ * The app loads the startup catalogue first and the rest in chunks with the
+ * lazy code (`withMessages`). Vitest imports modules directly, without the
+ * build's wrapper, so tests get the full catalogue in both locales.
+ */
+i18n.global.mergeLocaleMessage('en', en);
+i18n.global.mergeLocaleMessage('de', de);

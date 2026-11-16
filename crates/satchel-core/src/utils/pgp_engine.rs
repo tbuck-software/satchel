@@ -223,6 +223,75 @@ pub fn split_armored_keys(armored: &str) -> Result<Vec<String>, String> {
         .collect()
 }
 
+/// The Autocrypt `keydata` for `addr`: the binary Transferable Public Key cut
+/// down to the five packets Autocrypt Level 1 names ("OpenPGP Based key
+/// data"): the primary key, the user id for `addr`, its self-signature, one
+/// encryption subkey and that subkey's binding signature. Works on a private
+/// key block too; only public material leaves.
+pub fn autocrypt_keydata(armored_key: &str, addr: &str) -> Result<Vec<u8>, String> {
+    let cert = RpgpEngine::parse_certificates(armored_key)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| "key block contained no OpenPGP key".to_string())?;
+    ensure_certificate_active(&cert)?;
+    let needle = addr.trim().to_ascii_lowercase();
+    let (user, self_signature) = cert
+        .details
+        .users
+        .iter()
+        .filter_map(|user| valid_user_self_signature(&cert, user).map(|sig| (user, sig)))
+        .find(|(user, _)| {
+            user.id.as_str().is_some_and(|id| {
+                let id = id.trim().to_ascii_lowercase();
+                id == needle || id.contains(&format!("<{needle}>"))
+            })
+        })
+        .ok_or_else(|| "the key has no user id for this address".to_string())?;
+    let subkey = RpgpEngine::encryption_subkey(&cert)
+        .ok_or_else(|| "the key has no encryption subkey".to_string())?;
+    let binding = active_subkey_binding(&cert.primary_key, &subkey.key, &subkey.signatures)
+        .ok_or_else(|| "the encryption subkey has no valid binding".to_string())?;
+    let reduced = SignedPublicKey::new(
+        cert.primary_key.clone(),
+        pgp::composed::SignedKeyDetails::new(
+            Vec::new(),
+            Vec::new(),
+            vec![SignedUser::new(
+                user.id.clone(),
+                vec![self_signature.clone()],
+            )],
+            Vec::new(),
+        ),
+        vec![SignedPublicSubKey::new(
+            subkey.key.clone(),
+            vec![binding.clone()],
+        )],
+    );
+    reduced
+        .to_bytes()
+        .map_err(|err| format!("could not serialize the public key: {err}"))
+}
+
+/// A peer's Autocrypt `keydata` as an armored certificate, with its metadata.
+///
+/// The bindings are verified and the key must be able to encrypt; anything
+/// else is not a key Satchel may encrypt to, and the header is treated as
+/// absent.
+pub fn certificate_from_keydata(keydata: &[u8]) -> Result<(String, PgpKeyMetadata), String> {
+    let cert = SignedPublicKey::from_bytes(keydata)
+        .map_err(|err| format!("not a usable OpenPGP public key: {err}"))?;
+    cert.verify_bindings()
+        .map_err(|err| format!("the key's signatures do not verify: {err}"))?;
+    let armored = cert
+        .to_armored_string(ArmorOptions::default())
+        .map_err(|err| format!("could not armor a public key: {err}"))?;
+    let metadata = RpgpEngine.key_metadata(&armored)?;
+    if !metadata.can_encrypt || metadata.is_expired {
+        return Err("the key cannot be used for encryption".to_string());
+    }
+    Ok((armored, metadata))
+}
+
 /// Pick an engine by name. Unknown names fall back to the in-process one.
 ///
 /// Public so tests can drive both engines in one process; `SATCHEL_PGP_ENGINE`

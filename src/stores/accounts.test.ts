@@ -7,6 +7,7 @@ import {
   backendCommandsAvailable,
   backendStartOauthFlow,
   backendPollOauthFlow,
+  backendSetAccountNames,
 } from '@/services/backend';
 import { useAccountsStore } from './accounts';
 import { useConnectionStore } from './connection';
@@ -19,6 +20,7 @@ vi.mock('@/services/backend', () => ({
   backendPollOauthFlow: vi.fn(),
   backendStartOauthFlow: vi.fn(),
   backendGetSourceCapabilities: vi.fn(),
+  backendSetAccountNames: vi.fn(),
   translateBackendError: vi.fn(() => null),
 }));
 
@@ -164,6 +166,36 @@ describe('credential lock', () => {
     await store.loadCredentialLock();
 
     expect(store.credentialLock).toBeNull();
+  });
+});
+
+describe('account names', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    listAccounts.mockResolvedValue([{
+      id: 'mail', display_name: 'Tom Example', label: null, email: 'tom@example.com', provider: 'imap', kind: 'email',
+    }] as never);
+    getCapabilities.mockResolvedValue({});
+  });
+
+  it('shows the label in lists and keeps the sender name for outgoing mail', async () => {
+    const accounts = useAccountsStore();
+    await accounts.load();
+    expect(accounts.accounts[0]).toMatchObject({ displayName: 'Tom Example', label: null, senderName: 'Tom Example' });
+
+    vi.mocked(backendSetAccountNames).mockResolvedValue(undefined);
+    expect(await accounts.setNames('mail', ' Work ', 'Tom Example')).toBe(true);
+    expect(backendSetAccountNames).toHaveBeenCalledWith('mail', 'Work', 'Tom Example');
+    expect(accounts.accounts[0]).toMatchObject({ displayName: 'Work', label: 'Work', senderName: 'Tom Example' });
+  });
+
+  it('puts the names back when the backend refuses them', async () => {
+    const accounts = useAccountsStore();
+    await accounts.load();
+    vi.mocked(backendSetAccountNames).mockRejectedValue(new Error('backend.errors.accountNameInvalid'));
+
+    expect(await accounts.setNames('mail', 'Work', 'Tom')).toBe(false);
+    expect(accounts.accounts[0]).toMatchObject({ displayName: 'Tom Example', label: null, senderName: 'Tom Example' });
   });
 });
 

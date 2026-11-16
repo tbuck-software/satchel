@@ -54,6 +54,13 @@ impl<'a> SecretContext<'a> {
             row: state,
         }
     }
+    /// A translation engine's API key, bound to the engine it was saved for.
+    pub fn translation_api_key(engine: &'a str) -> Self {
+        Self {
+            column: "translation_engine_keys.encrypted_api_key",
+            row: engine,
+        }
+    }
     /// A master key wrapped for a backup; one per file, so no row.
     pub fn wrapped_master_key() -> Self {
         Self {
@@ -600,7 +607,10 @@ fn profile_keyring_account(profile_dir: &Path) -> String {
             hash.update(unit.to_le_bytes());
         }
     }
-    format!("{KEYRING_ACCOUNT}:{:x}", hash.finalize())
+    format!(
+        "{KEYRING_ACCOUNT}:{}",
+        crate::utils::hex::lower_hex(&hash.finalize())
+    )
 }
 
 #[cfg(desktop)]
@@ -894,6 +904,39 @@ mod wrapped_export_tests {
                 "invalid key derivation parameters"
             );
         }
+    }
+
+    /// Wrapped keys written by argon2 0.5.3, the version that produced every
+    /// backup in the field. An Argon2 update that changes the derivation, the
+    /// AAD or the envelope makes these unreadable, which is a data break, not
+    /// a test to regenerate.
+    #[test]
+    fn backups_wrapped_by_argon2_0_5_still_unwrap() {
+        let key: [u8; 32] = std::array::from_fn(|i| i as u8);
+        let current = "wrapped:v1:65536:3:1:mGpcifGeAGjNHTnAXqIUCA==:enc:v2:mT522F6JLuh6Dkra:iVyRmM5NHv6V3RFYAW7ryoSqJBgcza12jm57HHykb6kDBU5RZUhij2slRcsgaPQwSPJGXouTA01I3rXU";
+        let legacy = "wrapped:v1:19456:2:1:CQkJCQkJCQkJCQkJCQkJCQ==:enc:v2:qdkrwcAwEx3Enz8H:np4OTpfh57wxs5a4zse/YzLP40p/yokvcV+jwI5zqbIkyPPGlBWk0uNQ5BRxkVPSkY+oUskD+SHf2Qvf";
+        for wrapped in [current, legacy] {
+            assert_eq!(
+                unwrap_master_key(wrapped, Some("fixture passphrase")).unwrap(),
+                key
+            );
+            assert_eq!(
+                unwrap_master_key(wrapped, Some("wrong passphrase")).unwrap_err(),
+                BACKUP_PASSPHRASE_REJECTED
+            );
+        }
+        let derived = derive_wrapping_key(
+            "fixture passphrase",
+            &[3_u8; 16],
+            WRAP_M_COST,
+            WRAP_T_COST,
+            WRAP_P_COST,
+        )
+        .unwrap();
+        assert_eq!(
+            STANDARD.encode(derived),
+            "zGgWW1pJKA500MCLObN2+Dh5Xnn6ozErK1WOAxJJwLs="
+        );
     }
 
     #[test]

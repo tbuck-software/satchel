@@ -61,3 +61,11 @@ it('requires an explicitly selected send time to stay in the future', () => {
     expect(composerSendBlocker(state({ to: ['a@example.com'], ...text, scheduledFor }), now)).toBeNull();
   }
 });
+
+it('takes the mail merge list in place of To/Cc/Bcc', () => {
+  expect(composerSendBlocker(state({ mergeRecipients: 3, ...text }))).toBeNull();
+  expect(composerSendBlocker(state({ mergeRecipients: 0, ...text }))).toEqual({ reason: 'noRecipients' });
+  expect(composerSendBlocker(state({ mergeRecipients: 3 }))).toEqual({ reason: 'empty' });
+  // A stray invalid chip cannot block a merge; the copies never carry it.
+  expect(composerSendBlocker(state({ mergeRecipients: 3, to: ['nope'], ...text }))).toBeNull();
+});

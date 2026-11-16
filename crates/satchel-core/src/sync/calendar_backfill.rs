@@ -211,7 +211,7 @@ async fn mark_calendar_scanned(
         crate::db::calendar::CalendarRepository::upsert_invite_on_connection(
             &mut tx,
             &reference.account_id,
-            Some(&reference.message_id),
+            crate::db::calendar::InviteOrigin::MailPart(&reference.message_id),
             invite,
         )
         .await

@@ -9,6 +9,7 @@ import { useRoute, useRouter } from 'vue-router';
 import type {
   BackendDraft,
   BackendOutgoingAttachment,
+  BackendSendMessagePayload,
   BackendSendMessageResult,
 } from '@/types/composer';
 import { useAccountsStore } from '@/stores/accounts';
@@ -26,6 +27,10 @@ import RichTextEditor from '@/components/mail/RichTextEditor.vue';
 import ComposerSignature from '@/components/mail/ComposerSignature.vue';
 import ComposerThreadContext from '@/components/mail/ComposerThreadContext.vue';
 import ComposerSenderField from '@/components/mail/ComposerSenderField.vue';
+import MailMergeBar from '@/components/mail/MailMergeBar.vue';
+import { useMailMergeStore } from '@/stores/mailMerge';
+import { contactsMergeSource, mergeDurationMinutes, mergeToken, type MailMergeSource } from '@/utils/mailMerge';
+import type { ComposerMailMergeSeed } from '@/stores/composer';
 import SegmentedControl from '@/components/ui/SegmentedControl.vue';
 import AppBanner from '@/components/ui/AppBanner.vue';
 import AppButton from '@/components/ui/AppButton.vue';
@@ -47,6 +52,9 @@ import {
 } from '@/composables/useComposerCrypto';
 import { useComposerInlineAttachments, type ComposerInlineAttachmentEditor } from '@/composables/useComposerInlineAttachments';
 import { useThreadEmlDrop } from '@/composables/useThreadEmlDrop';
+import { useRecipientDrop } from '@/composables/useRecipientDrop';
+import { openDraftTarget, type OpenDraftTarget } from '@/composables/openDraftTarget';
+import type { RecipientField } from '@/utils/appDrag';
 import { useComposerLocalBackup } from '@/composables/useComposerLocalBackup';
 import { useDraftEditorClaim } from '@/composables/useDraftEditorClaim';
 import { useComposerSignature } from '@/composables/useComposerSignature';
@@ -76,6 +84,10 @@ import { composerDraftInput, composerDraftSnapshot, composerRecoveryContent, typ
 import type { ComposerBackup, ComposerBackupContent } from '@/persistence/composerBackup';
 
 const SendLaterMenu = defineAsyncComponent(() => import('@/components/mail/SendLaterMenu.vue'));
+// Free slots and their text load the first time someone asks for them.
+const InsertAvailabilityDialog = defineAsyncComponent(() => import('@/components/mail/InsertAvailabilityDialog.vue'));
+const MailMergeSourceDialog = defineAsyncComponent(() => import('@/components/mail/MailMergeSourceDialog.vue'));
+const MailMergeReviewDialog = defineAsyncComponent(() => import('@/components/mail/MailMergeReviewDialog.vue'));
 
 const props = withDefaults(defineProps<{
   embedded?: boolean;
@@ -88,6 +100,10 @@ const props = withDefaults(defineProps<{
   initialSubject?: string;
   initialBody?: string;
   initialBodyHtml?: string | null;
+  /** Start in mail merge mode, with these contacts as the list when given. */
+  initialMailMerge?: ComposerMailMergeSeed | null;
+  /** Bumped by the palette's "Mail merge…" while this composer is open. */
+  mailMergeRequests?: number;
 }>(), {
   embedded: false,
   mode: 'new',
@@ -99,6 +115,8 @@ const props = withDefaults(defineProps<{
   initialSubject: '',
   initialBody: '',
   initialBodyHtml: null,
+  initialMailMerge: null,
+  mailMergeRequests: 0,
 });
 
 const emit = defineEmits<{
@@ -130,6 +148,7 @@ const attachmentActions = useAttachmentActions();
 const composerTransport = useComposerTransport();
 const toast = useToast();
 const confirm = useConfirm();
+const mailMergeStore = useMailMergeStore();
 const supportsBackend = composerTransport.commandsAvailable();
 
 const accountId = ref<string>('');
@@ -142,8 +161,10 @@ const subject = ref(props.initialSubject);
 const body = ref(props.initialBody);
 const bodyHtml = ref<string | null>(props.initialBodyHtml);
 const { writingText, writingHtml, historyText, historyHtml, removeHistory } = useComposerBody(body, bodyHtml);
-const { textarea: writingTextarea } = useTextareaAutosize({ input: writingText });
-const { textarea: historyTextarea } = useTextareaAutosize({ input: historyText });
+const writingTextarea = ref<HTMLTextAreaElement>();
+const historyTextarea = ref<HTMLTextAreaElement>();
+useTextareaAutosize({ element: writingTextarea, input: writingText });
+useTextareaAutosize({ element: historyTextarea, input: historyText });
 const contextThreadId = ref<string | null>(props.threadId);
 const replyToMessageId = ref<string | null>(null);
 const attachments = ref<BackendOutgoingAttachment[]>([]);
@@ -157,8 +178,31 @@ const scheduledFor = ref<string | null>(null);
 const scheduleClock = useActionClock(() => scheduledFor.value !== null);
 const followUpAt = ref<string | null>(null);
 const showTemplatePicker = ref(false);
+const showAvailability = ref(false);
 const showSendLater = ref(false);
 const sendLaterAnchor = ref<AnchorBox | null>(null);
+
+/*
+ * Mail merge: the list replaces To/Cc/Bcc, Send opens the review, and the
+ * review starts a job that sends one copy per recipient through the outbox.
+ */
+const mergeSource = ref<MailMergeSource | null>(
+  props.initialMailMerge?.contacts?.length
+    ? contactsMergeSource(
+      props.initialMailMerge.contacts,
+      props.initialMailMerge.label ?? t('mailMerge.source.contactsLabel', { count: props.initialMailMerge.contacts.length }, props.initialMailMerge.contacts.length),
+    )
+    : null,
+);
+const showMergeSource = ref(Boolean(props.initialMailMerge) && !mergeSource.value);
+const showMergeReview = ref(false);
+const mergeBusy = ref(false);
+const mergeError = ref<string | null>(null);
+/** Where a picked field goes: the field the caret was in last. */
+const mergeInsertTarget = ref<'subject' | 'body'>('body');
+const subjectInputRef = ref<HTMLInputElement | null>(null);
+/** One token per review: a start sent again after a lost answer finds its job. */
+const mergeRequestId = ref('');
 
 function openSendLater(event: MouseEvent | KeyboardEvent) {
   const trigger = event.currentTarget as HTMLElement;
@@ -240,6 +284,9 @@ const startsInRecipients = computed(
   () => props.mode === 'new' && props.initialTo.length === 0 && !props.initialDraftId,
 );
 const attachmentZoneRef = ref<InstanceType<typeof AttachmentDropZone> | null>(null);
+const attachTitle = computed(() => (attachments.value.length > 0
+  ? t('compose.toolbar.attachWithCount', { count: attachments.value.length })
+  : t('compose.toolbar.attach')));
 // Send and the composer's own status line: no toast may sit on them.
 const footerRef = ref<HTMLElement | null>(null);
 useToastClearance(footerRef);
@@ -273,6 +320,81 @@ const threadEmlDrop = useThreadEmlDrop(
   },
   () => sending.value,
 );
+
+// Contacts and chips dragged onto the composer. The id tells this
+// composer's chips (a move between its fields) from anyone else's.
+const composerDragId = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+  ? crypto.randomUUID()
+  : `composer-${Math.random().toString(36).slice(2)}`;
+
+function recipientsOf(field: RecipientField) {
+  return field === 'to' ? to : field === 'cc' ? cc : bcc;
+}
+
+function addRecipients(field: RecipientField, addresses: string[]) {
+  const list = recipientsOf(field);
+  const next = [...list.value];
+  for (const address of addresses) if (!next.includes(address)) next.push(address);
+  if (next.length !== list.value.length) list.value = next;
+}
+
+function removeRecipients(field: RecipientField, addresses: string[]) {
+  const list = recipientsOf(field);
+  list.value = list.value.filter((value) => !addresses.includes(value));
+}
+
+// Cc and Bcc open while a recipient hovers the composer, so either can take
+// it, and fold away again if the drop left them empty.
+let ccBccOpenedForDrag = false;
+const recipientDrop = useRecipientDrop({
+  composerId: composerDragId,
+  addToTo: (addresses) => addRecipients('to', addresses),
+  // A mail merge has no recipient fields: its list comes from the merge source.
+  disabled: () => sending.value || mergeSource.value !== null,
+  onActiveChange: (active) => {
+    if (active) {
+      if (!showCcBcc.value && !isPhone.value) {
+        showCcBcc.value = true;
+        ccBccOpenedForDrag = true;
+      }
+      return;
+    }
+    if (!ccBccOpenedForDrag) return;
+    ccBccOpenedForDrag = false;
+    if (cc.value.length === 0 && bcc.value.length === 0) showCcBcc.value = false;
+  },
+});
+
+function onComposerDragEnter(event: DragEvent) {
+  threadEmlDrop.onDragEnter(event);
+  recipientDrop.onDragEnter(event);
+}
+function onComposerDragOver(event: DragEvent) {
+  threadEmlDrop.onDragOver(event);
+  recipientDrop.onDragOver(event);
+}
+function onComposerDragLeave(event: DragEvent) {
+  threadEmlDrop.onDragLeave(event);
+  recipientDrop.onDragLeave(event);
+}
+function onComposerDrop(event: DragEvent) {
+  threadEmlDrop.onDrop(event);
+  recipientDrop.onDrop(event);
+}
+
+// What a drop does, offered to the keyboard: the palette's "Attach to draft",
+// a contact's "Add to draft".
+const draftTarget: OpenDraftTarget = {
+  attach: (source) => threadEmlDrop.attach(source),
+  canAddRecipients: () => mergeSource.value === null,
+  addRecipients: (addresses) => {
+    if (mergeSource.value === null) addRecipients('to', addresses);
+  },
+};
+openDraftTarget.value = draftTarget;
+onBeforeUnmount(() => {
+  if (openDraftTarget.value === draftTarget) openDraftTarget.value = null;
+});
 const initialized = ref(false);
 /** Failed draft loads must not persist or send an empty replacement. */
 const draftLoadFailed = ref(false);
@@ -488,6 +610,7 @@ const sendBlocker = computed(() => composerSendBlocker({
   body: body.value,
   attachmentCount: attachments.value.length,
   scheduledFor: scheduledFor.value,
+  mergeRecipients: mergeSource.value ? mergeSource.value.rows.length : null,
 }, scheduleClock.now.value));
 const canSend = computed(() => sendBlocker.value === null);
 /** What the sender can do about a disabled Send button, if anything. */
@@ -999,6 +1122,39 @@ function announceAfterClose(tone: 'success' | 'info' | 'warning', text: string, 
   else toast.info(text, options);
 }
 
+/** The message as Send hands it over; a mail merge sends the same. */
+function sendPayload(account: { id: string; displayName: string; senderName?: string }): BackendSendMessagePayload {
+  return {
+    accountId: account.id,
+    to: to.value,
+    cc: cc.value,
+    bcc: bcc.value,
+    subject: subject.value.trim() || t('compose.noSubject'),
+    body: body.value,
+    bodyHtml: plainTextCompose.value
+      ? null
+      : composerInlineAttachments.serializeInlineImages(bodyHtml.value ?? composerHtmlFromText(body.value)),
+    threadId: contextThreadId.value,
+    replyToMessageId: replyToMessageId.value,
+    attachments: attachments.value,
+    fromAddress: fromAddress.value,
+    fromName: account.senderName ?? account.displayName,
+    replyTo: replyTo.value,
+    draftId: draftId.value,
+    scheduledFor: scheduledFor.value,
+    followUpAt: followUpAt.value,
+    smimeSignWithCertId: smimeSignCertId.value,
+    smimeEncryptToRecipients: smimeEncrypt.value,
+    pgpSignWithKeyId: pgpSignKeyId.value,
+    pgpEncryptToRecipients: pgpEncrypt.value,
+    priority: priority.value,
+    signatureId: selectedSignatureId.value,
+    signatureVariant: signatureVariant.value,
+    signatureOverrideText: signatureOverrideText.value,
+    signatureOverrideHtml: plainTextCompose.value ? null : signatureOverrideHtml.value,
+  };
+}
+
 async function send() {
   scheduleClock.refresh();
   if (!canSend.value || !activeAccount.value) {
@@ -1006,40 +1162,19 @@ async function send() {
     if (sendBlockedHint.value) status.value = { tone: 'warning', text: sendBlockedHint.value };
     return;
   }
+  // A mail merge never sends from here: the review comes first.
+  if (mergeSource.value) {
+    mergeError.value = null;
+    mergeRequestId.value = crypto.randomUUID();
+    showMergeReview.value = true;
+    return;
+  }
   sending.value = true;
   let sendCommitted = false;
   try {
     await pauseDraftPersistence();
     status.value = null;
-    const result = await composerTransport.sendMessage({
-      accountId: activeAccount.value.id,
-      to: to.value,
-      cc: cc.value,
-      bcc: bcc.value,
-      subject: subject.value.trim() || t('compose.noSubject'),
-      body: body.value,
-      bodyHtml: plainTextCompose.value
-        ? null
-        : composerInlineAttachments.serializeInlineImages(bodyHtml.value ?? composerHtmlFromText(body.value)),
-      threadId: contextThreadId.value,
-      replyToMessageId: replyToMessageId.value,
-      attachments: attachments.value,
-      fromAddress: aliasEmail.value,
-      fromName: activeAccount.value.displayName,
-      replyTo: replyTo.value,
-      draftId: draftId.value,
-      scheduledFor: scheduledFor.value,
-      followUpAt: followUpAt.value,
-      smimeSignWithCertId: smimeSignCertId.value,
-      smimeEncryptToRecipients: smimeEncrypt.value,
-      pgpSignWithKeyId: pgpSignKeyId.value,
-      pgpEncryptToRecipients: pgpEncrypt.value,
-      priority: priority.value,
-      signatureId: selectedSignatureId.value,
-      signatureVariant: signatureVariant.value,
-      signatureOverrideText: signatureOverrideText.value,
-      signatureOverrideHtml: plainTextCompose.value ? null : signatureOverrideHtml.value,
-    });
+    const result = await composerTransport.sendMessage(sendPayload(activeAccount.value));
     sendCommitted = true;
     finishDraftPersistence();
     localBackup.clear();
@@ -1110,6 +1245,139 @@ async function send() {
   }
 }
 
+function openMailMerge() {
+  if (moreSettingsRef.value) moreSettingsRef.value.open = false;
+  showMergeSource.value = true;
+}
+
+function applyMergeSource(source: MailMergeSource) {
+  mergeSource.value = source;
+  showMergeSource.value = false;
+  // Copies are addressed one by one; nothing typed into To/Cc/Bcc goes along.
+  to.value = [];
+  cc.value = [];
+  bcc.value = [];
+  scheduledFor.value = null;
+  followUpAt.value = null;
+  showCcBcc.value = false;
+  mergeError.value = null;
+}
+
+function stopMailMerge() {
+  mergeSource.value = null;
+  showMergeReview.value = false;
+}
+
+function changeMergeList() {
+  showMergeReview.value = false;
+  showMergeSource.value = true;
+}
+
+/** Puts `{{Field}}` where the caret was: the subject, or the body. */
+async function insertMergeField(field: string) {
+  const token = mergeToken(field);
+  if (mergeInsertTarget.value === 'subject' && subjectInputRef.value) {
+    const input = subjectInputRef.value;
+    const start = input.selectionStart ?? subject.value.length;
+    const end = input.selectionEnd ?? start;
+    subject.value = `${subject.value.slice(0, start)}${token}${subject.value.slice(end)}`;
+    await nextTick();
+    input.focus();
+    input.setSelectionRange(start + token.length, start + token.length);
+    return;
+  }
+  if (plainTextCompose.value && writingTextarea.value) {
+    const area = writingTextarea.value;
+    const start = area.selectionStart ?? writingText.value.length;
+    const end = area.selectionEnd ?? start;
+    writingText.value = `${writingText.value.slice(0, start)}${token}${writingText.value.slice(end)}`;
+    bodyHtml.value = null;
+    await nextTick();
+    area.focus();
+    area.setSelectionRange(start + token.length, start + token.length);
+    return;
+  }
+  richEditorRef.value?.insertText(token);
+}
+
+/** What `create` appends as the signature, so the preview shows it too. */
+const mergeSignature = computed(() => ({
+  fromAddress: aliasEmail.value,
+  signatureId: selectedSignatureId.value,
+  signatureVariant: signatureVariant.value,
+  signatureOverrideText: signatureOverrideText.value,
+  signatureOverrideHtml: plainTextCompose.value ? null : signatureOverrideHtml.value,
+}));
+
+const mergeTemplate = computed(() => ({
+  subject: subject.value.trim() || t('compose.noSubject'),
+  body: body.value,
+  body_html: plainTextCompose.value ? null : (bodyHtml.value ?? composerHtmlFromText(body.value)),
+}));
+
+/**
+ * Starts the job once the user confirmed count and account. The job takes
+ * the draft's place, so persistence pauses as it does for a send.
+ */
+async function startMailMerge(delaySeconds: number, count: number) {
+  const minutes = mergeDurationMinutes(count, delaySeconds);
+  const source = mergeSource.value;
+  const account = activeAccount.value;
+  if (!source || !account || mergeBusy.value) return;
+  const confirmed = await confirm.ask({
+    title: t('mailMerge.confirm.title', { count }, count),
+    body: t('mailMerge.confirm.body', { address: fromAddress.value, account: account.displayName || account.email }),
+    detail: `${t('mailMerge.review.duration', { minutes }, minutes)} ${t('mailMerge.confirm.detail')}`,
+    confirmLabel: t('mailMerge.confirm.send'),
+  });
+  if (!confirmed) return;
+  mergeBusy.value = true;
+  mergeError.value = null;
+  let committed = false;
+  try {
+    await pauseDraftPersistence();
+    const job = await mailMergeStore.createJob({
+      message: { ...sendPayload(account), to: [], cc: [], bcc: [], scheduledFor: null, followUpAt: null },
+      sourceLabel: source.label,
+      delaySeconds,
+      list: source,
+      requestId: mergeRequestId.value || crypto.randomUUID(),
+    });
+    committed = true;
+    finishDraftPersistence();
+    localBackup.clear();
+    editorClaim.release();
+    showMergeReview.value = false;
+    const text = t('mailMerge.started', { count: job.total }, job.total);
+    if (props.embedded) {
+      toast.info(text, { action: { label: t('mailMerge.viewProgress'), handler: () => router.push({ name: 'outbox' }) } });
+    } else {
+      status.value = { tone: 'info', text };
+    }
+    emit('sent');
+    if (props.embedded) return;
+    if (isPopout()) await closePopout();
+    else await router.push({ name: 'outbox' });
+  } catch (err) {
+    if (!committed) mergeError.value = translateBackendError(err) ?? (err instanceof Error ? err.message : String(err));
+    else console.warn('post-merge navigation failed', err);
+  } finally {
+    if (!committed) resumeDraftPersistence();
+    mergeBusy.value = false;
+  }
+}
+
+// The palette asks whichever composer is open. A reply or forward is no
+// mail merge: the conversation's quote would reach everyone on the list.
+watch(() => props.mailMergeRequests, (next, previous) => {
+  if (next <= (previous ?? 0)) return;
+  if (contextThreadId.value || replyToMessageId.value || props.mode !== 'new') {
+    status.value = { tone: 'warning', text: t('mailMerge.notForReplies') };
+    return;
+  }
+  openMailMerge();
+});
+
 function formatScheduled(value: string | null): string {
   return value ? formatTimestamp(value) : '';
 }
@@ -1137,7 +1405,7 @@ function currentDraftState(): ComposerDraftState {
   return {
     accountId: accountId.value,
     fromAddress: fromAddress.value,
-    fromName: activeAccount.value?.displayName ?? null,
+    fromName: activeAccount.value ? (activeAccount.value.senderName ?? activeAccount.value.displayName) : null,
     threadId: contextThreadId.value,
     replyTo: replyTo.value,
     sendOptions: {
@@ -1192,6 +1460,31 @@ function onTemplateApply(rendered: {
   showTemplatePicker.value = false;
 }
 
+/** Put the availability text where the caret is, in either editor. */
+function onAvailabilityInsert(content: { text: string; html: string }) {
+  showAvailability.value = false;
+  if (!plainTextCompose.value) {
+    // An editor that is gone (closed mid-dialog) must not swallow the text silently.
+    if (!richEditorRef.value?.insertHtml?.(content.html)) toast.error(t('availability.insert.insertFailed'));
+    return;
+  }
+  const area = writingTextarea.value;
+  const value = writingText.value;
+  const from = area?.selectionStart ?? value.length;
+  const to = area?.selectionEnd ?? from;
+  const before = value.slice(0, from);
+  const after = value.slice(to);
+  const lead = before && !before.endsWith('\n') ? '\n' : '';
+  const trail = after && !after.startsWith('\n') ? '\n' : '';
+  writingText.value = `${before}${lead}${content.text}${trail}${after}`;
+  bodyHtml.value = null;
+  const caret = before.length + lead.length + content.text.length;
+  void nextTick(() => {
+    area?.focus();
+    area?.setSelectionRange(caret, caret);
+  });
+}
+
 function onSendLaterChosen(value: string | null) {
   scheduledFor.value = value;
   showSendLater.value = false;
@@ -1211,6 +1504,11 @@ const signatureName = computed(() =>
   availableSignatures.value.find((signature) => signature.id === selectedSignatureId.value)?.name
     ?? t('compose.signature.none'),
 );
+
+function openAvailabilityFromPanel() {
+  if (moreSettingsRef.value) moreSettingsRef.value.open = false;
+  showAvailability.value = true;
+}
 
 function openSignatureMenu() {
   if (moreSettingsRef.value) moreSettingsRef.value.open = false;
@@ -1240,13 +1538,16 @@ defineExpose({
 <template>
   <section
     :class="['compose', { 'compose--embedded': props.embedded, 'compose--phone': isPhone }]"
-    @dragenter.capture="threadEmlDrop.onDragEnter"
-    @dragover.capture="threadEmlDrop.onDragOver"
-    @dragleave.capture="threadEmlDrop.onDragLeave"
-    @drop.capture="threadEmlDrop.onDrop"
+    @dragenter.capture="onComposerDragEnter"
+    @dragover.capture="onComposerDragOver"
+    @dragleave.capture="onComposerDragLeave"
+    @drop.capture="onComposerDrop"
   >
     <div v-if="threadEmlDrop.dropActive.value" class="compose-eml-drop" aria-hidden="true">
       <span>{{ $t('compose.emlDrop.hint') }}</span>
+    </div>
+    <div v-else-if="recipientDrop.overBody.value" class="compose-recipient-drop" aria-hidden="true">
+      {{ $t('composeDrop.addToTo') }}
     </div>
     <!-- The header carries the title alone. Template and Save live in the
          footer beside Send, Discard in the options panel. -->
@@ -1326,9 +1627,30 @@ defineExpose({
       />
     </div>
 
-    <div class="row recipient-row">
+    <MailMergeBar
+      v-if="mergeSource"
+      :source="mergeSource"
+      :disabled="sending || mergeBusy"
+      @insert="insertMergeField"
+      @change="showMergeSource = true"
+      @stop="stopMailMerge"
+    />
+    <div v-else class="row recipient-row">
       <label class="label" :for="toFieldId">{{ $t('common.to') }}</label>
-      <RecipientChips ref="toFieldRef" v-model="to" :input-id="toFieldId" :label="$t('common.to')" :placeholder="$t('compose.recipients.toPlaceholder')" class="field" @submit="send" />
+      <RecipientChips
+        ref="toFieldRef"
+        v-model="to"
+        :input-id="toFieldId"
+        :label="$t('common.to')"
+        :placeholder="$t('compose.recipients.toPlaceholder')"
+        field="to"
+        :composer-id="composerDragId"
+        :drop-ready="recipientDrop.dragActive.value"
+        :drop-fallback="recipientDrop.overBody.value"
+        class="field"
+        @submit="send"
+        @move-from="removeRecipients"
+      />
       <AppButton v-if="!isPhone" size="sm" variant="ghost" class="cc-link"
         :aria-expanded="showCcBcc"
         :title="showCcBcc ? $t('compose.recipients.collapseCcBcc') : $t('compose.recipients.showCcBcc')"
@@ -1348,7 +1670,7 @@ defineExpose({
       @click="openPhoneFold"
     >
       <!-- One line, so the name reads "Cc/Bcc, From: address". -->
-      <span class="label">{{ $t('compose.recipients.ccBccFrom') }}</span> <span class="compose-fold-from">{{ fromAddress }}</span>
+      <span class="label">{{ mergeSource ? $t('common.from') : $t('compose.recipients.ccBccFrom') }}</span> <span class="compose-fold-from">{{ fromAddress }}</span>
       <!-- Says the row opens; as bare text it read like a caption. -->
       <AppIcon class="compose-fold-chevron"><path d="m4.5 6.5 3.5 3.5 3.5-3.5" /></AppIcon>
     </AppButton>
@@ -1360,13 +1682,36 @@ defineExpose({
       :inert="phoneFoldClosed || undefined"
       data-testid="compose-fold"
     >
-      <div class="row">
+      <div v-if="!mergeSource" class="row">
         <label class="label" :for="ccFieldId">{{ $t('common.cc') }}</label>
-        <RecipientChips ref="ccFieldRef" v-model="cc" :input-id="ccFieldId" :label="$t('common.cc')" :placeholder="$t('compose.recipients.ccPlaceholder')" class="field" @submit="send" />
+        <RecipientChips
+          ref="ccFieldRef"
+          v-model="cc"
+          :input-id="ccFieldId"
+          :label="$t('common.cc')"
+          :placeholder="$t('compose.recipients.ccPlaceholder')"
+          field="cc"
+          :composer-id="composerDragId"
+          :drop-ready="recipientDrop.dragActive.value"
+          class="field"
+          @submit="send"
+          @move-from="removeRecipients"
+        />
       </div>
-      <div class="row">
+      <div v-if="!mergeSource" class="row">
         <label class="label" :for="bccFieldId">{{ $t('common.bcc') }}</label>
-        <RecipientChips v-model="bcc" :input-id="bccFieldId" :label="$t('common.bcc')" :placeholder="$t('compose.recipients.bccPlaceholder')" class="field" @submit="send" />
+        <RecipientChips
+          v-model="bcc"
+          :input-id="bccFieldId"
+          :label="$t('common.bcc')"
+          :placeholder="$t('compose.recipients.bccPlaceholder')"
+          field="bcc"
+          :composer-id="composerDragId"
+          :drop-ready="recipientDrop.dragActive.value"
+          class="field"
+          @submit="send"
+          @move-from="removeRecipients"
+        />
       </div>
       <div v-if="isPhone" class="row sender-row">
         <label class="label" :for="senderFieldId">{{ $t('common.from') }}</label>
@@ -1384,16 +1729,32 @@ defineExpose({
       <label class="label" :for="subjectFieldId">{{ $t('common.subject') }}</label>
       <input
         :id="subjectFieldId"
+        ref="subjectInputRef"
         v-model="subject"
         class="compose-subject"
         :aria-label="$t('common.subject')"
+        @focus="mergeInsertTarget = 'subject'"
         :placeholder="$t('compose.subject.placeholder')"
         @keydown.meta.enter.prevent="send"
         @keydown.ctrl.enter.prevent="send"
       />
     </div>
 
-    <div class="body" :class="{ 'body--with-history': plainTextCompose ? historyText : historyHtml }" @click="focusComposeBody">
+    <!-- Under the subject, where they are in view as the composer opens: at
+         the end of the column they sat below the quoted history, out of sight
+         of the text they belong to. -->
+    <AttachmentDropZone
+      ref="attachmentZoneRef"
+      v-model="attachments"
+      inline-enabled
+      :show-empty-state="false"
+      class="compose-attachments"
+      @insert-inline="composerInlineAttachments.onAttachmentInsertedInline"
+      @remove-inline="composerInlineAttachments.onInlineAttachmentRemoved"
+      @move-to-attachment="composerInlineAttachments.onInlineAttachmentRemoved"
+    />
+
+    <div class="body" :class="{ 'body--with-history': plainTextCompose ? historyText : historyHtml }" @click="focusComposeBody" @focusin="mergeInsertTarget = 'body'">
       <textarea
         v-if="plainTextCompose"
         ref="writingTextarea"
@@ -1483,16 +1844,6 @@ defineExpose({
       <ComposerThreadContext v-if="contextThreadId && !quoteHoldsWholeThread" :thread-id="contextThreadId" />
     </div>
 
-    <AttachmentDropZone
-      ref="attachmentZoneRef"
-      v-model="attachments"
-      inline-enabled
-      :show-empty-state="false"
-      class="compose-attachments"
-      @insert-inline="composerInlineAttachments.onAttachmentInsertedInline"
-      @remove-inline="composerInlineAttachments.onInlineAttachmentRemoved"
-      @move-to-attachment="composerInlineAttachments.onInlineAttachmentRemoved"
-    />
     </div>
 
     <footer ref="footerRef" class="footer">
@@ -1518,12 +1869,16 @@ defineExpose({
       </p>
       <div class="footer-actions">
         <!-- The attachment label folds away when the composer is narrow. -->
-        <AppButton variant="ghost" class="tool-button" :title="$t('compose.toolbar.attach')" :aria-label="$t('compose.toolbar.attach')" @click="attachmentZoneRef?.openPicker()">
+        <AppButton variant="ghost" class="tool-button" :title="attachTitle" :aria-label="attachTitle" @click="attachmentZoneRef?.openPicker()">
           <template #icon><AppIcon size="lg"><path d="M13.5 7.5l-6.2 6.2a3.5 3.5 0 01-5-5l6.5-6.5a2.5 2.5 0 013.5 3.5L5.8 12.2a1.5 1.5 0 01-2.1-2.1l6.1-6.1"/></AppIcon></template>
           <span class="tool-label">{{ $t('compose.toolbar.attachShort') }}</span>
+          <span v-if="attachments.length > 0" class="tool-count" aria-hidden="true">{{ attachments.length }}</span>
         </AppButton>
         <IconButton size="lg" v-if="supportsBackend" :title="$t('compose.toolbar.template')" :aria-label="$t('compose.toolbar.template')" @click="showTemplatePicker = true">
           <AppIcon size="lg"><path d="M3 1.5h7l3 3v10H3z"/><path d="M10 1.5v3h3M5.5 8h5M5.5 11h4"/></AppIcon>
+        </IconButton>
+        <IconButton size="lg" v-if="supportsBackend && !isPhone" :title="$t('availability.insert.button')" :aria-label="$t('availability.insert.button')" :disabled="sending" data-testid="compose-insert-availability" @click="showAvailability = true">
+          <AppIcon size="lg"><rect x="2" y="3" width="12" height="11" rx="1.5"/><path d="M5 1.5v3M11 1.5v3M2 6.5h12M5.5 10l1.5 1.5 3-3"/></AppIcon>
         </IconButton>
         <details ref="moreSettingsRef" class="more-settings">
           <summary class="more-summary" :title="$t('compose.toolbar.more')" :aria-label="$t('compose.toolbar.more')">
@@ -1543,6 +1898,19 @@ defineExpose({
               >
                 <span class="panel-signature-name">{{ signatureName }}</span>
                 <AppIcon size="sm"><path d="m4 6 4 4 4-4" /></AppIcon>
+              </AppButton>
+            </div>
+            <!-- A phone gets the words, not just an icon in the dock. -->
+            <div v-if="isPhone && supportsBackend" class="panel-row">
+              <AppButton
+                variant="ghost"
+                class="panel-signature"
+                :disabled="sending"
+                data-testid="compose-insert-availability-panel"
+                @click="openAvailabilityFromPanel"
+              >
+                <template #icon><AppIcon><rect x="2" y="3" width="12" height="11" rx="1.5"/><path d="M5 1.5v3M11 1.5v3M2 6.5h12M5.5 10l1.5 1.5 3-3"/></AppIcon></template>
+                {{ $t('availability.insert.button') }}
               </AppButton>
             </div>
             <div class="panel-row">
@@ -1597,6 +1965,13 @@ defineExpose({
                 <small v-if="cryptoHint" class="panel-note">{{ cryptoHint }}</small>
               </div>
             </div>
+            <template v-if="supportsBackend && !contextThreadId && !mergeSource">
+              <div class="panel-sep" role="separator" />
+              <AppButton size="sm" variant="ghost" class="panel-merge" :disabled="sending" data-testid="compose-mail-merge" @click="openMailMerge">
+                <template #icon><AppIcon><path d="M2 4.5h8M2 8h8M2 11.5h5" /><path d="m11 9.5 3 2-3 2" /></AppIcon></template>
+                {{ $t('mailMerge.menuItem') }}
+              </AppButton>
+            </template>
             <template v-if="draftId">
               <div class="panel-sep" role="separator" />
               <AppButton size="sm" variant="danger"
@@ -1620,7 +1995,19 @@ defineExpose({
           {{ $t('common.save') }}
         </AppButton>
         <!-- A disabled button gets no hover of its own; the wrapper carries the tooltip. -->
-        <span class="send-wrap" :title="sendBlockedHint ?? undefined" data-testid="compose-send-wrap">
+        <span v-if="mergeSource" class="send-wrap" :title="sendBlockedHint ?? undefined">
+          <AppButton
+            variant="primary"
+            :disabled="!canSend || mergeBusy"
+            :shortcut="canSend ? sendShortcut : null"
+            data-testid="compose-merge-review"
+            @click="send"
+          >
+            <template #icon><AppIcon><path d="m14 2-4.5 12L7 9 2 6.5 14 2ZM7 9l4-4"/></AppIcon></template>
+            {{ $t('mailMerge.reviewAndSend') }}
+          </AppButton>
+        </span>
+        <span v-else class="send-wrap" :title="sendBlockedHint ?? undefined" data-testid="compose-send-wrap">
           <SplitButton
             :secondary-label="$t('compose.sendLater.title')"
             :expanded="showSendLater"
@@ -1652,10 +2039,35 @@ defineExpose({
 
     </template>
 
+    <MailMergeSourceDialog
+      v-if="showMergeSource"
+      :current="mergeSource"
+      @apply="applyMergeSource"
+      @close="showMergeSource = false"
+    />
+    <MailMergeReviewDialog
+      v-if="showMergeReview && mergeSource && activeAccount"
+      :source="mergeSource"
+      :template="mergeTemplate"
+      :signature="mergeSignature"
+      :account-id="activeAccount.id"
+      :from-address="fromAddress"
+      :encrypt="pgpEncrypt || smimeEncrypt"
+      :busy="mergeBusy"
+      :error="mergeError"
+      @start="startMailMerge"
+      @change-list="changeMergeList"
+      @close="showMergeReview = false"
+    />
     <TemplatePicker
       v-if="showTemplatePicker"
       @apply="onTemplateApply"
       @close="showTemplatePicker = false"
+    />
+    <InsertAvailabilityDialog
+      v-if="showAvailability"
+      @insert="onAvailabilityInsert"
+      @close="showAvailability = false"
     />
     <SendLaterMenu
       v-if="sendLaterAnchor"
@@ -1874,6 +2286,22 @@ textarea:focus {
   white-space: normal;
 }
 
+/* Too narrow for copy and actions side by side, the actions take a row of
+   their own instead of squeezing the title to a word or two per line. */
+.compose-notices :deep(.banner) {
+  flex-wrap: wrap;
+}
+
+.compose-notices :deep(.banner__copy) {
+  flex: 1 1 22rem;
+}
+
+.compose-notices :deep(.banner__actions) {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
 /* Composer window layout */
 .compose {
   /* Labels sit in a column of their own; every value — field, body text,
@@ -1894,6 +2322,28 @@ textarea:focus {
 
 .compose--embedded {
   height: 100%;
+}
+
+/* A contact over the body: it goes to To, which lights up as well. A pill,
+   not a cover, so the recipient fields stay visible as the other targets. */
+.compose-recipient-drop {
+  position: absolute;
+  inset-inline: 0;
+  bottom: var(--space-xl);
+  z-index: 5;
+  justify-self: center;
+  width: max-content;
+  max-width: calc(100% - 2 * var(--space-md));
+  margin-inline: auto;
+  padding: var(--space-xs) var(--space-md);
+  border: 1px solid var(--accent-primary);
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--accent-primary) 12%, var(--bg-surface));
+  color: var(--accent-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  box-shadow: var(--shadow-lg);
+  pointer-events: none;
 }
 
 /* Covers the composer while a thread from the list hovers it; events pass
@@ -1986,26 +2436,25 @@ textarea:focus {
 .compose :deep(.chips:focus-within) { border-color: transparent; box-shadow: none; }
 .compose :deep(.chip) { padding-block: 3px; }
 
+/* The body has no scroller of its own: it grows with its text inside the
+   column, which scrolls as a whole. A body box that scrolled inside a column
+   that scrolled as well gave two scrollbars once a banner and attachments
+   took the room. Whatever else claims the height, a few lines of the answer
+   stay in view. */
 .compose .body {
-  flex: 1 1 auto;
-  min-height: 0;
+  flex: 1 0 auto;
+  min-height: min(8.5rem, 30vh);
   display: flex;
   flex-direction: column;
-  overflow: auto;
   padding: var(--space-md) 0 var(--space-xl) var(--compose-value-x);
   cursor: text;
-  /* The body scrolls under a fixed footer: without a fade its last line ended
-     in a hard cut ("Show conversation" sliced in half) that read as clipped
-     rather than as more to scroll to. The mask reads only alpha. */
-  -webkit-mask-image: linear-gradient(to bottom, var(--bg-surface) calc(100% - var(--space-lg)), transparent);
-  mask-image: linear-gradient(to bottom, var(--bg-surface) calc(100% - var(--space-lg)), transparent);
 }
 
 /* On the page, the writing area grows with the text and the action bar
    follows right under it, instead of waiting at the bottom of the window.
    The floating composer keeps filling its frame. */
 .compose:not(.compose--embedded) .body {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   min-height: min(18rem, 40vh);
 }
 
@@ -2060,15 +2509,21 @@ textarea:focus {
   line-height: var(--leading-editable);
 }
 
+/* Part of the column, not a box that scrolls on its own: the column already
+   scrolls, and the count on Attach says they are there. */
 .compose .compose-attachments {
   flex: none;
-  max-height: 132px;
-  overflow: auto;
-  margin: 3px 0 8px var(--compose-value-x);
-  padding: 8px 10px;
-  border-color: var(--border-color-muted);
+  margin: 0 0 0 var(--compose-value-x);
+  padding: var(--space-xs) 0;
+  border: 0;
+  border-bottom: var(--border-muted);
+  border-radius: 0;
+  background: transparent;
+}
+
+.compose .compose-attachments.over {
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--bg-base) 28%, transparent);
+  outline: 1px dashed var(--accent-primary);
 }
 
 .compose .compose-attachments :deep(.empty) {
@@ -2098,12 +2553,47 @@ textarea:focus {
 
 /* Labelled tools sit flush with the icon-only ones beside them. */
 .tool-button {
+  position: relative;
   padding-inline: var(--space-2-5) var(--space-3-5);
+}
+
+/* How many files ride along, also once the tray has scrolled out of view.
+   Neutral, not accent: Send is the one accented control in this bar. */
+.tool-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  min-width: 20px;
+  height: 20px;
+  margin-left: var(--space-xs);
+  padding-inline: 6px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--text-primary) 12%, transparent);
+  color: var(--text-primary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--weight-semibold);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
 }
 
 @container (max-width: 34rem) {
   .tool-label { display: none; }
   .tool-button { width: 38px; padding: 0; }
+  /* Without the label the count rides on the icon's corner. */
+  .tool-count {
+    position: absolute;
+    top: 0;
+    right: -2px;
+    min-width: 16px;
+    height: 16px;
+    margin: 0;
+    padding-inline: 4px;
+    background: var(--bg-raised);
+    box-shadow: 0 0 0 1px var(--border-color-muted);
+    font-size: var(--font-size-3xs);
+  }
   .tool-button :deep(.app-button__icon) { margin: 0; }
 }
 
@@ -2201,6 +2691,10 @@ textarea:focus {
   line-height: 1.45;
 }
 
+.panel-merge {
+  justify-self: start;
+}
+
 .panel-signature {
   justify-self: start;
   max-width: 100%;
@@ -2255,8 +2749,28 @@ textarea:focus {
 .compose .status,
 .compose .schedule-info { font-size: var(--font-size-xs); }
 
-/* Desktop: the wrapper adds no box; fields and body stay pinned as before. */
-.compose-scroll,
+/* Fields, body and attachments share one column between the notices and the
+   footer, which scrolls as a whole when they do not fit. Pinned fields over
+   a body that scrolled on its own let a banner and a few attachments push
+   Send and Attach out of the floating frame and squeeze the body to two
+   lines. */
+.compose-scroll {
+  flex: 0 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Room inside the clip for the fields' focus rings, given back outside. */
+  padding-inline: var(--space-2xs);
+  margin-inline: calc(-1 * var(--space-2xs));
+}
+
+.compose--embedded .compose-scroll {
+  flex: 1 1 auto;
+}
+
 .compose-fold {
   display: contents;
 }

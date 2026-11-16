@@ -11,6 +11,7 @@ import {
   backendCommandsAvailable,
   backendRespondToInvite,
   backendSyncGoogleCalendar,
+  backendSyncOutlookCalendar,
   backendSyncGroupware,
   type BackendCalendarEvent,
   type BackendCalendarInvite,
@@ -39,7 +40,7 @@ export const useInvitesStore = defineStore('invites', () => {
   }
 
   /**
-   * Mirror the remote calendars (Google API und CalDAV) into the local events
+   * Mirror the remote calendars (Google, Outlook and CalDAV) into the local events
    * table, then reload. Returns the collected error list so the caller can
    * surface it once — a missing scope should produce one toast, not a toast
    * per poll.
@@ -50,13 +51,14 @@ export const useInvitesStore = defineStore('invites', () => {
    */
   async function syncRemote(): Promise<unknown[]> {
     if (!backendCommandsAvailable()) return [];
-    const [google, dav] = await Promise.allSettled([
+    const [google, outlook, dav] = await Promise.allSettled([
       backendSyncGoogleCalendar(),
+      backendSyncOutlookCalendar(),
       backendSyncGroupware(),
     ]);
     const errors: unknown[] = [];
     let checked = 0;
-    for (const result of [google, dav]) {
+    for (const result of [google, outlook, dav]) {
       if (result.status === 'fulfilled') {
         checked += result.value.accounts_checked;
         errors.push(...result.value.errors);

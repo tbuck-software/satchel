@@ -91,9 +91,15 @@ struct StoredMessage {
     message_id: String,
     thread_id: String,
     was_pre_existing: bool,
+    /// First seen after the account's notification cutoff: new mail, not a
+    /// first sync, a re-sync or a UIDVALIDITY reset replaying old mail.
+    newly_seen: bool,
     message_is_draft: bool,
     message_is_sent: bool,
     attachment_ids: Vec<String>,
+    /// The server reported another workflow marker for this copy than the
+    /// stored one.
+    workflow_marker_changed: bool,
 }
 
 pub(crate) const INGEST_BATCH_SIZE: usize = 100;
@@ -496,13 +502,20 @@ async fn persist_provider_message(
     } else {
         provider_message_id
     };
-    let prior_message = sqlx::query_as::<_, (Option<String>, Option<String>)>(
-        "SELECT thread_id, message_id_header FROM messages WHERE id = ?",
+    let prior_message = sqlx::query_as::<_, (Option<String>, Option<String>, Option<String>)>(
+        "SELECT thread_id, message_id_header, remote_workflow_marker FROM messages WHERE id = ?",
     )
     .bind(&message_id)
     .fetch_optional(&mut **tx)
     .await
     .map_err(|error| error.to_string())?;
+    // Only a marker that changed on this copy is worth the thread's
+    // reconciliation; a mailbox without markers costs nothing extra.
+    let workflow_marker_changed = message.workflow_marker.is_some_and(|marker| {
+        satchel_core::workflow::remote_marker::WorkflowMarker::from_column(
+            prior_message.as_ref().and_then(|row| row.2.as_deref()),
+        ) != marker
+    });
     let prior_thread_id = prior_message
         .as_ref()
         .and_then(|row| row.0.as_deref())
@@ -747,8 +760,8 @@ async fn persist_provider_message(
     // without its parts is missing information, not reporting a message that
     // lost its attachments — mail is immutable on the server.
     sqlx::query(
-        "INSERT INTO messages (id, account_id, folder_id, thread_id, message_id_header, in_reply_to, references_header, from_address, from_name, to_addresses, cc_addresses, bcc_addresses, reply_to, subject, date, body_text, body_html, original_body_html, original_source, snippet, is_read, is_starred, is_draft, is_sent, has_attachments, remote_uid, remote_id, raw_size, raw_headers, remote_draft_id, category, provider_labels, list_unsubscribe, list_unsubscribe_post, auth_spf, auth_dkim, auth_dmarc, smime_encrypted, smime_signed, pgp_signed, trust_metadata, created_at, updated_at, received_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "INSERT INTO messages (id, account_id, folder_id, thread_id, message_id_header, in_reply_to, references_header, from_address, from_name, to_addresses, cc_addresses, bcc_addresses, reply_to, subject, date, body_text, body_html, original_body_html, original_source, snippet, is_read, is_starred, is_draft, is_sent, has_attachments, remote_uid, remote_id, raw_size, raw_headers, remote_draft_id, category, provider_labels, list_unsubscribe, list_unsubscribe_post, auth_spf, auth_dkim, auth_dmarc, smime_encrypted, smime_signed, pgp_signed, trust_metadata, created_at, updated_at, received_at, remote_workflow_marker, chat_version, chat_group_id, chat_group_name)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
             folder_id = excluded.folder_id,
             thread_id = excluded.thread_id,
@@ -787,7 +800,11 @@ async fn persist_provider_message(
             smime_signed = excluded.smime_signed,
             pgp_signed = excluded.pgp_signed,
             trust_metadata = excluded.trust_metadata,
+            chat_version = COALESCE(excluded.chat_version, messages.chat_version),
+            chat_group_id = COALESCE(excluded.chat_group_id, messages.chat_group_id),
+            chat_group_name = COALESCE(excluded.chat_group_name, messages.chat_group_name),
             remote_draft_id = COALESCE(excluded.remote_draft_id, messages.remote_draft_id),
+            remote_workflow_marker = CASE WHEN ? THEN excluded.remote_workflow_marker ELSE messages.remote_workflow_marker END,
             draft_attachments_json = CASE
                 WHEN excluded.is_draft = 1 THEN NULL
                 ELSE messages.draft_attachments_json
@@ -842,10 +859,17 @@ async fn persist_provider_message(
     .bind(&now)
     .bind(&now)
     .bind(message.received_at_rfc3339.as_deref())
-    // The two guards of the conflict clause; its placeholders come after every
-    // one of the inserted values.
+    // `NULL` is no marker.
+    .bind(message.workflow_marker.and_then(|marker| marker.as_column()))
+    .bind(message.chat.as_ref().map(|chat| chat.version.as_str()))
+    .bind(message.chat.as_ref().and_then(|chat| chat.group_id.as_deref()))
+    .bind(message.chat.as_ref().and_then(|chat| chat.group_name.as_deref()))
+    // The guards of the conflict clause; their placeholders come after every
+    // one of the inserted values. A provider that does not report markers
+    // keeps the stored one.
     .bind(flags_locked)
     .bind(flags_locked)
+    .bind(message.workflow_marker.is_some())
     .execute(&mut **tx)
     .await
     .map_err(|err| err.to_string())?;
@@ -927,7 +951,7 @@ async fn persist_provider_message(
         )
         .bind(&attachment_id)
         .bind(&message_id)
-        .bind(attachment.filename.as_deref().map(satchel_core::utils::filename::strip_filename_controls))
+        .bind(attachment.filename.as_deref().map(satchel_core::utils::filename::safe_attachment_name))
         .bind(&attachment.content_type)
         .bind(attachment.size)
         .bind(attachment.content_id.as_deref())
@@ -958,6 +982,27 @@ async fn persist_provider_message(
             committed_projection_threads.push(prior_thread_id.clone());
         }
     }
+    // The server copy of a mail sent from here replaces the copy the send
+    // stored locally, whichever Sent folder that one ended up in.
+    let envelope_has_message_id = message
+        .message_id_header
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty());
+    if message_is_sent && !message_is_draft && envelope_has_message_id {
+        let retired = satchel_core::db::sent_copies::retire_local_sent_copies(
+            tx,
+            account_id,
+            &message_id_header,
+            &message_id,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+        for retired_thread in retired {
+            if !committed_projection_threads.contains(&retired_thread) {
+                committed_projection_threads.push(retired_thread);
+            }
+        }
+    }
     refresh_thread_projections_tx(tx, &committed_projection_threads)
         .await
         .map_err(|error| error.to_string())?;
@@ -971,22 +1016,133 @@ async fn persist_provider_message(
             sqlx::query("UPDATE follow_up_reminders SET status = 'resolved', resolved_at = ?, updated_at = ? WHERE thread_id = ? AND status = 'pending'")
                 .bind(&now).bind(&now).bind(&thread_id).execute(&mut **tx).await.map_err(|error| error.to_string())?;
             if folder_type == "inbox" {
-                sqlx::query("UPDATE threads SET workflow_state = 'inbox', board_column = 'inbox', snooze_until = NULL, workflow_changed_at = ?, updated_at = ? WHERE id = ? AND workflow_state IN ('snoozed', 'aside', 'done', 'waiting')")
-                    .bind(&now).bind(&now).bind(&thread_id).execute(&mut **tx).await.map_err(|error| error.to_string())?;
+                let resurfaced = sqlx::query("UPDATE threads SET workflow_state = 'inbox', board_column = 'inbox', snooze_until = NULL, workflow_changed_at = ?, updated_at = ? WHERE id = ? AND workflow_state IN ('snoozed', 'aside', 'done', 'waiting')")
+                    .bind(&now).bind(&now).bind(&thread_id).execute(&mut **tx).await.map_err(|error| error.to_string())?
+                    .rows_affected() > 0;
+                // The reply brought the thread back: its old Done or Snooze
+                // keyword comes off, so other clients stop showing it. Nothing
+                // is queued when the server holds no marker for it. The worker
+                // picks the row up on its next pass.
+                if resurfaced {
+                    satchel_core::sync::workflow_markers::enqueue_workflow_marker_in_transaction(
+                        tx,
+                        &SyncQueue::new(),
+                        &thread_id,
+                        &satchel_core::workflow::remote_marker::WorkflowMarker::None,
+                        None,
+                    )
+                    .await?;
+                }
+                sqlx::query("INSERT OR IGNORE INTO ingest_effects (message_id, thread_id, account_id, run_rules, created_at) VALUES (?, ?, ?, 1, ?)")
+                    .bind(&message_id).bind(&thread_id).bind(account_id).bind(&now)
+                    .execute(&mut **tx).await.map_err(|error| error.to_string())?;
+            } else if satchel_core::rules::has_filed_mark(&message.satchel_marks)
+                && !matches!(folder_type, "sent" | "drafts" | "spam" | "trash")
+            {
+                // Satchel's server script filed it away from the Inbox. The
+                // rules that run only here have not seen it yet; the ones the
+                // server ran find it where they would have put it.
                 sqlx::query("INSERT OR IGNORE INTO ingest_effects (message_id, thread_id, account_id, run_rules, created_at) VALUES (?, ?, ?, 1, ?)")
                     .bind(&message_id).bind(&thread_id).bind(account_id).bind(&now)
                     .execute(&mut **tx).await.map_err(|error| error.to_string())?;
             }
         }
     }
+    // The server forwarded it under a rule: recorded before any rule runs
+    // here, so a rule the server runs does not send it a second time.
+    if satchel_core::rules::has_forward_mark(&message.satchel_marks) {
+        sqlx::query(
+            "INSERT OR IGNORE INTO rule_server_marks (account_id, message_key, created_at)
+             VALUES (?, ?, ?)",
+        )
+        .bind(account_id)
+        .bind(&message_id_header)
+        .bind(&now)
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| error.to_string())?;
+    }
+    if newly_seen && !message_is_draft && !sender_is_account {
+        apply_autocrypt_header(tx, account_id, folder_type, message).await?;
+    }
     Ok(StoredMessage {
         message_id,
         thread_id,
         was_pre_existing,
+        newly_seen,
         message_is_draft,
         message_is_sent,
         attachment_ids,
+        workflow_marker_changed,
     })
+}
+
+/// Whether a message may change a peer's Autocrypt state at all. The spec
+/// ignores `multipart/report`, mail with several `From` addresses and spam
+/// ("Updating Autocrypt Peer State"); Satchel also ignores Trash and mail
+/// whose DMARC check failed, where the `From` is the least trustworthy.
+fn autocrypt_applies(
+    folder_type: &str,
+    message: &crate::providers::traits::MessageEnvelope,
+) -> bool {
+    let folder = folder_type.trim().to_ascii_lowercase();
+    message.autocrypt_eligible
+        && message.from_address.contains('@')
+        && !matches!(folder.as_str(), "spam" | "junk" | "trash")
+        && !message
+            .auth_dmarc
+            .as_deref()
+            .is_some_and(|verdict| verdict.trim().eq_ignore_ascii_case("fail"))
+}
+
+/// Autocrypt Level 1 peer state from an incoming message, while the Chats
+/// experiment is on in Labs. Off, Satchel keeps no key it was not given.
+async fn apply_autocrypt_header(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    account_id: &str,
+    folder_type: &str,
+    message: &crate::providers::traits::MessageEnvelope,
+) -> Result<(), String> {
+    let enabled = satchel_core::db::labs::is_enabled_in(&mut **tx, satchel_core::db::labs::CHATS)
+        .await
+        .map_err(|error| error.to_string())?;
+    if !enabled || !autocrypt_applies(folder_type, message) {
+        return Ok(());
+    }
+    // The user's own aliases are not peers (the primary address never gets here).
+    let own_alias: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 FROM account_aliases WHERE account_id = ? AND LOWER(TRIM(email)) = LOWER(TRIM(?))",
+    )
+    .bind(account_id)
+    .bind(&message.from_address)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|error| error.to_string())?;
+    if own_alias.is_some() {
+        return Ok(());
+    }
+    let parse = |value: &str| {
+        chrono::DateTime::parse_from_rfc3339(value)
+            .ok()
+            .map(|time| time.with_timezone(&chrono::Utc))
+    };
+    let received = message
+        .received_at_rfc3339
+        .as_deref()
+        .and_then(parse)
+        .unwrap_or_else(chrono::Utc::now);
+    let effective = satchel_core::autocrypt::effective_date(parse(&message.date_rfc3339), received);
+    let header =
+        satchel_core::autocrypt::select_header(&message.autocrypt_headers, &message.from_address);
+    satchel_core::db::autocrypt_peers::apply_incoming(
+        tx,
+        account_id,
+        &message.from_address,
+        effective,
+        header.as_ref(),
+    )
+    .await
+    .map_err(|error| error.to_string())
 }
 
 async fn finish_provider_message(
@@ -1007,13 +1163,29 @@ async fn finish_provider_message(
         message_id,
         thread_id,
         was_pre_existing,
+        newly_seen,
         message_is_draft,
         message_is_sent,
         attachment_ids,
+        workflow_marker_changed,
     } = stored;
     // Provider downloads and event publishing follow the committed rows.
     if folder_type == "archive" || folder_type == "aside" || is_snooze_folder(folder_remote_id) {
         reconcile_external_workflow_states(pool, &HashSet::from([thread_id.clone()])).await?;
+    }
+    // Done or Snooze set on another device or client travels as a keyword
+    // or label on the copy just stored.
+    if workflow_marker_changed {
+        let changed = satchel_core::sync::workflow_markers::reconcile_remote_workflow_markers(
+            pool,
+            &HashSet::from([thread_id.clone()]),
+        )
+        .await?;
+        if let Some(events) = events.filter(|_| !changed.is_empty()) {
+            events.publish(crate::events::bus::AppEvent::ThreadsUpdated(
+                changed.into_iter().collect(),
+            ));
+        }
     }
 
     // Calendar parts and inline images are downloaded from the provider, so
@@ -1166,19 +1338,57 @@ async fn finish_provider_message(
         }
     }
 
+    // The local spam filter judges new, unread Inbox mail before its
+    // notification is published. Only mail past the notification cutoff
+    // counts as new: adding an account, a re-sync or a UIDVALIDITY reset
+    // replays a backlog the user has long sorted, and Move must not file old
+    // mail in a Spam folder the server purges. With the filter on Move, the
+    // provider move is queued through the same durable queue as the
+    // blocked-sender move above, and the moved message's notification is
+    // dismissed.
+    if newly_seen
+        && !message.is_read
+        && !sender_is_blocked
+        && folder_type == "inbox"
+        && !message_is_sent
+        && !message_is_draft
+    {
+        match satchel_core::spam::classify_incoming(
+            pool,
+            blocked_sender_queue.as_ref(),
+            satchel_core::spam::IncomingMessage {
+                provider: provider_kind,
+                message_id: &message_id,
+                thread_id: &thread_id,
+                from_address: &message.from_address,
+                hint_headers: message.spam_hint_headers.as_deref(),
+            },
+        )
+        .await
+        {
+            Ok(outcome) => tracing::debug!(?outcome, account_id, "spam filter classified new mail"),
+            Err(error) => {
+                tracing::warn!(%error, account_id, "spam filter classification deferred");
+            }
+        }
+    }
+
     // Detect calendar invitations: prefer the standalone text/calendar part if
     // the IMAP parser pulled one out, otherwise scan body text/html (Outlook/Gmail
     // often inline the invite).
-    let invite_source = message.body_calendar.clone().or_else(|| {
-        crate::email::calendar::extract_ics_block(
+    use crate::db::calendar::InviteOrigin;
+    let invite_source = match message.body_calendar.clone() {
+        Some(raw) => Some((raw, InviteOrigin::MailPart(&message_id))),
+        None => crate::email::calendar::extract_ics_block(
             message.body_text.as_deref(),
             message.body_html.as_deref(),
         )
-    });
-    if let Some(raw_ics) = invite_source {
+        .map(|raw| (raw, InviteOrigin::MailBody(&message_id))),
+    };
+    if let Some((raw_ics, origin)) = invite_source {
         if let Some(invite) = crate::email::calendar::parse_invite(&raw_ics) {
             let _ = crate::db::calendar::CalendarRepository::new(pool)
-                .upsert_invite(account_id, Some(&message_id), &invite)
+                .upsert_invite(account_id, origin, &invite)
                 .await;
         }
     }
@@ -1262,8 +1472,8 @@ fn provider_message_is_draft(folder_type: &str, mailbox_ids: &[String]) -> bool 
 #[cfg(test)]
 mod tests {
     use super::{
-        persist_blocked_sender_diagnostic, provider_message_db_id, provider_message_is_draft,
-        should_check_blocked_sender, upsert_provider_message,
+        autocrypt_applies, persist_blocked_sender_diagnostic, provider_message_db_id,
+        provider_message_is_draft, should_check_blocked_sender, upsert_provider_message,
     };
     use crate::providers::traits::{MessageEnvelope, RemoteAttachment, RemoteMessageState};
     use crate::sync::folder_reconcile::reconcile_imap_folder_snapshot;
@@ -1271,6 +1481,24 @@ mod tests {
     use crate::sync::queue::SyncQueue;
     use crate::sync::thread_resolution::{merge_reply_split_threads, standalone_thread_key};
     use sqlx::sqlite::SqlitePoolOptions;
+
+    #[test]
+    fn autocrypt_skips_spam_trash_reports_and_failed_dmarc() {
+        let mut message = envelope("1");
+        message.from_address = "lena@example.test".into();
+        message.autocrypt_eligible = true;
+        assert!(autocrypt_applies("inbox", &message));
+        assert!(!autocrypt_applies("spam", &message));
+        assert!(!autocrypt_applies("Junk", &message));
+        assert!(!autocrypt_applies("trash", &message));
+        message.auth_dmarc = Some("fail".into());
+        assert!(!autocrypt_applies("inbox", &message));
+        message.auth_dmarc = Some("pass".into());
+        assert!(autocrypt_applies("inbox", &message));
+        // A report, or mail from several people, as the provider judged it.
+        message.autocrypt_eligible = false;
+        assert!(!autocrypt_applies("inbox", &message));
+    }
 
     fn envelope(remote_id: &str) -> MessageEnvelope {
         MessageEnvelope {
@@ -1297,6 +1525,7 @@ mod tests {
             body_html: None,
             is_read: true,
             is_starred: false,
+            workflow_marker: None,
             body_calendar: None,
             smime_encrypted: None,
             smime_signed: None,
@@ -1307,8 +1536,526 @@ mod tests {
             auth_spf: None,
             auth_dkim: None,
             auth_dmarc: None,
+            spam_hint_headers: None,
+            satchel_marks: Vec::new(),
+            chat: None,
+            autocrypt_headers: Vec::new(),
+            autocrypt_eligible: false,
             attachments: Vec::new(),
         }
+    }
+
+    // ---- Chats: who a reply goes to cannot be steered by threading (fourth review) ----
+
+    const OWN: &str = "account@example.com";
+
+    #[allow(clippy::too_many_arguments)]
+    fn chat_envelope(
+        remote: &str,
+        mid: &str,
+        irt: Option<&str>,
+        from: &str,
+        to: &[&str],
+        date: &str,
+        chat: bool,
+        group: Option<&str>,
+    ) -> MessageEnvelope {
+        let mut message = envelope(remote);
+        message.message_id_header = Some(mid.into());
+        message.in_reply_to = irt.map(str::to_string);
+        message.references = irt.map(|value| vec![value.to_string()]).unwrap_or_default();
+        message.from_address = from.into();
+        message.to_addresses = to.iter().map(|addr| addr.to_string()).collect();
+        message.subject = "Message from Lena".into();
+        message.date_rfc3339 = date.into();
+        message.received_at_rfc3339 = Some(date.into());
+        if chat {
+            message.chat = Some(satchel_core::chat::ChatHeaders {
+                version: "1.0".into(),
+                group_id: group.map(str::to_string),
+                group_name: group.map(|_| "G".to_string()),
+            });
+        }
+        message
+    }
+
+    async fn thread_with(pool: &sqlx::SqlitePool, mid: &str) -> String {
+        sqlx::query_scalar("SELECT thread_id FROM messages WHERE message_id_header = ?")
+            .bind(mid)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    async fn chat_of(pool: &sqlx::SqlitePool, mid: &str) -> satchel_core::db::chats::ChatThread {
+        let thread = thread_with(pool, mid).await;
+        satchel_core::db::chats::ChatRepository::new(pool)
+            .thread(&thread)
+            .await
+            .unwrap()
+    }
+
+    /// Lena's chat answered by the attacker with Message-ID `<x>`; the
+    /// attacker's older message claims to reply to `<x>`.
+    async fn seed_reply_relation_attack(
+        pool: &sqlx::SqlitePool,
+        attacker_chat: bool,
+    ) -> MessageEnvelope {
+        let older = chat_envelope(
+            "1",
+            "<a1>",
+            Some("<x>"),
+            "attacker@evil.test",
+            &[OWN, "victim@evil.test"],
+            "2026-07-01T09:00:00+00:00",
+            attacker_chat,
+            attacker_chat.then_some("EVILGROUP123"),
+        );
+        ingest(pool, "inbox", &older).await.unwrap();
+        ingest(
+            pool,
+            "inbox",
+            &chat_envelope(
+                "3",
+                "<y>",
+                None,
+                "lena@example.test",
+                &[OWN],
+                "2026-08-01T10:00:00+00:00",
+                true,
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+        ingest(
+            pool,
+            "inbox",
+            &chat_envelope(
+                "4",
+                "<x>",
+                Some("<y>"),
+                "attacker@evil.test",
+                &[OWN],
+                "2026-08-01T11:00:00+00:00",
+                true,
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+        older
+    }
+
+    #[tokio::test]
+    async fn a_reingested_message_never_moves_into_a_chat() {
+        for attacker_chat in [true, false] {
+            let pool = ingest_pool().await;
+            let older = seed_reply_relation_attack(&pool, attacker_chat).await;
+            merge_reply_split_threads(&pool).await.unwrap();
+            // A flag refresh or envelope refetch stores the older message again.
+            ingest(&pool, "inbox", &older).await.unwrap();
+            assert_ne!(
+                thread_with(&pool, "<a1>").await,
+                thread_with(&pool, "<y>").await,
+                "attacker_chat={attacker_chat}"
+            );
+            let chat = chat_of(&pool, "<y>").await;
+            assert_eq!(
+                chat.recipients,
+                vec!["lena@example.test"],
+                "attacker_chat={attacker_chat}"
+            );
+            assert_eq!(chat.group_id, None);
+            assert!(chat.first_reply, "confirmation required");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_reingested_reply_fetched_before_its_parent_does_not_take_over_the_chat() {
+        let pool = ingest_pool().await;
+        let attacker = chat_envelope(
+            "9",
+            "<a>",
+            Some("<y>"),
+            "attacker@evil.test",
+            &[OWN, "victim@evil.test"],
+            "2026-08-01T09:00:00+00:00",
+            true,
+            Some("EVILGROUP123"),
+        );
+        ingest(&pool, "inbox", &attacker).await.unwrap();
+        ingest(
+            &pool,
+            "inbox",
+            &chat_envelope(
+                "3",
+                "<y>",
+                None,
+                "lena@example.test",
+                &[OWN],
+                "2026-08-01T10:00:00+00:00",
+                true,
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+        ingest(&pool, "inbox", &attacker).await.unwrap();
+        assert_ne!(
+            thread_with(&pool, "<a>").await,
+            thread_with(&pool, "<y>").await
+        );
+        let chat = chat_of(&pool, "<y>").await;
+        assert_eq!(chat.recipients, vec!["lena@example.test"]);
+        assert!(chat.first_reply, "confirmation required");
+    }
+
+    #[tokio::test]
+    async fn a_provider_conversation_always_confirms_the_first_reply() {
+        for attacker_first in [true, false] {
+            let pool = ingest_pool().await;
+            sqlx::query("UPDATE accounts SET provider = 'gmail'")
+                .execute(&pool)
+                .await
+                .unwrap();
+            let in_conversation =
+                |remote: &str, mid: &str, irt: Option<&str>, from: &str, date: &str| {
+                    let mut message =
+                        chat_envelope(remote, mid, irt, from, &[OWN], date, true, None);
+                    message.remote_thread_id = Some("conv-1".into());
+                    message.mailbox_ids = vec!["INBOX".into()];
+                    message
+                };
+            let lena = in_conversation(
+                "g-y",
+                "<y>",
+                None,
+                "lena@example.test",
+                "2026-08-01T10:00:00+00:00",
+            );
+            let attacker = in_conversation(
+                "g-a",
+                "<a>",
+                Some("<y>"),
+                "attacker@evil.test",
+                "2026-08-01T11:00:00+00:00",
+            );
+            let order = if attacker_first {
+                [&attacker, &lena]
+            } else {
+                [&lena, &attacker]
+            };
+            for message in order {
+                super::upsert_provider_message(
+                    None,
+                    &pool,
+                    "gmail",
+                    "account",
+                    OWN,
+                    "Account",
+                    &crate::commands::accounts::AccountConfig::from_plaintext("{}"),
+                    "inbox",
+                    "INBOX",
+                    "inbox",
+                    message,
+                    None,
+                )
+                .await
+                .unwrap();
+            }
+            let chat = chat_of(&pool, "<y>").await;
+            // Earliest receipt, not fetch order, names the start; the reply asks either way.
+            assert_eq!(
+                chat.recipients,
+                vec!["lena@example.test"],
+                "attacker_first={attacker_first}"
+            );
+            assert!(chat.first_reply, "confirmation required");
+        }
+    }
+
+    #[tokio::test]
+    async fn without_a_receipt_time_the_first_reply_still_asks() {
+        let pool = ingest_pool().await;
+        let mut attacker = chat_envelope(
+            "9",
+            "<a>",
+            Some("<y>"),
+            "attacker@evil.test",
+            &[OWN],
+            "2026-08-01T11:00:00+00:00",
+            true,
+            None,
+        );
+        attacker.received_at_rfc3339 = None;
+        ingest(&pool, "inbox", &attacker).await.unwrap();
+        let mut lena = chat_envelope(
+            "3",
+            "<y>",
+            None,
+            "lena@example.test",
+            &[OWN],
+            "2026-08-01T10:00:00+00:00",
+            true,
+            None,
+        );
+        lena.received_at_rfc3339 = None;
+        ingest(&pool, "inbox", &lena).await.unwrap();
+        ingest(&pool, "inbox", &attacker).await.unwrap();
+        assert!(
+            chat_of(&pool, "<y>").await.first_reply,
+            "confirmation required"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_chat_split_by_a_reply_fetched_first_heals_with_its_member() {
+        let pool = ingest_pool().await;
+        ingest(
+            &pool,
+            "inbox",
+            &chat_envelope(
+                "2",
+                "<m1>",
+                Some("<m0>"),
+                "lena@example.test",
+                &[OWN],
+                "2026-08-02T10:00:00+00:00",
+                true,
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+        ingest(
+            &pool,
+            "inbox",
+            &chat_envelope(
+                "1",
+                "<m0>",
+                None,
+                "lena@example.test",
+                &[OWN],
+                "2026-08-01T10:00:00+00:00",
+                true,
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+        merge_reply_split_threads(&pool).await.unwrap();
+        assert_eq!(
+            thread_with(&pool, "<m1>").await,
+            thread_with(&pool, "<m0>").await
+        );
+        assert_eq!(
+            chat_of(&pool, "<m0>").await.recipients,
+            vec!["lena@example.test"]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_reply_merge_keeps_strangers_out_of_the_chat() {
+        let pool = ingest_pool().await;
+        ingest(
+            &pool,
+            "inbox",
+            &chat_envelope(
+                "1",
+                "<a1>",
+                Some("<x>"),
+                "attacker@evil.test",
+                &[OWN, "victim@evil.test"],
+                "2026-07-01T09:00:00+00:00",
+                false,
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+        ingest(
+            &pool,
+            "inbox",
+            &chat_envelope(
+                "2",
+                "<a2>",
+                Some("<x2>"),
+                "attacker@evil.test",
+                &[OWN, "victim@evil.test"],
+                "2026-07-01T09:30:00+00:00",
+                true,
+                Some("EVILGROUP123"),
+            ),
+        )
+        .await
+        .unwrap();
+        ingest(
+            &pool,
+            "inbox",
+            &chat_envelope(
+                "3",
+                "<y>",
+                None,
+                "lena@example.test",
+                &[OWN],
+                "2026-08-01T10:00:00+00:00",
+                true,
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+        ingest(
+            &pool,
+            "inbox",
+            &chat_envelope(
+                "4",
+                "<x>",
+                Some("<y>"),
+                "attacker@evil.test",
+                &[OWN],
+                "2026-08-01T11:00:00+00:00",
+                true,
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+        ingest(
+            &pool,
+            "inbox",
+            &chat_envelope(
+                "5",
+                "<x2>",
+                Some("<y>"),
+                "attacker@evil.test",
+                &[OWN],
+                "2026-08-01T11:30:00+00:00",
+                false,
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+        merge_reply_split_threads(&pool).await.unwrap();
+        for stranger in ["<a1>", "<a2>"] {
+            assert_ne!(
+                thread_with(&pool, stranger).await,
+                thread_with(&pool, "<y>").await,
+                "{stranger}"
+            );
+        }
+        let chat = chat_of(&pool, "<y>").await;
+        assert_eq!(chat.recipients, vec!["lena@example.test"]);
+        assert!(chat.first_reply, "confirmation required");
+        // New mail that answers the attacker's message joins as a reply, and
+        // since it is older than the chat the first reply still asks.
+        ingest(
+            &pool,
+            "inbox",
+            &chat_envelope(
+                "6",
+                "<a3>",
+                Some("<x>"),
+                "attacker@evil.test",
+                &[OWN, "victim@evil.test"],
+                "2026-07-02T09:00:00+00:00",
+                true,
+                Some("EVILGROUP123"),
+            ),
+        )
+        .await
+        .unwrap();
+        merge_reply_split_threads(&pool).await.unwrap();
+        assert!(
+            chat_of(&pool, "<y>").await.first_reply,
+            "confirmation required"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_chat_keeps_its_start_across_a_folder_move() {
+        let pool = ingest_pool().await;
+        sqlx::query("INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at) VALUES ('arch', 'account', 'Archive', 'Archive', 'archive', 'Archive', '', '')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        ingest(
+            &pool,
+            "inbox",
+            &chat_envelope(
+                "1",
+                "<m0>",
+                None,
+                "lena@example.test",
+                &[OWN],
+                "2026-08-01T10:00:00+00:00",
+                true,
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+        ingest(
+            &pool,
+            "inbox",
+            &chat_envelope(
+                "2",
+                "<m1>",
+                Some("<m0>"),
+                "lena@example.test",
+                &[OWN],
+                "2026-08-02T10:00:00+00:00",
+                true,
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+        // The first message moves to the Archive: new UID, same Message-ID
+        // and receipt time; the Inbox copy is expunged.
+        ingest(
+            &pool,
+            "arch",
+            &chat_envelope(
+                "11",
+                "<m0>",
+                None,
+                "lena@example.test",
+                &[OWN],
+                "2026-08-01T10:00:00+00:00",
+                true,
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+        sqlx::query(
+            "DELETE FROM messages WHERE folder_id = 'inbox' AND message_id_header = '<m0>'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        ingest(
+            &pool,
+            "inbox",
+            &chat_envelope(
+                "3",
+                "<a>",
+                Some("<m1>"),
+                "attacker@evil.test",
+                &[OWN, "victim@evil.test"],
+                "2026-08-03T10:00:00+00:00",
+                true,
+                Some("EVILGROUP123"),
+            ),
+        )
+        .await
+        .unwrap();
+        let chat = chat_of(&pool, "<m1>").await;
+        assert_eq!(chat.recipients, vec!["lena@example.test"]);
+        assert_eq!(chat.group_id, None);
     }
 
     #[tokio::test]
@@ -1806,6 +2553,142 @@ mod tests {
         );
     }
 
+    /// Persist `message` as newly arrived in `folder` (`folder_type`).
+    async fn persist_new(
+        pool: &sqlx::SqlitePool,
+        folder: &str,
+        folder_type: &str,
+        message: &MessageEnvelope,
+    ) {
+        let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        super::persist_provider_message(
+            &mut tx,
+            "imap",
+            "account",
+            "account@example.com",
+            "Account",
+            folder,
+            folder,
+            folder_type,
+            message,
+            None,
+            &super::PendingFlagLocks::default(),
+            Some("2026-01-01T00:00:00Z"),
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn mail_the_server_filed_away_still_meets_the_local_rules() {
+        let pool = ingest_pool().await;
+        sqlx::query(
+            "INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at)
+             VALUES ('lists', 'account', 'Lists', 'Lists', 'custom', 'Lists', '', '')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO rules (id, name, trigger_type, trigger_config, actions, is_active, priority, created_at, updated_at) VALUES ('rule', 'Tag', 'on_receive', '{\"from_contains\":\"external\"}', '[\"add_tag:lists\"]', 1, 1, '', '')")
+            .execute(&pool).await.unwrap();
+        let mut filed = envelope("filed");
+        filed.from_address = "external@example.test".into();
+        filed.date_rfc3339 = "2026-01-02T03:00:00Z".into();
+        filed.satchel_marks = vec!["$satchelfiled".into()];
+        persist_new(&pool, "lists", "custom", &filed).await;
+        let mut moved_by_hand = envelope("by-hand");
+        moved_by_hand.from_address = "external@example.test".into();
+        moved_by_hand.date_rfc3339 = "2026-01-02T04:00:00Z".into();
+        persist_new(&pool, "lists", "custom", &moved_by_hand).await;
+        sqlx::query(
+            "INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at)
+             VALUES ('junk', 'account', 'Junk', 'Junk', 'spam', 'Junk', '', '')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let mut filed_as_spam = envelope("spam");
+        filed_as_spam.from_address = "external@example.test".into();
+        filed_as_spam.date_rfc3339 = "2026-01-02T05:00:00Z".into();
+        filed_as_spam.satchel_marks = vec!["$satchelfiled".into()];
+        persist_new(&pool, "junk", "spam", &filed_as_spam).await;
+        let pending: Vec<String> =
+            sqlx::query_scalar("SELECT message_id FROM ingest_effects WHERE run_rules = 1")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            pending.len(),
+            1,
+            "only the mail Satchel's script filed, and not into Spam"
+        );
+        super::replay_ingest_effects(&pool, "account")
+            .await
+            .unwrap();
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM thread_tags")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn a_forward_the_server_sent_is_recorded_before_the_rules_run() {
+        let pool = ingest_pool().await;
+        sqlx::query("INSERT INTO rules (id, name, trigger_type, trigger_config, actions, is_active, priority, created_at, updated_at) VALUES ('rule-1', 'Books', 'on_receive', '{\"from_contains\":\"external\"}', '[\"forward:books@example.test\"]', 1, 1, '', '')")
+            .execute(&pool).await.unwrap();
+        // The server runs this version of the rule, since long before.
+        let fingerprint = satchel_core::server_rules::compiler::rule_fingerprint(
+            "on_receive",
+            r#"{"from_contains":"external"}"#,
+            r#"["forward:books@example.test"]"#,
+        );
+        sqlx::query(
+            "INSERT INTO managesieve_accounts (account_id, enabled, server_active, pushed_rules, pushed_forwards, updated_at)
+             VALUES ('account', 1, 1, ?, ?, '')",
+        )
+        .bind(serde_json::json!({ "rule-1": fingerprint }).to_string())
+        .bind(
+            serde_json::json!({ "rule-1": {
+                "trigger_type": "on_receive",
+                "trigger_config": r#"{"from_contains":"external"}"#,
+                "to": "books@example.test",
+                "since": ""
+            }})
+            .to_string(),
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let mut message = envelope("forwarded");
+        message.from_address = "external@example.test".into();
+        message.message_id_header = Some("<invoice@example.test>".into());
+        message.date_rfc3339 = "2026-01-02T03:00:00Z".into();
+        message.satchel_marks = satchel_core::rules::satchel_marks(["$SatchelFwd"]);
+        persist_new(&pool, "inbox", "inbox", &message).await;
+        let marks: Vec<String> = sqlx::query_scalar("SELECT message_key FROM rule_server_marks")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(marks, vec!["<invoice@example.test>".to_string()]);
+        super::replay_ingest_effects(&pool, "account")
+            .await
+            .unwrap();
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM sync_queue WHERE action_type = 'rule_forward'"
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            0,
+            "not sent a second time"
+        );
+    }
+
     #[tokio::test]
     async fn committed_rule_intent_replays_after_a_crash_and_failed_rules_stay_pending() {
         let pool = ingest_pool().await;
@@ -2036,6 +2919,112 @@ mod tests {
             .expect("is_read")
     }
 
+    /// Snoozed on another device: the copy arrives with the IMAP keyword,
+    /// and this device snoozes the thread for the fallback day (the wake
+    /// time does not travel on IMAP), so its own snooze worker wakes it. A
+    /// later sync from a provider that does not report markers leaves it.
+    #[tokio::test]
+    async fn a_snooze_keyword_from_another_device_snoozes_the_thread_here() {
+        use satchel_core::workflow::remote_marker::{Snooze, WorkflowMarker};
+        let pool = ingest_pool().await;
+        // After the first INBOX snapshot; before it a found snooze is only seen.
+        satchel_core::sync::workflow_markers::mark_snapshot_baseline(&pool, "account")
+            .await
+            .unwrap();
+        let snoozed = WorkflowMarker::Snoozed(Snooze {
+            wake: None,
+            generation: 1,
+        });
+        let mut message = envelope("41");
+        message.workflow_marker = Some(snoozed);
+        ingest(&pool, "inbox", &message).await.expect("ingest");
+        let (state, until): (String, Option<String>) =
+            sqlx::query_as("SELECT workflow_state, snooze_until FROM threads")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(state, "snoozed");
+        let until = chrono::DateTime::parse_from_rfc3339(&until.unwrap()).unwrap();
+        assert!(
+            until.with_timezone(&chrono::Utc) > chrono::Utc::now() + chrono::Duration::hours(23)
+        );
+
+        message.workflow_marker = None;
+        ingest(&pool, "inbox", &message).await.expect("re-ingest");
+        let (state, marker): (String, Option<String>) = sqlx::query_as(
+            "SELECT t.workflow_state, m.remote_workflow_marker FROM threads t JOIN messages m ON m.thread_id = t.id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(state, "snoozed");
+        assert_eq!(marker, snoozed.as_column());
+    }
+
+    /// A reply brings a snoozed thread back; its keyword comes off on the
+    /// server too, so other clients stop showing it as snoozed.
+    #[tokio::test]
+    async fn a_reply_to_a_snoozed_thread_queues_the_keyword_off() {
+        use satchel_core::workflow::remote_marker::{Snooze, WorkflowMarker};
+        let pool = ingest_pool().await;
+        sqlx::query("UPDATE folders SET uidvalidity = 7")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let mut parent = envelope("parent");
+        parent.message_id_header = Some("<parent@example.test>".into());
+        parent.date_rfc3339 = "2026-01-01T08:00:00Z".into();
+        ingest(&pool, "inbox", &parent).await.unwrap();
+        let snoozed = WorkflowMarker::Snoozed(Snooze {
+            wake: Some(chrono::Utc::now() + chrono::Duration::hours(4)),
+            generation: 1,
+        });
+        sqlx::query(
+            "UPDATE threads SET workflow_state = 'snoozed', snooze_until = '2026-12-01T00:00:00Z', remote_workflow_marker = ?",
+        )
+        .bind(snoozed.as_column())
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE accounts SET last_sync_at = '2026-01-01T12:00:00Z'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let mut reply = envelope("overnight");
+        reply.in_reply_to = parent.message_id_header.clone();
+        reply.from_address = "external@example.test".into();
+        reply.date_rfc3339 = "2026-01-02T03:00:00Z".into();
+        ingest(&pool, "inbox", &reply).await.unwrap();
+        let (state, markers): (String, i64) = sqlx::query_as(
+            "SELECT (SELECT workflow_state FROM threads LIMIT 1),
+                    (SELECT COUNT(*) FROM sync_queue WHERE json_extract(payload, '$.kind') = 'workflow_marker' AND json_extract(payload, '$.marker') = '')",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(state, "inbox");
+        assert_eq!(markers, 1);
+    }
+
+    /// The first sync after the upgrade: every copy reports "no marker".
+    /// Nothing is written for it, on the message or on the thread.
+    #[tokio::test]
+    async fn a_mailbox_without_markers_writes_no_marker_columns() {
+        use satchel_core::workflow::remote_marker::WorkflowMarker;
+        let pool = ingest_pool().await;
+        let mut message = envelope("43");
+        message.workflow_marker = Some(WorkflowMarker::None);
+        ingest(&pool, "inbox", &message).await.expect("ingest");
+        ingest(&pool, "inbox", &message).await.expect("re-ingest");
+        let (message_marker, thread_marker): (Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT m.remote_workflow_marker, t.remote_workflow_marker FROM messages m JOIN threads t ON t.id = m.thread_id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!((message_marker, thread_marker), (None, None));
+    }
+
     /// The user marked the thread read; the mutation is queued and has not
     /// reached the server. The next provider batch must not undo it.
     #[tokio::test]
@@ -2236,6 +3225,160 @@ mod tests {
             .unwrap();
         assert_eq!(ids.len(), 2, "{ids:?}");
         assert!(ids.contains(&decrypted), "{ids:?}");
+    }
+
+    /// New, unread IMAP mail is judged by the local spam filter once it has
+    /// learned enough. A backlog replayed by a first sync, a re-sync or a
+    /// UIDVALIDITY reset is not judged, and neither is mail already read —
+    /// in Move mode least of all: old mail must not land in a Spam folder
+    /// the server purges.
+    #[tokio::test]
+    async fn the_spam_filter_judges_new_unread_mail_and_never_a_backlog() {
+        let pool = ingest_pool().await;
+        sqlx::query(
+            "INSERT INTO folders
+             (id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at)
+             VALUES ('spam', 'account', 'Spam', 'Spam', 'spam', 'Spam', '', '')",
+        )
+        .execute(&pool)
+        .await
+        .expect("spam folder");
+        let cutoff = (chrono::Utc::now() - chrono::TimeDelta::hours(1)).to_rfc3339();
+        sqlx::query("UPDATE accounts SET last_sync_at = ?")
+            .bind(&cutoff)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut examples = Vec::new();
+        for n in 0..200 {
+            let mut spam = envelope(&format!("s{n}"));
+            spam.from_address = format!("winner{n}@lottery{}.example", n % 7);
+            spam.subject = format!("You won the lottery jackpot {n}");
+            spam.body_text = Some("Claim your jackpot prize, wire the processing fee".into());
+            spam.date_rfc3339 = now.clone();
+            examples.push(spam);
+            let mut ham = envelope(&format!("h{n}"));
+            ham.from_address = format!("colleague{n}@work{}.example", n % 5);
+            ham.subject = format!("Agenda for the project meeting {n}");
+            ham.body_text = Some("Please review the agenda and the minutes".into());
+            ham.date_rfc3339 = now.clone();
+            examples.push(ham);
+        }
+        for result in ingest_many(&pool, &examples).await {
+            result.expect("example");
+        }
+        let examples: Vec<(String, String)> =
+            sqlx::query_as("SELECT id, from_address FROM messages")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        for (id, from) in examples {
+            let label = if from.contains("lottery") {
+                satchel_core::spam::Label::Spam
+            } else {
+                satchel_core::spam::Label::Ham
+            };
+            satchel_core::spam::train_messages(
+                &pool,
+                &[id],
+                label,
+                satchel_core::spam::Signal::Explicit,
+                None,
+            )
+            .await
+            .unwrap();
+        }
+        sqlx::query("DELETE FROM app_settings WHERE key = 'data_repair.spam_bootstrap'")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let incoming = |id: &str, date: &str, read: bool| {
+            let mut message = envelope(id);
+            message.from_address = format!("boss-{id}@lottery3.example");
+            message.subject = format!("Lottery jackpot winner {id}");
+            message.body_text = Some("Claim your jackpot prize, wire the processing fee".into());
+            message.spam_hint_headers = Some("X-Spam-Flag: YES".into());
+            message.date_rfc3339 = date.to_string();
+            message.received_at_rfc3339 = Some(date.to_string());
+            message.is_read = read;
+            message
+        };
+        ingest(&pool, "inbox", &incoming("new", &now, false))
+            .await
+            .expect("new mail");
+        ingest(
+            &pool,
+            "inbox",
+            &incoming("old", "2025-06-01T08:00:00Z", false),
+        )
+        .await
+        .expect("backlog");
+        ingest(&pool, "inbox", &incoming("read", &now, true))
+            .await
+            .expect("read mail");
+
+        let verdict = |remote: &'static str| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_as::<_, (String, Option<String>)>(
+                    "SELECT v.verdict, v.hint_headers FROM spam_verdicts v
+                     JOIN messages m ON m.id = v.message_id WHERE m.remote_id = ?",
+                )
+                .bind(remote)
+                .fetch_optional(&pool)
+                .await
+                .unwrap()
+            }
+        };
+        assert_eq!(
+            verdict("new").await,
+            Some(("spam".to_string(), Some("X-Spam-Flag: YES".to_string())))
+        );
+        assert_eq!(verdict("old").await, None, "a backlog is never judged");
+        assert_eq!(verdict("read").await, None, "read mail is never judged");
+        // Mark is the default: the likely spam stays in the Inbox.
+        let pending: Option<String> =
+            sqlx::query_scalar("SELECT pending_folder_id FROM messages WHERE remote_id = 'new'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(pending, None);
+
+        // Move: new unread mail goes to Spam, a backlog and read mail stay.
+        satchel_core::spam::set_mode(&pool, satchel_core::spam::SpamFilterMode::Move)
+            .await
+            .unwrap();
+        ingest(&pool, "inbox", &incoming("new-move", &now, false))
+            .await
+            .expect("new mail in Move mode");
+        ingest(
+            &pool,
+            "inbox",
+            &incoming("old-move", "2025-06-01T08:00:00Z", false),
+        )
+        .await
+        .expect("backlog in Move mode");
+        ingest(&pool, "inbox", &incoming("read-move", &now, true))
+            .await
+            .expect("read mail in Move mode");
+        let pending = |remote: &'static str| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, Option<String>>(
+                    "SELECT pending_folder_id FROM messages WHERE remote_id = ?",
+                )
+                .bind(remote)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+            }
+        };
+        assert_eq!(pending("new-move").await.as_deref(), Some("spam"));
+        assert_eq!(pending("old-move").await, None, "a backlog is never moved");
+        assert_eq!(pending("read-move").await, None, "read mail is never moved");
+        assert_eq!(verdict("old-move").await, None);
     }
 
     /// A `Date` far in the future used to win the `last_message_date >= …`
@@ -2781,6 +3924,65 @@ mod tests {
         assert_eq!(
             remaining_drafts, 0,
             "the sent copy supersedes its Spark autosave"
+        );
+    }
+
+    /// The reported account: the local copy of a send sits in the legacy
+    /// `Sent Messages`, the server copy arrives in `Sent`. The server copy
+    /// replaces it; the old Apple Mail mail in the legacy folder stays.
+    #[tokio::test]
+    async fn a_synced_sent_copy_replaces_the_local_one_in_another_sent_folder() {
+        let pool = ingest_pool().await;
+        sqlx::query(
+            "INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at) VALUES
+             ('sent-legacy', 'account', 'INBOX.Sent Messages', 'INBOX.Sent Messages', 'sent', 'INBOX.Sent Messages', '', ''),
+             ('sent-live', 'account', 'INBOX.Sent', 'INBOX.Sent', 'sent', 'INBOX.Sent', '', '');
+             INSERT INTO threads (id, account_id, subject, last_message_date, message_count, unread_count, workflow_state, created_at, updated_at)
+             VALUES ('th-local', 'account', 'Re: Hello', '2026-11-14T23:38:50Z', 1, 0, 'waiting', '', '');
+             INSERT INTO messages (id, account_id, folder_id, thread_id, message_id_header, from_address, to_addresses, subject, date, is_read, is_sent, created_at, updated_at) VALUES
+             ('m-local', 'account', 'sent-legacy', 'th-local', '<reply@satchel.local>', 'account@example.com', '[\"friend@example.com\"]', 'Re: Hello', '2026-11-14T23:38:50Z', 1, 1, '', ''),
+             ('m-apple', 'account', 'sent-legacy', 'th-local', '<apple@tbuck.de>', 'account@example.com', '[]', 'Old', '2025-03-27T10:23:02Z', 1, 1, '', '');
+             UPDATE messages SET remote_uid = 4, remote_id = '4' WHERE id = 'm-apple';",
+        )
+        .execute(&pool)
+        .await
+        .expect("seed");
+
+        let mut server = envelope("398");
+        server.message_id_header = Some("<reply@satchel.local>".to_string());
+        server.subject = "Re: Hello".to_string();
+        server.from_address = "account@example.com".to_string();
+        server.to_addresses = vec!["friend@example.com".to_string()];
+        server.date_rfc3339 = "2026-11-14T23:38:50Z".to_string();
+        upsert_provider_message(
+            None,
+            &pool,
+            "imap",
+            "account",
+            "account@example.com",
+            "Account",
+            &crate::commands::accounts::AccountConfig::from_plaintext("{}"),
+            "sent-live",
+            "INBOX.Sent",
+            "sent",
+            &server,
+            None,
+        )
+        .await
+        .expect("server copy");
+
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT folder_id, COALESCE(remote_id, '-') FROM messages ORDER BY folder_id, remote_id",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("rows");
+        assert_eq!(
+            rows,
+            [
+                ("sent-legacy".to_string(), "4".to_string()),
+                ("sent-live".to_string(), "398".to_string()),
+            ]
         );
     }
 
@@ -3453,6 +4655,7 @@ mod tests {
             body_html: None,
             is_read: true,
             is_starred: false,
+            workflow_marker: None,
             body_calendar: None,
             smime_encrypted: None,
             smime_signed: None,
@@ -3463,6 +4666,11 @@ mod tests {
             auth_spf: None,
             auth_dkim: None,
             auth_dmarc: None,
+            spam_hint_headers: None,
+            satchel_marks: Vec::new(),
+            chat: None,
+            autocrypt_headers: Vec::new(),
+            autocrypt_eligible: false,
             attachments: Vec::new(),
         };
         upsert_provider_message(
@@ -3642,6 +4850,7 @@ mod tests {
             body_html: None,
             is_read: true,
             is_starred: false,
+            workflow_marker: None,
             body_calendar: None,
             smime_encrypted: None,
             smime_signed: None,
@@ -3652,6 +4861,11 @@ mod tests {
             auth_spf: None,
             auth_dkim: None,
             auth_dmarc: None,
+            spam_hint_headers: None,
+            satchel_marks: Vec::new(),
+            chat: None,
+            autocrypt_headers: Vec::new(),
+            autocrypt_eligible: false,
             attachments: Vec::new(),
         };
         upsert_provider_message(
@@ -3735,6 +4949,7 @@ mod tests {
             body_html: None,
             is_read: true,
             is_starred: false,
+            workflow_marker: None,
             body_calendar: None,
             smime_encrypted: None,
             smime_signed: None,
@@ -3745,6 +4960,11 @@ mod tests {
             auth_spf: None,
             auth_dkim: None,
             auth_dmarc: None,
+            spam_hint_headers: None,
+            satchel_marks: Vec::new(),
+            chat: None,
+            autocrypt_headers: Vec::new(),
+            autocrypt_eligible: false,
             attachments: vec![RemoteAttachment {
                 remote_part_id: "mime-1".to_string(),
                 filename: Some("note.txt".to_string()),
@@ -3816,6 +5036,7 @@ mod tests {
                 remote_id: "replacement-message".to_string(),
                 is_read: None,
                 is_starred: None,
+                workflow_marker: None,
             }],
             // Gmail: neither side names a generation.
             None,

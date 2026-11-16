@@ -11,10 +11,7 @@ const { traySnapshot, openThread, openDestination, actOnThread } = vi.hoisted(()
 }));
 
 const tauriWindow = vi.hoisted(() => ({
-  focusHandler: undefined as ((event: { payload: boolean }) => void) | undefined,
   hide: vi.fn(),
-  isVisible: vi.fn(),
-  onFocusChanged: vi.fn(),
 }));
 
 vi.mock('@/services/backend', () => ({
@@ -43,12 +40,7 @@ function mountPopover() {
 describe('tray briefing', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    tauriWindow.focusHandler = undefined;
-    tauriWindow.isVisible.mockResolvedValue(true);
-    tauriWindow.onFocusChanged.mockImplementation(async (handler) => {
-      tauriWindow.focusHandler = handler;
-      return () => {};
-    });
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
     traySnapshot.mockResolvedValue({
       new_threads: [
         {
@@ -93,23 +85,22 @@ describe('tray briefing', () => {
   });
 
   it('loads only when the hidden popover is actually shown and refreshes on reopen', async () => {
-    tauriWindow.isVisible.mockResolvedValueOnce(false);
+    vi.mocked(document.hasFocus).mockReturnValue(false);
     const wrapper = mountPopover();
     await flushPromises();
 
     expect(traySnapshot).not.toHaveBeenCalled();
 
-    tauriWindow.focusHandler?.({ payload: true });
-    tauriWindow.focusHandler?.({ payload: true });
+    window.dispatchEvent(new Event('focus'));
+    document.dispatchEvent(new Event('visibilitychange'));
     await flushPromises();
     expect(traySnapshot).toHaveBeenCalledTimes(1);
     expect(wrapper.text()).toContain('Mara Hoffmann');
 
-    tauriWindow.focusHandler?.({ payload: false });
-    tauriWindow.focusHandler?.({ payload: true });
+    window.dispatchEvent(new Event('focus'));
     await flushPromises();
-    expect(tauriWindow.hide).toHaveBeenCalledTimes(1);
     expect(traySnapshot).toHaveBeenCalledTimes(2);
+    wrapper.unmount();
   });
 
   it('shows the two workflow actions without adding read or reply controls', async () => {

@@ -95,9 +95,20 @@ export async function backendChooseSavePath(input: {
   return invoke<string | null>('choose_save_path', input);
 }
 
-/** The folder counterpart, for a backup target. */
+/**
+ * The folder counterpart, for a backup target. The chosen folder is also the
+ * one the backup list, restore and prune accept.
+ */
 export async function backendChooseDirectory(defaultPath?: string): Promise<string | null> {
   return invoke<string | null>('choose_directory', { defaultPath: defaultPath || null });
+}
+
+/** An open dialog run by the backend; the import commands read only its result. */
+export async function backendChooseOpenFile(input: {
+  filterName: string;
+  extensions: string[];
+}): Promise<string | null> {
+  return invoke<string | null>('choose_open_file', input);
 }
 
 /**

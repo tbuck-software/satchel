@@ -7,6 +7,7 @@ import { authErrorLabel } from '@/utils/oauthErrors';
 import AppBanner from '@/components/ui/AppBanner.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 
+const props = withDefaults(defineProps<{ variant?: 'strip' | 'card' }>(), { variant: 'strip' });
 const accounts = useAccountsStore();
 const toast = useToast();
 const busy = ref(new Set<string>());
@@ -34,16 +35,19 @@ async function reauth(accountId: string) {
   <div
     v-if="accounts.credentialLock || accounts.accountsWithAuthError.length > 0"
     class="reauth"
+    :class="`reauth--${props.variant}`"
   >
     <AppBanner
       v-if="accounts.credentialLock?.keyUnavailable"
       tone="danger"
+      :variant="props.variant"
       :title="t('settings.accounts.credentialLock.keyTitle')"
       :detail="t('settings.accounts.credentialLock.keyDetail')"
     />
     <AppBanner
       v-else-if="accounts.credentialLock"
       tone="danger"
+      :variant="props.variant"
       :title="t('settings.accounts.credentialLock.unreadableTitle', { count: accounts.credentialLock.unreadableAccounts }, accounts.credentialLock.unreadableAccounts)"
       :detail="t('settings.accounts.credentialLock.unreadableDetail')"
     />
@@ -51,6 +55,7 @@ async function reauth(accountId: string) {
       v-for="account in accounts.accountsWithAuthError"
       :key="account.id"
       tone="danger"
+      :variant="props.variant"
       :title="t('settings.accounts.reauth.bannerTitle', { email: account.email })"
       :detail="authErrorLabel(account.lastOauthError) || t('settings.accounts.reauth.expired')"
     >
@@ -73,5 +78,9 @@ async function reauth(accountId: string) {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+}
+
+.reauth--card {
+  gap: var(--space-xs);
 }
 </style>

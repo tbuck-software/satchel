@@ -933,6 +933,7 @@ async fn all_day_sync_writes_keep_date_boundaries_and_editor_revision() {
             remote_etag: state.remote_etag.as_deref(),
             collection_href: state.event.collection_href.as_deref(),
             raw_ics: state.raw_ics.as_deref(),
+            flags: Default::default(),
         })
         .await
         .unwrap();

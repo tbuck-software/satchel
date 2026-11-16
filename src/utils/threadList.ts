@@ -557,12 +557,8 @@ export function isNewSenderThread(
   })(thread);
 }
 
-/**
- * Screening new senders belongs to the Inbox. Spam is full of unknown senders
- * by nature, and Sent, Trash, Done and the folders hold mail that is already
- * filed: offering to allow or block its senders there makes no sense.
- */
-export function senderReviewInScope(scope: {
+/** Category folders belong to the Inbox, not filed mail or other workflow lists. */
+export function inboxGroupingInScope(scope: {
   workflow: WorkflowFilter;
   mailbox: MailboxFilter;
   contactEmail: string;
@@ -572,6 +568,13 @@ export function senderReviewInScope(scope: {
     && scope.mailbox.kind === 'section'
     && scope.mailbox.value === 'inbox';
 }
+
+/**
+ * Screening new senders belongs to the Inbox. Spam is full of unknown senders
+ * by nature, and Sent, Trash, Done and the folders hold mail that is already
+ * filed: offering to allow or block its senders there makes no sense.
+ */
+export const senderReviewInScope = inboxGroupingInScope;
 
 /**
  * Ids of the threads that belong in the new-sender review.
@@ -1303,9 +1306,33 @@ export function toThreadModel(input: BackendThread, accounts: readonly Account[]
     hasInvite: Boolean(input.has_invite),
     inviteStatus: input.invite_status ?? undefined,
     inviteCancelled: Boolean(input.invite_cancelled),
+    likelySpam: Boolean(input.likely_spam),
+    spamMoved: Boolean(input.spam_moved),
   };
 }
 
+
+const SPAM_FOLDER_NAME = /^(spam|junk|junk e-?mail|bulk mail)$/i;
+
+/** Whether a mailbox list shows a Spam folder. */
+export function isSpamMailbox(filter: MailboxFilter | null | undefined): boolean {
+  if (!filter) return false;
+  if (filter.kind === 'section') return filter.value === 'spam';
+  if (filter.kind === 'folder' && filter.value) {
+    return SPAM_FOLDER_NAME.test(filter.value.split('/').at(-1)?.trim() ?? '');
+  }
+  return false;
+}
+
+/**
+ * Whether Not spam applies: the filter marked the thread, or it sits in a
+ * Spam folder — the user's, the provider's or the filter's own move.
+ */
+export function offersNotSpam(thread: Thread, filter: MailboxFilter | null | undefined): boolean {
+  return Boolean(thread.likelySpam)
+    || isSpamMailbox(filter)
+    || (thread.mailboxNames ?? []).some((name) => SPAM_FOLDER_NAME.test(name.split('/').at(-1)?.trim() ?? ''));
+}
 
 export function matchesMailboxFilter(thread: Thread, filter: MailboxFilter): boolean {
   if (filter.kind === 'all' || !filter.value) {

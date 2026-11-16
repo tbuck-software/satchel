@@ -137,3 +137,33 @@ describe('company domains behind Google Workspace or Microsoft 365', () => {
     expect(backend.backendAddAccount).toHaveBeenCalledWith(expect.objectContaining({ provider: 'gmail' }));
   });
 });
+
+describe('account name and sender name', () => {
+  it('keeps the account name local and asks a password account for the sender name', async () => {
+    backend.backendDetectMailProvider.mockResolvedValue(null);
+    const wrapper = mount(OnboardingFlow);
+    await settle();
+    await typeEmail(wrapper, 'anna@self-hosted.example');
+
+    expect(wrapper.find('[data-testid="onboarding-sender-name"]').exists()).toBe(true);
+    await wrapper.get('[data-testid="onboarding-sender-name"]').setValue('Anna Example');
+    await wrapper.get('[data-testid="onboarding-account-label"]').setValue('Work');
+    expect(wrapper.text()).toContain('Only shown in Satchel.');
+  });
+
+  it('passes the account name as the label, not as the sender, on a Google sign-in', async () => {
+    const wrapper = mount(OnboardingFlow);
+    await settle();
+    await typeEmail(wrapper, 'anna@gmail.com');
+
+    // Google supplies the sender name; the wizard does not ask for it.
+    expect(wrapper.find('[data-testid="onboarding-sender-name"]').exists()).toBe(false);
+    await wrapper.get('[data-testid="onboarding-account-label"]').setValue('Work');
+    await wrapper.find('form').trigger('submit');
+    await settle();
+
+    expect(backend.backendAddAccount).toHaveBeenCalledWith(
+      expect.objectContaining({ label: 'Work', displayName: 'anna', provider: 'gmail' }),
+    );
+  });
+});

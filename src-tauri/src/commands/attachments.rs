@@ -1,5 +1,5 @@
 use base64::Engine;
-use satchel_core::utils::filename::strip_filename_controls;
+use satchel_core::utils::filename::{safe_attachment_name, strip_filename_controls};
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
 use tauri::{AppHandle, Manager};
@@ -19,6 +19,7 @@ use crate::{
 pub struct AttachmentDto {
     pub id: String,
     pub message_id: String,
+    #[serde(serialize_with = "satchel_core::utils::filename::serialize_optional_filename")]
     pub filename: Option<String>,
     pub content_type: String,
     pub size: Option<i64>,
@@ -155,7 +156,7 @@ pub(super) async fn attachments_for_messages(
             {
                 return None;
             }
-            row.filename = row.filename.as_deref().map(strip_filename_controls);
+            row.filename = row.filename.as_deref().map(safe_attachment_name);
             if row
                 .cached_path
                 .as_deref()
@@ -215,6 +216,7 @@ pub struct DownloadAttachmentResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ipc-types", ts(optional = nullable))]
     pub remote_uidvalidity: Option<u32>,
+    #[serde(serialize_with = "satchel_core::utils::filename::serialize_filename")]
     pub filename: String,
     pub mime_type: String,
     /// Base64 payload, only up to [`MAX_BASE64_PAYLOAD_BYTES`]. Above that it
@@ -233,6 +235,7 @@ pub struct PreparedAttachmentResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ipc-types", ts(optional = nullable))]
     pub remote_uidvalidity: Option<u32>,
+    #[serde(serialize_with = "satchel_core::utils::filename::serialize_filename")]
     pub filename: String,
     pub mime_type: String,
     pub size: i64,
@@ -393,7 +396,7 @@ async fn prepare_referenced_attachment(
     if message_id != reference.message_id {
         return Err(reference.changed_error());
     }
-    let filename = strip_filename_controls(&filename.unwrap_or_else(|| "attachment".into()));
+    let filename = safe_attachment_name(&filename.unwrap_or_else(|| "attachment".into()));
     tokio::fs::create_dir_all(cache_dir)
         .await
         .map_err(|err| format!("create attachment cache: {err}"))?;
@@ -453,7 +456,11 @@ async fn prepare_referenced_attachment(
     } else {
         fetched.content_type
     };
-    let final_filename = fetched.filename.unwrap_or(filename.clone());
+    let final_filename = fetched
+        .filename
+        .as_deref()
+        .map(safe_attachment_name)
+        .unwrap_or_else(|| filename.clone());
     // Each request owns its file. A late request must never overwrite a file
     // already published by a replacement row or another fetch.
     let path = attachment_cache_path(
@@ -560,10 +567,12 @@ pub async fn open_attachment_default(
         .and_then(|name| name.to_str())
         .ok_or_else(|| CommandError::unexpected("invalid cached attachment filename"))?;
     let risk = attachment_open_risk(cache_filename);
-    if risk.executable && !confirmed {
+    if risk.needs_confirmation && !confirmed {
         // A second extension is the part the user cannot see in a chip that
         // shows an icon and a truncated name, so it gets its own sentence.
-        let key = if risk.double_extension {
+        let key = if !risk.executable {
+            "backend.errors.attachmentTypeNotConfirmed"
+        } else if risk.double_extension {
             "backend.errors.attachmentExecutableDisguisedNotConfirmed"
         } else {
             "backend.errors.attachmentExecutableNotConfirmed"
@@ -578,9 +587,18 @@ pub async fn open_attachment_default(
         .map_err(|err| CommandError::unexpected(format!("open attachment: {err}")))
 }
 
-/// Types the operating system runs rather than displays. The list is the
-/// hand-off gate, not a malware verdict: it decides what needs a confirmed
-/// click before `open_path` sees it.
+/// The only types handed to the operating system without a confirmed click:
+/// passive documents and media. Everything else asks first.
+const OPEN_WITHOUT_CONFIRMATION_EXTENSIONS: &[&str] = &[
+    "pdf", "txt", "text", "md", "rtf", "csv", "tsv", "log", "docx", "xlsx", "pptx", "odt", "ods",
+    "odp", "pages", "numbers", "key", "epub", "ics", "vcf", "eml", "jpg", "jpeg", "png", "gif",
+    "heic", "heif", "webp", "bmp", "tif", "tiff", "avif", "mp3", "m4a", "aac", "wav", "flac",
+    "ogg", "opus", "aif", "aiff", "mp4", "m4v", "mov", "avi", "mkv", "webm", "zip",
+];
+
+/// Types the operating system runs rather than displays. They pick the
+/// stronger wording and block "show in folder"; the gate itself is the
+/// allowlist above.
 const EXECUTABLE_ATTACHMENT_EXTENSIONS: &[&str] = &[
     "action",
     "apk",
@@ -641,10 +659,71 @@ const EXECUTABLE_ATTACHMENT_EXTENSIONS: &[&str] = &[
     "appx",
     "appinstaller",
     "xll",
+    "xhtml",
+    "xht",
+    "shtml",
+    "mht",
+    "mhtml",
+    "webarchive",
+    "afploc",
+    "ftploc",
+    "vncloc",
+    "atloc",
+    "py",
+    "pyw",
+    "jnlp",
+    "docm",
+    "dotm",
+    "xlsm",
+    "xltm",
+    "xlam",
+    "pptm",
+    "potm",
+    "ppam",
+    "ppsm",
+    "sldm",
+    "application",
+    "settingcontent-ms",
+    "library-ms",
+    "search-ms",
+    "searchconnector-ms",
+    "wsc",
+    "msh",
+    "msh1",
+    "msh2",
+    "mshxml",
+    "msh1xml",
+    "msh2xml",
+    "ps1xml",
+    "ps2xml",
+    "psc1",
+    "psc2",
+    "diagcab",
+    "cab",
+    "appref-ms",
+    "website",
+    "sh",
+    "zsh",
+    "bash",
+    "csh",
+    "ksh",
+    "pl",
+    "rb",
+    "scpt",
+    "scptd",
+    "applescript",
+    "osax",
+    "deb",
+    "rpm",
+    "flatpakref",
+    "snap",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttachmentOpenRisk {
+    /// Not on the allowlist: opening asks first.
+    pub needs_confirmation: bool,
+    /// A type the operating system runs.
     pub executable: bool,
     /// Lowercased final extension, when the name has one.
     pub extension: Option<String>,
@@ -655,6 +734,8 @@ pub struct AttachmentOpenRisk {
 /// Pure so it can be exercised without a Tauri context or a cache directory.
 pub fn attachment_open_risk(filename: &str) -> AttachmentOpenRisk {
     let filename = strip_filename_controls(filename);
+    // Windows drops trailing dots and spaces: `invoice.exe. ` opens as `.exe`.
+    let filename = filename.trim_end_matches(|ch: char| ch == '.' || ch.is_whitespace());
     let segments: Vec<&str> = filename.rsplit('.').collect();
     let extension = segments
         .first()
@@ -664,11 +745,15 @@ pub fn attachment_open_risk(filename: &str) -> AttachmentOpenRisk {
     let executable = extension
         .as_deref()
         .is_some_and(|value| EXECUTABLE_ATTACHMENT_EXTENSIONS.contains(&value));
+    let needs_confirmation = !extension
+        .as_deref()
+        .is_some_and(|value| OPEN_WITHOUT_CONFIRMATION_EXTENSIONS.contains(&value));
     let double_extension = segments.len() > 2
         && segments
             .get(1)
             .is_some_and(|inner| looks_like_an_extension(inner));
     AttachmentOpenRisk {
+        needs_confirmation: needs_confirmation || executable,
         executable,
         extension,
         double_extension,
@@ -1049,6 +1134,64 @@ mod tests {
             super::safe_filename("Rechnung\u{202e}fdp.html"),
             "Rechnungfdp.html"
         );
+    }
+
+    #[test]
+    fn only_passive_types_open_without_confirmation() {
+        for name in [
+            "Rechnung.pdf",
+            "Foto.JPEG",
+            "Tabelle.xlsx",
+            "Einladung.ics",
+            "Archiv.zip",
+        ] {
+            assert!(
+                !super::attachment_open_risk(name).needs_confirmation,
+                "{name}"
+            );
+        }
+        for name in [
+            "page.xhtml",
+            "page.mhtml",
+            "page.webarchive",
+            "share.afploc",
+            "run.py",
+            "app.jnlp",
+            "macro.docm",
+            "macro.xlsm",
+            "panel.settingcontent-ms",
+            "help.diagcab",
+            "link.appref-ms",
+            "pin.website",
+            "unknown.xyz",
+            "noextension",
+            "legacy.doc",
+        ] {
+            assert!(
+                super::attachment_open_risk(name).needs_confirmation,
+                "{name}"
+            );
+        }
+        assert!(!super::attachment_open_risk("unknown.xyz").executable);
+        assert!(super::attachment_open_risk("macro.docm").executable);
+    }
+
+    #[test]
+    fn trailing_dots_and_spaces_do_not_hide_the_extension() {
+        for name in ["invoice.exe.", "invoice.exe ", "invoice.exe. . "] {
+            let risk = super::attachment_open_risk(name);
+            assert!(risk.executable, "{name}");
+            assert_eq!(risk.extension.as_deref(), Some("exe"));
+        }
+        assert!(
+            super::attachment_open_risk("invoice.pdf.")
+                .extension
+                .as_deref()
+                == Some("pdf")
+        );
+        let path =
+            super::attachment_cache_path(std::path::Path::new("/cache"), "id", "invoice.exe.");
+        assert!(path.to_str().unwrap().ends_with("invoice.exe"));
     }
 
     /// The ceiling, stated where someone changing it will see it.
@@ -1510,6 +1653,17 @@ mod tests {
     }
 
     #[test]
+    fn cache_names_drop_directory_parts() {
+        let path = attachment_cache_path(
+            std::path::Path::new("/cache"),
+            "id",
+            "../../Library/LaunchAgents/a.plist",
+        );
+        assert_eq!(path.parent(), Some(std::path::Path::new("/cache")));
+        assert!(path.to_str().unwrap().ends_with("-a.plist"));
+    }
+
+    #[test]
     fn executable_attachment_names_are_flagged() {
         let cases = [
             ("rechnung.pdf", false, false),
@@ -1524,6 +1678,7 @@ mod tests {
         for (name, executable, double) in cases {
             let risk = attachment_open_risk(name);
             assert_eq!(risk.executable, executable, "{name}");
+            assert!(!executable || risk.needs_confirmation, "{name}");
             assert_eq!(risk.double_extension, double, "{name}");
         }
 

@@ -175,6 +175,34 @@ pub fn build_submission(
             value: format!("<{rr}>"),
         });
     }
+    if let Some(value) = message
+        .auto_submitted
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        use lettre::message::header::{Header, HeaderName, HeaderValue};
+        /// RFC 3834 `Auto-Submitted`, for mail Satchel sends on its own.
+        #[derive(Clone)]
+        struct AutoSubmitted(String);
+        impl Header for AutoSubmitted {
+            fn name() -> HeaderName {
+                HeaderName::new_from_ascii_str("Auto-Submitted")
+            }
+            fn parse(value: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+                Ok(Self(value.to_string()))
+            }
+            fn display(&self) -> HeaderValue {
+                HeaderValue::new(Self::name(), self.0.clone())
+            }
+        }
+        // A token (`auto-generated`); anything else would be a header injection.
+        let token: String = value
+            .chars()
+            .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '-')
+            .collect();
+        builder = builder.header(AutoSubmitted(token));
+    }
     if let Some(in_reply_to) = &message.in_reply_to {
         builder = builder.in_reply_to(in_reply_to.clone());
     }

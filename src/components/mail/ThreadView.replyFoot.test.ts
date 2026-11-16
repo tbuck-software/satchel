@@ -38,7 +38,7 @@ vi.mock('@/stores/drafts', () => ({
   useDraftsStore: () => ({ items: [], sorted: [] }),
 }));
 vi.mock('@/stores/settings', () => ({
-  useSettingsStore: () => ({ readerZoom: 100, setReaderZoom: vi.fn() }),
+  useSettingsStore: () => ({ readerZoom: 100, setReaderZoom: vi.fn(), keybindings: {}, singleKeyShortcuts: true }),
 }));
 vi.mock('@/stores/mailboxes', () => ({
   useMailboxesStore: () => ({ mailboxes: [], load: vi.fn() }),
@@ -143,9 +143,11 @@ describe('thread reply foot', () => {
     const wrapper = render();
     await flushPromises();
 
-    const button = wrapper.get('.reply-bar').findAll('button').at(-1)!;
-    expect(button.text()).toBe('Reply');
-    expect(wrapper.get('.reply-bar').text()).toContain('Reply to Sarah Kim');
+    // One target: the field is the button, there is no second Reply pill.
+    const buttons = wrapper.get('.reply-bar').findAll('button');
+    expect(buttons).toHaveLength(1);
+    const button = buttons[0]!;
+    expect(button.text()).toContain('Reply to Sarah Kim');
     expect(wrapper.findComponent({ name: 'ThreadToolbar' }).props('replyInReader')).toBe(true);
 
     await button.trigger('click');

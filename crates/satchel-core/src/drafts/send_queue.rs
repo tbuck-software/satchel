@@ -25,7 +25,17 @@ pub fn build_send_action(
     input: OutgoingMessageInput,
     scheduled_for: Option<DateTime<Utc>>,
 ) -> Result<QueuedAction, String> {
-    let message_id_header = format!("<{}@satchel.local>", uuid::Uuid::new_v4());
+    // A Delta Chat group finds its messages by Message-ID too ("Outgoing
+    // groups messages": `Gr.<group-id>.<unique data>`).
+    let group_id = input
+        .chat
+        .as_ref()
+        .and_then(|chat| chat.group_id.as_deref())
+        .filter(|id| crate::chat::is_valid_group_id(id));
+    let message_id_header = match group_id {
+        Some(group_id) => crate::chat::group_message_id(group_id, "satchel.local"),
+        None => format!("<{}@satchel.local>", uuid::Uuid::new_v4()),
+    };
     let payload = SendActionPayload {
         account_id: account_id.clone(),
         draft_reference: None,

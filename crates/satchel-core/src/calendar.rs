@@ -8,7 +8,10 @@ use crate::drafts::send_queue::{build_send_action, SendActionPayload};
 use crate::sync::queue::{QueuedAction, SyncQueue};
 use sqlx::SqlitePool;
 
+pub mod availability;
+pub mod free_busy;
 mod ics;
+mod outlook;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SaveError {
@@ -92,6 +95,23 @@ pub async fn save_event(
     let attendees = normalize_attendees(&input.attendees);
     if input.id.is_some() && existing.is_none() {
         return Err(CalendarError::EventNotFound.into());
+    }
+    if let Some(existing) = existing
+        .as_ref()
+        .filter(|row| row.event.source == "outlook")
+    {
+        if input
+            .expected_updated_at
+            .as_deref()
+            .is_some_and(|version| version != existing.event.updated_at.as_str())
+        {
+            return Err(CalendarError::EventChanged.into());
+        }
+        return outlook::save_edit(pool, &input, existing, title, starts_at, ends_at).await;
+    }
+    if existing.is_none() && crate::providers::outlook::calendar::calendar_granted(&account.config)
+    {
+        return outlook::save_new(pool, &input, title, starts_at, ends_at, &attendees).await;
     }
     let ics = if let Some(existing) = &existing {
         if input
@@ -223,6 +243,10 @@ pub async fn save_event(
                     remote_etag: remote.as_ref().and_then(|value| value.etag.as_deref()),
                     collection_href: remote.as_ref().map(|value| value.collection_href.as_str()),
                     raw_ics: Some(&ics),
+                    flags: crate::db::calendar::EventFlags {
+                        transparent: availability::ics_transparent(&ics),
+                        ..Default::default()
+                    },
                 },
             )
             .await?;
@@ -263,6 +287,9 @@ pub async fn delete_event(pool: &SqlitePool, id: &str) -> Result<(), SaveError> 
         .event_sync_state_by_id(id)
         .await?
         .ok_or(CalendarError::EventNotFound)?;
+    if remote.source == "outlook" {
+        outlook::delete(pool, &remote).await?;
+    }
     if remote.source == "caldav" {
         let href = remote
             .remote_href
@@ -303,10 +330,9 @@ pub async fn delete_event(pool: &SqlitePool, id: &str) -> Result<(), SaveError> 
 fn build_invitation(invitation: Invitation) -> Result<QueuedAction, String> {
     use base64::Engine as _;
     use sha2::{Digest, Sha256};
-    let digest = format!(
-        "{:x}",
-        Sha256::digest(format!("{}\0{}", invitation.account_id, invitation.ics).as_bytes())
-    );
+    let digest = crate::utils::hex::lower_hex(&Sha256::digest(
+        format!("{}\0{}", invitation.account_id, invitation.ics).as_bytes(),
+    ));
     let outgoing = OutgoingMessageInput {
         to: invitation.attendees,
         subject: invitation.title.clone(),

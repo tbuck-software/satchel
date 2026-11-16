@@ -5,7 +5,7 @@ use std::{future::Future, pin::Pin};
 use crate::commands::error::{CommandError, CommandResult};
 use crate::commands::messages::{OutgoingAttachmentInput, OutgoingMessageInput};
 use crate::db::accounts::AccountRepository;
-use crate::db::calendar::{CalendarError, CalendarRepository};
+use crate::db::calendar::{CalendarError, CalendarRepository, InviteOrigin};
 pub use crate::db::calendar::{
     CalendarEventRecord as CalendarEventDto, CalendarInviteRecord as CalendarInviteDto,
     CalendarSourceRecord as CalendarSourceDto,
@@ -125,7 +125,7 @@ pub async fn import_ics(
     };
 
     let dto = CalendarRepository::new(pool.inner())
-        .upsert_invite(&account_id, None, &parsed)
+        .upsert_invite(&account_id, InviteOrigin::Import, &parsed)
         .await?;
 
     Ok(with_current_recurrence_metadata(dto))
@@ -146,9 +146,12 @@ fn decode_ics_payload(raw: &str) -> CommandResult<String> {
 
 #[tauri::command]
 pub async fn import_ics_path(
+    state: tauri::State<'_, crate::AppState>,
     pool: tauri::State<'_, SqlitePool>,
     path: String,
 ) -> CommandResult<CalendarInviteDto> {
+    // Paths arrive from "Open with Satchel", which grants them as it buffers them.
+    state.read_grants.file(std::path::Path::new(&path))?;
     crate::commands::file_limits::guard_import_size(std::path::Path::new(&path)).await?;
     let bytes = tokio::fs::read(&path).await.map_err(|error| {
         tracing::warn!(%error, %path, "calendar file could not be read");
@@ -422,6 +425,30 @@ pub async fn sync_google_calendar(
     .await
 }
 
+/// Mirror the calendars of every active Outlook account (or one account)
+/// that granted calendar access. Accounts without the grant are counted but
+/// cost no request; their prompt lives in the calendar settings.
+#[tauri::command]
+pub async fn sync_outlook_calendar(
+    pool: tauri::State<'_, SqlitePool>,
+    account_id: Option<String>,
+) -> CommandResult<GoogleCalendarSyncSummary> {
+    let accounts = AccountRepository::new(pool.inner())
+        .list_active_outlook_calendar_accounts(account_id.as_deref())
+        .await?;
+    Ok(sync_calendar_accounts(
+        pool.inner(),
+        accounts,
+        "backend.errors.outlookCalendarSyncFailed",
+        |pool, account_id| {
+            Box::pin(crate::providers::outlook::calendar::sync_account(
+                pool, account_id,
+            ))
+        },
+    )
+    .await)
+}
+
 type CalendarSyncFuture<'a> = Pin<Box<dyn Future<Output = Result<usize, String>> + Send + 'a>>;
 
 async fn sync_google_calendar_with<F>(
@@ -435,7 +462,24 @@ where
     let accounts = AccountRepository::new(pool)
         .list_active_gmail_calendar_accounts(account_id)
         .await?;
+    Ok(sync_calendar_accounts(
+        pool,
+        accounts,
+        "backend.errors.googleCalendarSyncFailed",
+        sync_account,
+    )
+    .await)
+}
 
+async fn sync_calendar_accounts<F>(
+    pool: &SqlitePool,
+    accounts: Vec<crate::db::accounts::CalendarAccountRef>,
+    error_key: &'static str,
+    sync_account: F,
+) -> GoogleCalendarSyncSummary
+where
+    F: for<'a> Fn(&'a SqlitePool, &'a str) -> CalendarSyncFuture<'a>,
+{
     let mut summary = GoogleCalendarSyncSummary::default();
     for account in accounts {
         summary.accounts_checked += 1;
@@ -444,20 +488,16 @@ where
         match sync_account(pool, &account.id).await {
             Ok(count) => summary.events_synced += count,
             Err(error) => {
-                tracing::warn!(account_id = %account.id, %error, "google calendar sync failed");
-                summary
-                    .errors
-                    .push(google_calendar_sync_error(&account.email));
+                tracing::warn!(account_id = %account.id, %error, "remote calendar sync failed");
+                summary.errors.push(
+                    CommandError::new(error_key)
+                        .with_param("account", account.email.as_str())
+                        .encoded(),
+                );
             }
         }
     }
-    Ok(summary)
-}
-
-fn google_calendar_sync_error(account: &str) -> String {
-    CommandError::new("backend.errors.googleCalendarSyncFailed")
-        .with_param("account", account)
-        .encoded()
+    summary
 }
 
 #[cfg(test)]

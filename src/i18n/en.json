@@ -22,6 +22,19 @@
     "settings": "Account settings…",
     "title": "Appearance"
   },
+  "accountQuota": {
+    "asOf": "As of {time}",
+    "critical": "Full or nearly full. New mail may already bounce.",
+    "freeUp": "Deleting large messages, emptying Trash or clearing out a sender's mail makes room.",
+    "messagesMeter": "Messages in the mailbox",
+    "messagesUsed": "{used} of {limit} messages",
+    "sidebarCritical": "{account}: mailbox {percent} full, new mail may bounce. Open account settings.",
+    "sidebarWarning": "{account}: mailbox {percent} full. Open account settings.",
+    "storageMeter": "Mailbox storage used",
+    "storageUsed": "{used} of {limit} used",
+    "title": "Mailbox storage",
+    "warning": "Almost full. Once it is full, new mail bounces."
+  },
   "accountVisibility": {
     "accounts": "Accounts",
     "always": "Always",
@@ -99,6 +112,20 @@
     "signatures": {
       "discovered": "Found {count} signature in your sent mail. | Found {count} signatures in your sent mail."
     },
+    "status": {
+      "certificate": "Check certificate",
+      "details": "Show details",
+      "error": "Something failed",
+      "importing": "Older mail {percent}",
+      "more": "+{count}",
+      "offline": "Offline",
+      "review": "{count} to review",
+      "signIn": "Sign-in needed",
+      "syncFailed": "Sync failed",
+      "syncNow": "Sync now",
+      "syncing": "Syncing",
+      "title": "Sync and accounts"
+    },
     "sync": {
       "failures": {
         "explanation": "Temporary connection problems retry automatically. These items need a review.",
@@ -109,6 +136,21 @@
         "unavailable": "Open Outbox to review the affected items."
       },
       "mutationsFailed": "{count} change didn't reach the server. | {count} changes didn't reach the server.",
+      "progress": {
+        "complete": "Everything is up to date.",
+        "counts": "{done} of {total} messages",
+        "details": "Show sync details",
+        "explanation": "Older mail loads in the background — keep working meanwhile. Totals grow while more folders are found.",
+        "folder": "Reading {folder}",
+        "folderCount": "{folder} · folder {current} of {total}",
+        "history": "Loading older mail",
+        "needsAttention": "This account needs attention. Check its sync error.",
+        "paused": "Paused while offline",
+        "preparing": "Connecting to your mailbox…",
+        "title": "Mail sync",
+        "updated": "Last activity {time}",
+        "waiting": "Working in the background"
+      },
       "retryFailed": "Re-sync failed: {error}",
       "retryQueued": "{count} change is being synced again. | {count} changes are being synced again.",
       "status": {
@@ -136,6 +178,59 @@
       "version": "Version {version}"
     }
   },
+  "availability": {
+    "insert": {
+      "button": "Insert my availability",
+      "duration": "Meeting length",
+      "failed": "Free time could not be found: {error}",
+      "hoursHint": "Working hours: {hours}. Change them under Settings → Calendar.",
+      "hoursShort": "{count} h",
+      "insert": "Insert",
+      "insertFailed": "The availability could not be inserted. Click into the message and try again.",
+      "loading": "Finding free time…",
+      "minutesShort": "{count} min",
+      "none": "No free time within working hours in the next working day. | No free time within working hours in the next {count} working days.",
+      "range": "Within the next",
+      "title": "Insert my availability",
+      "workingDays": "{count} working day | {count} working days"
+    },
+    "settings": {
+      "calendars": "Calendars that make you busy",
+      "description": "Your working hours and the calendars that make you busy. “Insert my availability” in the composer and “Next time everyone is free” in the event editor use them.",
+      "invalidHours": "The working day has to end after it starts.",
+      "title": "Availability",
+      "workDays": "Working days",
+      "workEnd": "Working day ends",
+      "workStart": "Working day starts"
+    },
+    "strip": {
+      "allFreeAt": "Everyone known is free at {time}.",
+      "busyThen": "Busy then",
+      "busyTimes": "Busy {times}",
+      "conflicts": "{count} person is busy at {time}. | {count} people are busy at {time}.",
+      "freeAllDay": "Free all day",
+      "freeThen": "Free then",
+      "loadFailed": "Availability could not be loaded.",
+      "loading": "Loading availability…",
+      "nextDay": "Next day",
+      "nextFree": "Next time everyone is free",
+      "noneFree": "No time when everyone is free in the next {count} working days.",
+      "notCounted": "Not counted, their availability is unknown: {people}",
+      "previousDay": "Previous day",
+      "searchFailed": "Free time could not be found: {error}",
+      "searching": "Looking…",
+      "title": "Availability",
+      "unknown": "Availability unknown",
+      "unknownHint": "Striped rows: their calendar does not share free/busy with this account.",
+      "you": "You"
+    },
+    "text": {
+      "day": "{day}: {times}",
+      "hours": "{count} hour | {count} hours",
+      "intro": "I'm free for {duration} at these times ({zone}):",
+      "minutes": "{count} minute | {count} minutes"
+    }
+  },
   "backend": {
     "errors": {
       "accountAvatarInvalid": "The picture must be a small PNG, JPEG or WebP image.",
@@ -144,6 +239,7 @@
       "accountConfigurationInvalid": "The account configuration is invalid.",
       "accountCredentialAccessFailed": "The saved account credentials could not be accessed. Please try again.",
       "accountHasNoPassword": "This account signs in through its provider and has no password to change.",
+      "accountNameInvalid": "Use a name without line breaks, at most 120 characters long.",
       "accountNotFound": "The account was not found.",
       "accountNotImap": "This account does not use IMAP.",
       "accountPasswordRequired": "Enter the account password.",
@@ -160,6 +256,11 @@
       "attachmentExecutableNotConfirmed": "\"{filename}\" is a program (.{extension}), not a document. Satchel will not hand it to the operating system without your confirmation.",
       "attachmentNotBase64": "\"{filename}\" could not be attached: its data is damaged. Remove the attachment and add the file again.",
       "attachmentPayloadMissing": "The attachment could not be read: Satchel received neither its content nor a path to it.",
+      "attachmentTypeNotConfirmed": "Satchel does not know what opens \"{filename}\". It will not hand it to the operating system without your confirmation.",
+      "availabilityDurationInvalid": "Choose a meeting length between 5 minutes and 24 hours.",
+      "availabilityRangeInvalid": "That time range cannot be checked for free time.",
+      "availabilityTimeZoneInvalid": "This device's time zone is not known to Satchel.",
+      "availabilityWorkingHoursInvalid": "Working hours need a start before their end and at least one working day.",
       "backupPassphraseOrAcknowledgementRequired": "Set a passphrase for the master key, or confirm that the backup folder may hold it unprotected.",
       "backupPassphraseRejected": "That passphrase does not open this backup's master key.",
       "backupPassphraseRequired": "This backup's master key is wrapped. Enter the passphrase it was created with.",
@@ -175,6 +276,7 @@
       "calendarEventEndInvalid": "The event must end after it starts.",
       "calendarEventNotFound": "The calendar event was not found.",
       "calendarEventOwnership": "This calendar event belongs to another account.",
+      "calendarEventReadOnly": "Outlook does not let this account change the event: it is a meeting you attend, or its calendar is read-only.",
       "calendarFileReadFailed": "The calendar file could not be read.",
       "calendarInviteCancelled": "A cancelled invitation cannot be answered.",
       "calendarInviteInvalid": "The saved invitation is invalid.",
@@ -186,8 +288,11 @@
       "calendarRemoteUnavailable": "Sync this calendar before changing the event. Its remote version is unavailable.",
       "calendarRemoteWriteFailed": "The calendar server could not confirm the change. Sync the calendar before trying again.",
       "calendarResponseInvalid": "Choose a valid invitation response.",
+      "calendarRichDescriptionReadOnly": "This description is formatted in Outlook and would lose its links and layout here. Edit it in Outlook.",
       "calendarTimeInvalid": "Enter a valid event time.",
       "calendarTitleRequired": "Enter an event title.",
+      "chatConfirmationNeeded": "The chat changed. Send again.",
+      "chatEncryptionLost": "This reply was to go out encrypted and no longer can. It waits in the Outbox.",
       "composeWindowUnsupported": "A separate compose window is only available on the desktop.",
       "contactAvatarFallbackSyncFailed": "Fallback contact photos could not be synchronized.",
       "contactAvatarLocalSyncFailed": "Local contact photos could not be synchronized.",
@@ -197,8 +302,8 @@
       "decryptedAttachmentUnavailable": "This attachment comes from an encrypted message, and its decrypted copy is no longer stored. Open the message to decrypt it again.",
       "desktopUnavailable": "The desktop backend is unavailable. Start Satchel with `pnpm tauri:dev`.",
       "directorySelectionUnavailable": "Folder selection is not available on this platform.",
-      "draftChangedElsewhere": "This draft was changed in another window. Your text here is not saved.",
-      "draftGoneElsewhere": "This draft was sent or discarded in another window. Your text here is not saved.",
+      "draftChangedElsewhere": "This draft was changed elsewhere, so your latest edits are not saved yet.",
+      "draftGoneElsewhere": "This draft was sent or deleted elsewhere, so your latest edits are not saved yet.",
       "draftSendPending": "This draft has an active send. Open it from Drafts to cancel sending before editing.",
       "draftSyncQueueInvalid": "The saved draft sync request is invalid.",
       "draftSyncTimedOut": "The provider did not finish syncing the draft in time.",
@@ -226,6 +331,7 @@
       "groupwareContactSyncFailed": "Contacts for {account} could not be synchronized.",
       "groupwareCredentialsRejected": "No CalDAV or CardDAV service accepted the saved credentials.",
       "groupwareSyncFailed": "Groupware for {account} could not be synchronized.",
+      "groupwareTaskSyncFailed": "Tasks for {account} could not be synchronized.",
       "imapConnectionFailed": "A secure IMAP connection could not be established. Last attempt: {reason}. You can enter the server manually under Advanced.",
       "imapCredentialsRejected": "No secure IMAP configuration accepted these credentials. Check the username or enter the server manually.",
       "imapDraftUidWithoutValidity": "This older draft in \"{folder}\" has no verified server identity. Its server copy was left untouched.",
@@ -239,6 +345,24 @@
       "inlineBackfillAlreadyRunning": "The inline image backfill is already running.",
       "logsFolderUnavailable": "The logs folder could not be opened.",
       "mailActionFailed": "The mail action could not be saved. Please try again.",
+      "mailMergeCsvEmpty": "The file is empty.",
+      "mailMergeCsvNoRows": "The file has a header row but no recipients.",
+      "mailMergeCsvTooLarge": "The file is larger than 5 MB. That is not a recipient list.",
+      "mailMergeCsvTooManyColumns": "The file has more than {limit} columns. That is not a recipient list.",
+      "mailMergeCsvUnreadable": "The file could not be read.",
+      "mailMergeCsvUnterminatedQuote": "A quotation mark in row {line} is never closed.",
+      "mailMergeDelayInvalid": "Choose between 1 and 3600 seconds between messages.",
+      "mailMergeInvalidState": "The mail merge cannot do that right now. It may have changed in the meantime.",
+      "mailMergeJobNotFound": "This mail merge no longer exists.",
+      "mailMergeMissingKeys": "Recipients without an encryption key: {count} ({addresses}). Nothing was sent.",
+      "mailMergeMissingValues": "A placeholder had no value for this recipient.",
+      "mailMergeNoRecipients": "No row of the list can be sent.",
+      "mailMergePersistenceFailed": "The mail merge could not be saved.",
+      "mailMergeRemovedFromOutbox": "Removed from the Outbox before it was sent.",
+      "mailMergeReplyNotAllowed": "A mail merge is a new message. It cannot answer or forward a conversation.",
+      "mailMergeSmimeSigningUnavailable": "The S/MIME signing certificate is locked or missing. Unlock it and start again.",
+      "mailMergeTooManyRecipients": "One mail merge sends at most {limit} messages. Split the list.",
+      "mailMoveInterrupted": "The move was interrupted before it finished. Try again.",
       "mailMovePending": "The server move is still being finalized. Try again shortly.",
       "mailUndoUnavailable": "This action can no longer be undone.",
       "messageBodyProviderUnsupported": "Loading message bodies is not supported for {provider} accounts.",
@@ -273,6 +397,9 @@
       "oauthReloadRequired": "The account's sign-in changed while this was in progress. Please try again.",
       "oauthUrlRejected": "Satchel refused an unexpected sign-in address.",
       "outboxActionCannotBeDiscarded": "This outbox action cannot be discarded safely.",
+      "outlookCalendarAccessMissing": "Calendar access for this Outlook account is not connected. Connect it under Settings → Calendar.",
+      "outlookCalendarSyncFailed": "Outlook Calendar for {account} could not be synchronized.",
+      "outlookEventChangedRemotely": "This event changed in Outlook. The calendar has been refreshed; open the event again and retry.",
       "passwordCheckFailed": "Signing in with the new password failed: {reason}",
       "pgpDecodeFailed": "The decrypted OpenPGP content could not be read.",
       "pgpDecryptFailed": "The OpenPGP message could not be decrypted with the unlocked keys.",
@@ -317,6 +444,7 @@
       "queueRejected": "The server rejected this action. Review its details before trying again.",
       "queueTemporary": "The server is temporarily unavailable. Satchel will try again automatically.",
       "queuedDraftNotRestorable": "This message can no longer be reopened as a draft because its draft changed after it was queued. It is still in the Outbox, where you can view it or discard it before it is sent.",
+      "readSourceNotChosen": "Satchel only reads a file or folder chosen in its own dialog. Choose {path} again.",
       "recipientAddressInvalid": "This is not a valid recipient address: {value}",
       "replyContextLoadFailed": "The reply context could not be loaded. The message has not been sent yet.",
       "replyThreadNotFound": "The conversation for this reply is no longer available.",
@@ -329,15 +457,49 @@
       "restoreSearchIndexInvalid": "The backup's search index does not match its messages. Make a fresh backup instead of restoring this one.",
       "restoreStagingChanged": "The staged backup is incomplete or has changed. Stage the backup again.",
       "revealTargetBlocked": "This target cannot be opened in the file manager.",
+      "rules": {
+        "actionsInvalid": "This rule's folder or forward address is not allowed."
+      },
       "scheduledTimeInvalid": "Choose a valid send time in the future.",
+      "senderAddressMissing": "This account has no sender address. Add one in Settings → Accounts, then send again.",
       "senderAddressNotOwned": "\"{address}\" is neither this account's address nor one of its aliases. Pick a different sender.",
       "senderPreferenceAccountInvalid": "The account for this sender preference is invalid.",
       "senderPreferenceCategoryInvalid": "Choose a valid sender category.",
       "senderPreferenceEmailInvalid": "Enter a valid sender email address.",
       "senderPreferencePersistenceFailed": "Sender preferences are currently unavailable. Please try again.",
+      "senderSweepAccountInvalid": "This account cannot be cleaned up.",
+      "senderSweepActionInvalid": "Unknown cleanup action.",
+      "senderSweepDaysInvalid": "Choose between 0 and 3650 days.",
+      "senderSweepFolderInvalid": "Choose a folder of this account.",
+      "senderSweepOwnAddress": "You cannot clean up your own address.",
+      "senderSweepPersistenceFailed": "The cleanup rule could not be saved.",
+      "senderSweepRuleNotFound": "This rule no longer exists.",
+      "senderSweepSenderInvalid": "That is not a sender address.",
+      "senderSweepTrashNeedsAge": "A rule that moves mail to Trash needs an age of at least one day.",
       "sentMessagePersistenceFailed": "The message was sent, but its local Sent record could not be saved. Do not send it again.",
       "sentMessagePostProcessingFailed": "The message was sent, but its local follow-up could not be completed. Do not send it again.",
       "serverHostAndPortRequired": "Enter both a server host and port.",
+      "serverRules": {
+        "authFailed": "The filter server refused the account's password.",
+        "consentNeeded": "Another filter script is active. Choose under Settings → Accounts → Server rules.",
+        "includeUnavailable": "This server cannot run two scripts side by side.",
+        "invalidChoice": "Unknown choice.",
+        "invalidHost": "Enter a valid host name.",
+        "invalidPort": "Enter a valid port.",
+        "invalidTls": "Choose STARTTLS or TLS.",
+        "nameTaken": "A script of yours already uses Satchel's name. Rename it first.",
+        "noMechanism": "The filter server offers no supported sign-in method.",
+        "notConfigured": "Check the server first, or enter it manually.",
+        "persistence": "Server rule settings could not be saved.",
+        "protocol": "The filter server sent an unexpected reply.",
+        "quota": "The filter script exceeds the server's space.",
+        "refused": "The filter server rejected the script.",
+        "tls": "The filter server offers no secure connection.",
+        "turnOffFirst": "Turn server rules off before changing the server.",
+        "unreachable": "The filter server could not be reached.",
+        "unverified": "The server did not confirm Satchel's script as active.",
+        "vacationUnsupported": "This server cannot send the reply as set up."
+      },
       "signatureAccountMismatch": "This signature belongs to another account.",
       "signatureAssetContentIdDuplicate": "Each signature image needs a unique content ID.",
       "signatureAssetContentInvalid": "A signature image could not be decoded.",
@@ -371,7 +533,20 @@
       "smimeUndecodedPart": "The decrypted S/MIME content contains a part that Satchel cannot show.",
       "smimeVerificationFailed": "The S/MIME signature could not be verified.",
       "snapshotMessagesHeld": "{count} messages in {folder} could not be updated from the server for {account} and stay where they are for now. Satchel tries again in a day.",
+      "spamFilterUnavailable": "The spam filter settings could not be read or saved.",
       "systemFolderImmutable": "\"{name}\" is a system folder and cannot be changed.",
+      "taskChanged": "This task changed in the meantime.",
+      "taskCompletedInvalid": "The completion time could not be read.",
+      "taskDueInvalid": "The due date could not be read.",
+      "taskListNameRequired": "A list needs a name.",
+      "taskListNotFound": "This task list no longer exists.",
+      "taskListNotLocal": "Lists from an account are renamed and deleted on its server.",
+      "taskListReadOnly": "This task list is read-only.",
+      "taskNotFound": "This task no longer exists.",
+      "taskPersistenceFailed": "The task could not be saved.",
+      "taskPriorityInvalid": "The priority is not one Satchel knows.",
+      "taskReminderInvalid": "The reminder time could not be read.",
+      "taskTitleRequired": "A task needs a title.",
       "templateNotFound": "The template was not found.",
       "templatePersistenceFailed": "Templates are currently unavailable. Please try again.",
       "threadMetadataInvalid": "The thread organization details are invalid.",
@@ -392,12 +567,36 @@
       "topicNoteContentEmpty": "Enter note content.",
       "topicPersistenceFailed": "The topic could not be saved. Please try again.",
       "topicStatusInvalid": "The topic status is invalid.",
+      "translation": {
+        "consentRequired": "Mail from this account may not be sent for translation yet.",
+        "credentialsUnavailable": "The key store is locked, so the API key cannot be read or saved.",
+        "encrypted": "Encrypted mail is not sent for translation.",
+        "engineUnknown": "Unknown translation engine.",
+        "freePlanNotForMail": "DeepL API Free keys can't be used for mail: DeepL forbids personal data on the free API, and every mail contains some. Translating needs a Pro key.",
+        "invalidKey": "DeepL did not accept the API key. Check it in Settings → Translation.",
+        "invalidResponse": "DeepL's answer could not be read.",
+        "keyMalformed": "That does not look like an API key. Paste the key without spaces or line breaks.",
+        "keyMissing": "No API key is saved for the translation engine.",
+        "messageNotFound": "This message is not stored on this device.",
+        "network": "DeepL could not be reached. Check the connection.",
+        "notConfigured": "Translation is not set up. Choose an engine in Settings → Translation.",
+        "nothingToTranslate": "This message has no text to translate.",
+        "persistenceFailed": "The translation could not be saved on this device.",
+        "quotaExceeded": "The DeepL character allowance is used up for this billing period.",
+        "rateLimited": "DeepL is getting too many requests. Try again in a minute.",
+        "rejected": "DeepL refused the request.",
+        "tooLarge": "This message is too long to translate in one go.",
+        "unavailable": "DeepL is not available right now. Try again later.",
+        "unsupportedLanguage": "The translation engine does not translate into this language."
+      },
       "trayDestinationInvalid": "This tray destination is not available.",
       "trayMessageNotFound": "This email is no longer available.",
       "trayThreadInvalid": "This tray email reference is invalid.",
       "unexpected": "An unexpected backend error occurred.",
       "unsubscribeBrowserOpenFailed": "The unsubscribe page could not be opened: {message}",
+      "unsubscribeConfirmationStale": "The unsubscribe mail no longer matches what was confirmed. Nothing was sent.",
       "unsubscribeHeaderMissing": "This email carries no unsubscribe address.",
+      "unsubscribeMailtoInvalid": "The unsubscribe address in this email is not a single valid address. Satchel will not send to it.",
       "unsubscribeMessageNotFound": "This email is no longer available.",
       "unsubscribeNoTarget": "This email carries no usable unsubscribe address.",
       "unsubscribePostFailed": "The unsubscribe request failed: {message}",
@@ -423,7 +622,9 @@
     "createHint": "Click an empty day or time slot to create an event.",
     "editor": {
       "add": "Add",
+      "attendeesNotified": "Attendees will be notified of your changes.",
       "attendeesPlaceholder": "person{'@'}example.com, team{'@'}example.com",
+      "descriptionLocked": "This description is formatted in Outlook (links, tables). Edit it there; everything else can be changed here.",
       "descriptionPlaceholder": "Notes, agenda, …",
       "editTitle": "Edit event",
       "errors": {
@@ -431,10 +632,12 @@
         "invalidDates": "Start and end do not contain a valid date.",
         "titleRequired": "Please enter a title."
       },
+      "guestsNeedInvites": "Guests are only saved with invitations on.",
       "locationPlaceholder": "Location or video link",
       "newTitle": "New event",
+      "occurrenceOnly": "Changes apply to this occurrence only.",
       "sendInvites": "Send ICS invitations by mail",
-      "serverNotifications": "CalDAV servers may notify guests even when mail invitations are turned off.",
+      "serverNotifications": "Calendar servers may notify guests even when mail invitations are turned off.",
       "submit": "Create event",
       "titlePlaceholder": "Event title"
     },
@@ -442,7 +645,10 @@
       "allDay": "All day",
       "attendees": "Attendees",
       "delete": "Delete event",
+      "deleteConfirmAttendees": "The event is deleted from the calendar on the server, and its attendees will be notified. This cannot be undone.",
       "deleteConfirmBody": "The event is removed from your calendar. This cannot be undone.",
+      "deleteConfirmOccurrence": "Only this occurrence is deleted from the calendar on the server; the rest of the series stays. This cannot be undone.",
+      "deleteConfirmOccurrenceAttendees": "Only this occurrence is deleted from the calendar on the server, and its attendees will be notified; the rest of the series stays. This cannot be undone.",
       "deleteConfirmRemote": "The event is also deleted from the calendar on the server. This cannot be undone.",
       "deleteConfirmTitle": "Delete this event?",
       "details": "Event details",
@@ -450,6 +656,7 @@
       "end": "End",
       "location": "Location",
       "organizer": "Organizer",
+      "readOnlyOutlook": "Change this event in Outlook: it is a meeting you attend, or its calendar is read-only.",
       "start": "Start",
       "title": "Title",
       "untitled": "(No title)"
@@ -498,6 +705,7 @@
       "hide": "Hide",
       "invites": "Invitations",
       "local": "Local",
+      "outlook": "Outlook calendar",
       "show": "Show"
     },
     "status": {
@@ -506,6 +714,7 @@
       "declined": "Declined",
       "googleCalendar": "Google Calendar",
       "needsAction": "Awaiting reply",
+      "outlookCalendar": "Outlook Calendar",
       "ownEvent": "Own event",
       "tentative": "Maybe"
     },
@@ -600,7 +809,100 @@
       "problem": "{account}: {problem}"
     }
   },
+  "chats": {
+    "allAccounts": "All accounts",
+    "composer": {
+      "hint": "Enter sends, Shift+Enter adds a line",
+      "label": "Message",
+      "placeholder": "Message {name}…",
+      "queued": "Queued. It goes out when the connection is back.",
+      "send": "Send",
+      "sendFailed": "The message could not be sent.",
+      "sending": "Sending…"
+    },
+    "confirm": {
+      "firstBody": "This is your first reply in this chat. It goes to:",
+      "firstGroupBody": "This is your first reply in this group. It goes to:",
+      "firstGroupTitle": "Reply to this group?",
+      "firstTitle": "Send your first reply?",
+      "plainBody": "This chat was end-to-end encrypted. This reply would go out in plain text, because not every recipient has an Autocrypt key.",
+      "plainTitle": "Send without encryption?",
+      "recipientsBody": "The recipients changed since your last reply, or since the chat began.",
+      "recipientsTitle": "Send to these people?",
+      "send": "Send",
+      "sendPlain": "Send unencrypted"
+    },
+    "empty": {
+      "description": "Messages from Delta Chat appear here as they arrive.",
+      "title": "No chats yet"
+    },
+    "encrypted": "End-to-end encrypted",
+    "list": "Chats",
+    "loadFailed": "The chats could not be loaded.",
+    "members": "{count} member | {count} members",
+    "messagesLoadFailed": "The messages could not be loaded.",
+    "notEncrypted": "Not encrypted",
+    "notEncryptedNoKey": "Replies go out unencrypted: there is no OpenPGP key for {address}.",
+    "notEncryptedNoPeerKey": "Replies go out unencrypted until every member has sent an Autocrypt key.",
+    "notMember": "{name} · not in this chat",
+    "partHidden": "Part of this message is hidden · Show as mail",
+    "select": {
+      "description": "Its messages show as bubbles, with a reply field below.",
+      "title": "Pick a chat"
+    },
+    "showAsMail": "Show as mail",
+    "title": "Chats",
+    "today": "Today",
+    "unlock": {
+      "body": "This reply is end-to-end encrypted and signed with your OpenPGP key for {address}.",
+      "confirm": "Unlock and send",
+      "failed": "The key could not be unlocked.",
+      "label": "Passphrase",
+      "title": "Unlock your key to send",
+      "wrong": "That passphrase does not unlock the key."
+    },
+    "unread": "{count} unread",
+    "unsigned": {
+      "body": "Your key stays locked. The reply is still end-to-end encrypted, but the recipients cannot check that it came from you.",
+      "confirm": "Send unsigned",
+      "title": "Send without your signature?"
+    },
+    "yesterday": "Yesterday"
+  },
+  "cleanup": {
+    "actions": {
+      "archiveAll": "Archive all",
+      "keepLatest": "Keep latest",
+      "rule": "From now on…",
+      "trashAll": "Move all to Trash"
+    },
+    "allAccounts": "All accounts",
+    "canUnsubscribe": "Unsubscribe available",
+    "empty": {
+      "description": "No sender has mail from the last {days} days in the Inbox.",
+      "title": "Nothing to clean up"
+    },
+    "keys": {
+      "move": "Move",
+      "title": "Keyboard"
+    },
+    "loadFailed": "Could not load the senders.",
+    "messages": "{count} message | {count} messages",
+    "newest": "newest {date}",
+    "openForAccount": "Clean up mailbox…",
+    "subtitle": "Top senders in the Inbox, last {days} days",
+    "subtitleAccount": "Top senders in {account}, last {days} days",
+    "threads": "{count} conversation | {count} conversations",
+    "title": "Clean up",
+    "trashConfirm": {
+      "body": "Conversations with other participants, your replies or a pin stay. Undo is offered for a few seconds.",
+      "title": "Move one conversation from {sender} to Trash? | Move {count} conversations from {sender} to Trash?"
+    },
+    "unreadShare": "{percent}% unread",
+    "unsubscribed": "Unsubscribed"
+  },
   "commands": {
+    "addTask": "Add as task",
     "blockAddress": "Block this sender",
     "blockDomain": "Block the sender's whole domain",
     "compose": "Compose new email",
@@ -611,6 +913,7 @@
     "exportText": "Export conversation as text",
     "keywords": {
       "block": "block sender domain",
+      "cleanup": "clean up sweep senders newsletters unsubscribe",
       "compose": "compose new mail write",
       "copyLink": "link url share satchel",
       "editShortcuts": "keybindings shortcuts customize",
@@ -620,6 +923,8 @@
       "moveToFolder": "move folder file",
       "moveToInbox": "move inbox",
       "mute": "mute silence notifications",
+      "newTask": "task todo to-do add create",
+      "notSpam": "not spam ham wanted inbox",
       "oauthGmail": "oauth google sign in login",
       "oauthOutlook": "oauth microsoft sign in login",
       "openSettingsSection": "settings preferences options",
@@ -644,6 +949,7 @@
     "markUnread": "Mark as unread",
     "moveToFolder": "Move to {folder}",
     "moveToInbox": "Move to inbox",
+    "newTask": "New task",
     "noEmailAccount": "No email account set up.",
     "oauthFailed": "{provider} sign-in could not be started.",
     "oauthFailedCause": "{provider} sign-in could not be started: {cause}",
@@ -651,6 +957,7 @@
     "oauthOpened": "{provider} sign-in opened in the browser.",
     "oauthOutlook": "Start OAuth (Outlook)",
     "oauthStarted": "{provider} sign-in started: {url}",
+    "openCleanup": "Open cleanup assistant",
     "openSettingsSection": "Settings: {section}",
     "pin": "Pin or unpin",
     "printConversation": "Print conversation",
@@ -658,11 +965,13 @@
     "setAside": "Set aside",
     "showShortcuts": "Show keyboard shortcuts",
     "snooze": "Snooze…",
+    "sweepSender": "Clean up mail from this sender…",
     "syncDone": "Sync finished.",
     "syncFailed": "Sync failed.",
     "syncFailedCause": "Sync failed: {cause}",
     "syncMail": "Sync email",
     "toggleTheme": "Switch theme (light/dark)",
+    "translateMessage": "Translate message or show the original",
     "trashMany": "Delete {count} emails",
     "undo": "Undo: {label}",
     "waiting": "Wait for a reply"
@@ -822,6 +1131,18 @@
       "paragraph": "Text",
       "placeholder": "Write your message…",
       "strike": "Strikethrough",
+      "table": {
+        "addColumnAfter": "Insert column right",
+        "addColumnBefore": "Insert column left",
+        "addRowAfter": "Insert row below",
+        "addRowBefore": "Insert row above",
+        "deleteColumn": "Delete column",
+        "deleteRow": "Delete row",
+        "deleteTable": "Delete table",
+        "headerRow": "Header row",
+        "insert": "Insert table",
+        "toolbar": "Table"
+      },
       "textColor": "Text colour"
     },
     "emlDrop": {
@@ -966,11 +1287,12 @@
     "toolbar": {
       "attach": "Attach file",
       "attachShort": "Attach",
+      "attachWithCount": "Attach file ({count} attached)",
       "more": "More options",
       "template": "Use template"
     },
     "unsaved": {
-      "conflictTitle": "Not saved: this draft changed in another window",
+      "conflictTitle": "Draft not saved",
       "discardMine": "Discard my changes",
       "saveAsNew": "Save as new draft",
       "title": "Not saved"
@@ -983,6 +1305,11 @@
       "popOutFailed": "Could not open a separate window: {error}",
       "restore": "Restore window"
     }
+  },
+  "composeDrop": {
+    "add": "Add to draft",
+    "addToTo": "Drop to add to To",
+    "attach": "Attach to draft"
   },
   "contacts": {
     "add": {
@@ -1250,11 +1577,16 @@
       "openWithDefault": "Open with default app",
       "openWithDefaultNamed": "Open {filename} with the default app",
       "pdfFailed": "This PDF could not be displayed.",
+      "pdfNext": "Next page",
+      "pdfPage": "Page {page} of {total}",
+      "pdfPages": "PDF pages",
       "pdfPreview": "PDF preview",
+      "pdfPrevious": "Previous page",
       "previewLabel": "Attachment preview",
       "previewUnavailable": "No preview available for {mime}.",
       "quickLookFailed": "Could not open Quick Look: {error}",
       "readFailed": "“{name}” could not be read.",
+      "removeNamed": "Remove {name}",
       "save": "Save attachment",
       "saveEllipsis": "Save…",
       "saveFailed": "Could not save the attachment: {error}",
@@ -1262,6 +1594,9 @@
       "showInFolder": "Show in folder",
       "tooLarge": "“{name}” is larger than {limit}.",
       "totalExceeded": "Total size exceeded: “{name}” no longer fits the {limit} budget ({used} already in use).",
+      "unknownTypeBody": "Satchel does not know the file type .{extension}. Opening it hands it to the operating system, which may run it. Check the full name below before you decide.",
+      "unknownTypeNoExtensionBody": "This file has no extension, so Satchel cannot tell what it is. Opening it hands it to the operating system, which may run it.",
+      "unknownTypeTitle": "Open this attachment?",
       "useAsAttachment": "Send image as a regular attachment",
       "viewInSatchel": "View in Satchel",
       "viewInSatchelNamed": "View {filename} in Satchel"
@@ -1537,6 +1872,14 @@
     "unsubscribe": {
       "action": "Unsubscribe",
       "banner": "Newsletter — unsubscribe in one click",
+      "confirm": {
+        "body": "This newsletter unsubscribes by email. Satchel sends this message from your account:",
+        "message": "Message",
+        "send": "Send unsubscribe email",
+        "subject": "Subject",
+        "title": "Send an unsubscribe email?",
+        "to": "To"
+      },
       "failed": "Unsubscribe failed: {error}",
       "sending": "Sending…",
       "success": "Unsubscribed via {method}"
@@ -1560,6 +1903,132 @@
       "text": "Text",
       "textTitle": "Plain text"
     }
+  },
+  "mailMerge": {
+    "bar": {
+      "change": "Change list",
+      "insertField": "Insert field",
+      "insertFieldHint": "Inserts the field where the cursor was, in the subject or the message",
+      "recipients": "one recipient from {source} | {count} recipients from {source}",
+      "stop": "Stop mail merge",
+      "title": "Mail merge"
+    },
+    "command": "Mail merge…",
+    "commandKeywords": "mail merge serial letter personalised copies bulk csv list",
+    "confirm": {
+      "body": "From {address} ({account}), one copy per recipient, each addressed to them alone.",
+      "detail": "The messages leave through the Outbox one at a time. You can pause or cancel the rest there.",
+      "send": "Send",
+      "title": "Send one personalised message? | Send {count} personalised messages?"
+    },
+    "contactsAction": "Mail merge to one contact… | Mail merge to {count} contacts…",
+    "jobs": {
+      "cancel": "Cancel the rest",
+      "cancelConfirm": {
+        "body": "Nothing is left to send. | The remaining message is not sent. | The remaining {count} messages are not sent. Messages already sent stay sent.",
+        "title": "Cancel this mail merge?"
+      },
+      "cancelledCount": "one not sent | {count} not sent",
+      "failed": "one failed | {count} failed",
+      "hideRecipients": "Hide recipients",
+      "loadFailed": "Could not load the mail merge jobs.",
+      "next": "Next message at {time}",
+      "noSource": "list",
+      "pause": "Pause",
+      "progressLabel": "Progress of {subject}",
+      "remove": "Remove",
+      "resume": "Resume",
+      "retry": "Retry the failed one | Retry {count} failed",
+      "row": {
+        "cancelled": "Not sent",
+        "failed": "Failed",
+        "pending": "Waiting",
+        "queued": "In the Outbox",
+        "sent": "Sent",
+        "unknown": "Delivery unconfirmed"
+      },
+      "sent": "{count} of {total} sent",
+      "showRecipients": "Show recipients",
+      "status": {
+        "cancelled": "Cancelled",
+        "completed": "Finished",
+        "paused": "Paused",
+        "pausedAccountFailures": "Paused: another mail merge on this account kept failing",
+        "pausedFailures": "Paused after repeated failures",
+        "pausedRestart": "Paused when Satchel restarted",
+        "running": "Sending"
+      },
+      "title": "Mail merge",
+      "unknown": "one unconfirmed | {count} unconfirmed"
+    },
+    "menuItem": "Mail merge…",
+    "notForReplies": "Mail merge works with a new message, not with a reply or forward.",
+    "review": {
+      "delay": "Time between messages",
+      "delayHint": "A slower pace keeps the provider from flagging the account; Gmail and Microsoft are strict.",
+      "delayInvalid": "Choose between 1 and 3600 seconds.",
+      "duration": "Sends right away. | Takes about a minute. | Takes about {minutes} minutes.",
+      "encrypted": "Each copy is encrypted for its recipient. Before the first one goes, every recipient's key and your own are checked; a key that goes missing later stops that copy, which is then not sent unencrypted.",
+      "issue": {
+        "duplicate": "The address appears in an earlier row",
+        "invalidEmail": "No valid email address",
+        "missing": "No value for {fields}"
+      },
+      "line": "Row {line}",
+      "next": "Next recipient",
+      "noAddress": "No address",
+      "overLimit": "{count} recipients is more than one job may send ({limit}).",
+      "overLimitDetail": "Split the list into parts of at most {limit} and send each as its own mail merge.",
+      "position": "{index} of {total}",
+      "previewLabel": "Preview",
+      "previous": "Previous recipient",
+      "rowSkipped": "This row is skipped",
+      "seconds": "seconds",
+      "skipped": "One row is skipped | {count} rows are skipped",
+      "start": "Send one message from {address} | Send {count} messages from {address}",
+      "summary": "One of {total} rows in {source} will be sent. | {count} of {total} rows in {source} will be sent.",
+      "title": "Review mail merge",
+      "unknownFields": "No field of the list is called {fields}.",
+      "unknownFieldsDetail": "Fields in the list: {fields}. Rows without a fallback for these are skipped."
+    },
+    "reviewAndSend": "Review and send…",
+    "source": {
+      "apply": "Use one recipient | Use {count} recipients",
+      "chooseFile": "Choose CSV file…",
+      "chooseOther": "Choose another file…",
+      "contacts": "Contacts",
+      "contactsLabel": "one contact | {count} contacts",
+      "csv": "CSV file",
+      "csvHint": "The first row names the fields. Comma or semicolon, UTF-8 or Windows-1252, as Excel and LibreOffice save it.",
+      "delimiter": {
+        "comma": "comma-separated",
+        "semicolon": "semicolon-separated",
+        "tab": "tab-separated"
+      },
+      "emailColumn": "Email address column",
+      "emailColumnPick": "Choose a column",
+      "emailColumnRequired": "Choose the column that holds the email addresses.",
+      "encoding": {
+        "utf16": "UTF-16",
+        "utf8": "UTF-8",
+        "utf8Bom": "UTF-8 (BOM)",
+        "windows1252": "Windows-1252"
+      },
+      "fields": "Fields: {fields}",
+      "kindLabel": "Where the recipients come from",
+      "lead": "Each recipient gets a copy addressed to them alone. Fields from the list fill the placeholders in subject and message.",
+      "noContacts": "No contacts yet",
+      "rows": "One row | {count} rows",
+      "searchContacts": "Search contacts",
+      "sectionLabel": "{section} (one contact) | {section} ({count} contacts)",
+      "selectAll": "Select the one shown | Select all {count} shown",
+      "selectNone": "Clear selection",
+      "title": "Mail merge",
+      "truncated": "The file has more rows. Only the first {count} were read.",
+      "windows1252Hint": "The file was read as Windows-1252. If umlauts or accents look wrong, save it as \"CSV UTF-8\" and choose it again."
+    },
+    "started": "Mail merge started: one copy is on its way. | Mail merge started: {count} copies go out one by one.",
+    "viewProgress": "View progress"
   },
   "nativeUi": {
     "composeWindowTitle": "New message — Satchel",
@@ -1589,6 +2058,7 @@
       "summary": "{count} new emails",
       "syncFailed": "Remote sync failed",
       "syncing": "Syncing content",
+      "taskDue": "Task due",
       "trash": "Delete"
     },
     "oauth": {
@@ -1617,6 +2087,7 @@
       "allDayCount": "{count} entries",
       "more": "+{count} more",
       "now": "Now",
+      "tasksDue": "{count} task due | {count} tasks due",
       "title": "Today"
     },
     "calendar": "Calendar",
@@ -1714,6 +2185,7 @@
       "tomorrow14": "Tomorrow 14:00",
       "tomorrow8": "Tomorrow 08:00"
     },
+    "tasks": "Tasks",
     "toggleSection": "Toggle {name}",
     "unpinContact": "Unpin contact",
     "unpinContactNamed": "Unpin {name}"
@@ -1766,12 +2238,16 @@
       "later": "Later",
       "microsoft365Detected": "{domain} receives mail through Microsoft 365",
       "microsoftDetected": "Microsoft sign-in detected",
+      "nameHint": "Only shown in Satchel.",
       "nameLabel": "Account name",
       "namePlaceholder": "Work, Personal, …",
       "otherMethod": "Different sign-in method?",
       "passwordHint": "Applies to inbox, outbox, calendar and contacts.",
       "passwordLabel": "Password",
       "passwordPlaceholder": "Your mail password",
+      "senderHint": "Recipients see this as the sender.",
+      "senderLabel": "Your name",
+      "senderPlaceholder": "Alex Example",
       "signInSecurely": "Sign in securely",
       "workspaceDetected": "{domain} receives mail through Google Workspace"
     },
@@ -2031,7 +2507,24 @@
         "unreadableTitle": "{count} account is locked | {count} accounts are locked"
       },
       "description": "Manage email accounts, syncing and sign-in.",
+      "detail": {
+        "calendarsHint": "Connect CalDAV calendars and CardDAV contacts from the same provider.",
+        "connection": "Connection",
+        "general": "General",
+        "labelsTitle": "Labels and categories",
+        "passwordTitle": "Password",
+        "remove": "Remove account",
+        "removeHint": "Deletes this account's mail, folders and stored sign-in from this device.",
+        "server": "On the server",
+        "signInHint": "Signed in with {provider}. Renew the sign-in when Satchel asks for new permissions.",
+        "signInTitle": "Sign-in",
+        "syncTitle": "Mail sync"
+      },
       "disconnected": "disconnected",
+      "empty": {
+        "description": "Add an account to read and send mail with Satchel.",
+        "title": "No email account yet"
+      },
       "groupware": {
         "autoFailed": "Automatic discovery failed: {error}. Please add the credentials.",
         "badge": "CalDAV / CardDAV",
@@ -2064,7 +2557,18 @@
       "imapFailed": "IMAP connection failed: {error}",
       "imapOk": "IMAP connection OK ({folders} folders)",
       "imapOkWithSample": "IMAP connection OK ({folders} folders): {sample}",
+      "mailAccounts": "Email accounts",
+      "names": {
+        "label": "Account name",
+        "labelHint": "How the account appears in the sidebar and in lists.",
+        "saveFailed": "The names could not be saved.",
+        "saved": "Names saved.",
+        "sender": "Sender name",
+        "senderHint": "Recipients see this name next to {email}.",
+        "senderPlaceholder": "First and last name"
+      },
       "oauthStatus": "{provider}: {state}",
+      "openAccount": "Settings for {name}",
       "password": {
         "action": "Update password",
         "checking": "Signing in…",
@@ -2101,6 +2605,10 @@
       "removeRequiresApp": "Deleting accounts requires the desktop app.",
       "removeTitle": "Remove account",
       "removed": "Account deleted: {email}",
+      "status": {
+        "signInNeeded": "Sign-in needed",
+        "upToDate": "Up to date"
+      },
       "statusUnavailable": "Status unavailable: {error}",
       "sync": {
         "accountsCount": "{count} account | {count} accounts",
@@ -2350,6 +2858,7 @@
           "filter_no_date": "No readable date",
           "filter_not_inbox": "Not in inbox",
           "filter_own_sent": "Own message",
+          "filter_spam_moved": "Moved to Spam by the spam filter",
           "filter_too_old": "Older than the last sync",
           "not_bundled_fallback": "Shown without an app bundle (click has no effect)",
           "permission_denied": "Permission denied",
@@ -2447,7 +2956,9 @@
       "connect": "Connect",
       "connected": "Connected",
       "contactsHint": "Connect Google Contacts to use contact photos. Mail works without contact access.",
-      "contactsTitle": "Google Contacts"
+      "contactsTitle": "Google Contacts",
+      "outlookCalendarHint": "Connect an Outlook account to read and edit its calendars. Mail works without calendar access.",
+      "outlookCalendarTitle": "Outlook Calendar"
     },
     "images": {
       "allow": "Allow",
@@ -2495,6 +3006,19 @@
       "throttled": "The provider is throttling — pausing for about {duration}",
       "title": "Embedded images",
       "upfront": "A full run takes at least about {duration} — finishing around {time} at the earliest."
+    },
+    "labs": {
+      "experimental": "Experimental",
+      "flags": {
+        "chats": {
+          "description": "Shows mail from Delta Chat as chats: a Chats list under the Inbox, messages as bubbles, and a reply field that sends at once. The mail stays in your folders. With an OpenPGP key for your address, replies are end-to-end encrypted with Autocrypt.",
+          "title": "Chats with Delta Chat"
+        }
+      },
+      "loadFailed": "The Labs settings could not be loaded.",
+      "note": "These features are not finished. They can change, break or go away in a later version. Each switch applies to this device only.",
+      "restart": "Takes effect after a restart.",
+      "saveFailed": "The switch could not be saved."
     },
     "language": {
       "de": "Deutsch",
@@ -2727,6 +3251,46 @@
       "refreshed": "{count} labels/categories updated.",
       "title": "Provider features"
     },
+    "ruleActions": {
+      "account": "Account",
+      "accountHint": "A rule that moves mail belongs to the account whose folder it moves to.",
+      "accountMissing": "Account removed: the rule no longer runs",
+      "actionLocal": "Local only",
+      "actionPending": "Not on the server yet",
+      "actionServer": "Server",
+      "actionServerTitle": "This action also runs on the server.",
+      "addressInvalid": "Enter one email address, without a name.",
+      "addressLabel": "Forward address",
+      "addressOwn": "That is one of your own addresses: the mail would come straight back.",
+      "addressPlaceholder": "name{'@'}example.com",
+      "allAccounts": "All accounts",
+      "chooseAccountFirst": "Choose an account above to pick one of its folders.",
+      "folderLabel": "Folder",
+      "folderMissing": "Folder missing: the move does nothing",
+      "folderPlaceholder": "Choose a folder",
+      "forwardHint": "New mail is forwarded once, with the original attached; applying rules to mail you already have forwards nothing. Automatic replies and mailing-list mail are not forwarded.",
+      "forwardPaused": "Forwarding paused: this rule forwarded more than {count} messages within an hour. Check the rule, then resume forwarding. Saving the rule leaves it paused.",
+      "forwardResume": "Resume forwarding",
+      "forwardResumed": "Forwarding resumed.",
+      "forwardSummary": "Forward to {address}",
+      "keepCopy": "Keep a copy on the server",
+      "keepCopyHint": "Without a copy, the server forwards the message and keeps none: if the forward fails (the address bounces), the message is gone from your mailbox. When Satchel forwards it, the original stays either way.",
+      "kinds": {
+        "forward": "Forward to",
+        "moveToFolder": "Move to folder",
+        "star": "Pin"
+      },
+      "moveSummary": "Move to {folder}",
+      "moveSummaryMissing": "Move to a folder that no longer exists",
+      "noCopyConfirm": "On the server, messages this rule forwards are not stored in your mailbox. If the forward fails, they are lost.",
+      "noCopyConfirmAction": "Forward without a copy",
+      "noCopyConfirmTitle": "Forward without keeping a copy?",
+      "noFolders": "This account has no folder to move mail to.",
+      "oneMoveHint": "A message moves once: the first matching rule decides the folder.",
+      "onePerRule": "A rule can move to one folder and forward to one address. Remove the extra action to save.",
+      "reasonFolder": "The server does not know this folder.",
+      "serverSkips": "One forward was left to the server, which ran this rule when the message arrived. | {count} forwards were left to the server, which ran this rule when the messages arrived."
+    },
     "rules": {
       "actions": {
         "addTag": "Add tag",
@@ -2776,6 +3340,16 @@
       "noRuleMatched": "No rule matched the open mail.",
       "pause": "Pause",
       "paused": "Paused",
+      "placement": {
+        "local": "Local only",
+        "pending": "Not on the server yet; it goes with the next send.",
+        "reasonAction": "“{action}” exists only in Satchel.",
+        "reasonCondition": "This condition runs only in Satchel.",
+        "reasonExtension": "The server lacks the Sieve extension “{extension}”.",
+        "reasonOther": "This rule runs only in Satchel.",
+        "server": "Also runs on server",
+        "serverOn": "Also runs on the server for {accounts}, so it works while Satchel is closed. The server marks only the arriving message read (Satchel the whole conversation) and compares addresses without names."
+      },
       "priorities": {
         "high": "High",
         "low": "Low",
@@ -2886,6 +3460,10 @@
         "description": "Control loading of external content",
         "label": "External images"
       },
+      "labs": {
+        "description": "Unfinished features",
+        "label": "Labs"
+      },
       "mobile-sync": {
         "description": "Fetch new email in the background",
         "label": "Background sync"
@@ -2911,7 +3489,7 @@
         "label": "Rules"
       },
       "senders": {
-        "description": "Blocked senders and who may load images",
+        "description": "Spam filter, blocked senders and who may load images",
         "label": "Senders & images"
       },
       "sending": {
@@ -2950,6 +3528,10 @@
         "description": "Reusable email texts",
         "label": "Templates"
       },
+      "translation": {
+        "description": "DeepL key, target language and what is sent",
+        "label": "Translation"
+      },
       "tray": {
         "description": "Menu bar and tray behaviour",
         "label": "System tray"
@@ -2958,6 +3540,51 @@
         "description": "Automatic out-of-office replies",
         "label": "Out of office"
       }
+    },
+    "serverRules": {
+      "alongside": "after Satchel's: “{script}”",
+      "check": "Check server",
+      "consentDetailInclude": "Nothing was changed. Run both, or use Satchel's instead.",
+      "consentDetailNoInclude": "Nothing was changed. This server runs one script at a time.",
+      "consentTitle": "Your script “{script}” is active",
+      "editServer": "Enter server manually",
+      "endpoint": "{host}:{port} · {tls}",
+      "forceConfirmBody": "Satchel's scripts stay on the server and may keep running there; remove them in your provider's webmail. Satchel stops sending to this server.",
+      "forceConfirmTitle": "Turn off without the server?",
+      "forceTurnOff": "Turn off without contacting the server",
+      "hint": "Your rules and the out-of-office reply also run on the mail server, so they work while Satchel is closed.",
+      "host": "Server",
+      "hostPlaceholder": "sieve.example.com",
+      "keepLocal": "Keep rules in Satchel",
+      "lastPush": "Sent {time}",
+      "port": "Port",
+      "portPlaceholder": "4190",
+      "pushNow": "Send again",
+      "pushed": "No rule on the server | 1 rule on the server | {count} rules on the server",
+      "replace": "Use Satchel's instead",
+      "replaceConfirmBody": "“{script}” stays on the server but stops running until you turn server rules off.",
+      "replaceConfirmTitle": "Stop running “{script}”?",
+      "runBoth": "Run both",
+      "security": "Connection security",
+      "status": {
+        "active": "Active on server",
+        "available": "Available",
+        "unavailable": "Not available",
+        "unknown": "Not checked",
+        "waiting": "Needs your choice"
+      },
+      "suggestedDetail": "It is not on your mail server's domain. Satchel signs in there only if you say so.",
+      "suggestedTitle": "Autoconfig names {host}:{port}",
+      "title": "Server rules",
+      "tlsImplicit": "TLS",
+      "tlsStarttls": "STARTTLS",
+      "turnOff": "Turn off",
+      "turnOn": "Turn on",
+      "useDetected": "Use detected server",
+      "useSuggested": "Use this server",
+      "vacationOnServer": "with out-of-office reply",
+      "wrapperConfirmBody": "Satchel activates a small script “satchel-main” that runs Satchel's rules first, then “{script}”, unchanged. Turning off makes “{script}” active again.",
+      "wrapperConfirmTitle": "Run both scripts?"
     },
     "shortcuts": {
       "colCommand": "Command",
@@ -3109,6 +3736,39 @@
       "typeScript": "Script",
       "typeWebhook": "Webhook"
     },
+    "spamFilter": {
+      "bootstrapping": "It is still learning from the mail you have already sorted, and judges nothing until it is done.",
+      "judging": "It judges new mail as it arrives.",
+      "modeAria": "What the spam filter does with likely spam",
+      "modeLabel": "New mail that looks like spam",
+      "modeMark": "Mark",
+      "modeMarkHint": "Likely spam stays in the Inbox with a mark, and Not spam is one key away.",
+      "modeMarkTitle": "Mark likely spam in the list and the reader",
+      "modeMove": "Move to Spam",
+      "modeMoveHint": "Likely spam it is very sure about goes to the Spam folder; the rest is marked. Mail from people you have written to always stays. Your server may delete mail in Spam after a while.",
+      "modeMoveTitle": "Move likely spam to the Spam folder",
+      "modeOff": "Off",
+      "modeOffHint": "New mail is not judged. Spam and Not spam still teach the filter.",
+      "modeOffTitle": "Do not judge new mail",
+      "moveNeedsMore": "Until it has learned {spam} more spam and {ham} more wanted messages, Move only marks.",
+      "needsMore": "It judges new mail once it has learned {spam} more spam and {ham} more wanted messages.",
+      "providers": "Gmail and Microsoft accounts are filtered by their provider. Satchel learns from them but leaves their mail where the provider put it.",
+      "purpose": "Satchel learns what you call spam and judges new mail on this device. Nothing is sent anywhere.",
+      "title": "Spam filter",
+      "trained": "{spam} spam and {ham} wanted messages.",
+      "trainingLabel": "Learned so far"
+    },
+    "sweep": {
+      "empty": "No sender rules yet. Set one from a sender's menu or in the cleanup assistant.",
+      "lastRun": "Last run {when}, nothing filed | Last run {when}, one conversation filed | Last run {when}, {count} conversations filed",
+      "loadFailed": "Could not load the sender rules.",
+      "neverRun": "Has not run yet",
+      "purpose": "Rules set from a mail's sender or the cleanup assistant. Each runs every 15 minutes on Inbox conversations its sender wrote alone; conversations with others, your replies or a pin stay.",
+      "remove": "Remove",
+      "removeBody": "Mail it already filed stays where it is.",
+      "removeTitle": "Remove the rule for {sender}?",
+      "title": "Sender cleanup"
+    },
     "swipes": {
       "ariaLong": "{direction}: far swipe",
       "ariaShort": "{direction}: short swipe",
@@ -3174,6 +3834,59 @@
       "vim": "Vim navigation",
       "vimHint": "Navigate with j/k and work through messages from the keyboard."
     },
+    "translation": {
+      "consentAria": "Allow translation for {account}",
+      "consentHint": "Off for every account until you switch it on. Applies to this device only.",
+      "consentTitle": "Accounts that may be translated",
+      "engineAria": "Translation engine",
+      "engineDeepl": "DeepL",
+      "engineHint": "DeepL runs on DeepL's servers. It is never a local engine.",
+      "engineLabel": "Engine",
+      "engineOff": "Off",
+      "keyEncrypted": "Stored encrypted and included in backups; Satchel never shows it again. Switching off keeps the key; Remove key deletes it.",
+      "keyHint": "From your DeepL account under API keys. Satchel needs a DeepL API Pro key; keys ending in :fx are DeepL API Free (also called DeepL API Developer) and can't be used for mail.",
+      "keyLabel": "DeepL API key",
+      "keyPlaceholder": "Paste the API key",
+      "keyRemovedToast": "API key removed",
+      "keySaved": "Key saved on this device ({plan})",
+      "keySavedToast": "API key saved",
+      "logClear": "Clear log",
+      "logClearConfirm": "Clear the request log?",
+      "logClearConfirmBody": "The entries are deleted from this device. Translations stay cached.",
+      "logEmpty": "Nothing has been sent.",
+      "logEntry": "{provider} · {units}",
+      "logHideText": "Hide sent text",
+      "logHint": "Every request that left this device in the last 30 days.",
+      "logKeepText": "Keep the text that was sent",
+      "logKeepTextHint": "Off by default. Turning it off also deletes the text already kept.",
+      "logOk": "Translated",
+      "logShowText": "Show sent text",
+      "logTitle": "Request log",
+      "logUnits": "{count} characters",
+      "noAccounts": "No mail accounts yet.",
+      "planFree": "DeepL API Free",
+      "planPro": "DeepL API Pro",
+      "purpose": "Translate mail into your language with DeepL. Nothing is sent until you translate a message from an account you allowed.",
+      "removeKey": "Remove key",
+      "replaceKey": "Replace key",
+      "saveKey": "Save key",
+      "sentBody": "Translating sends the message body to DeepL: text and formatting. Links and addresses starting with http(s)://, //, www. or mailto: are held back as Satchel recognises them, everywhere in HTML and plain-text mail, and put back on this device; a link broken across lines of a plain-text mail may go in part. Host names without those prefixes and e-mail addresses in the text go as text. Sender, recipients, subject, attachments and encrypted mail are never sent.",
+      "sentCache": "Each translation is stored on this device, so opening the message again sends nothing.",
+      "sentTerms": "Per DeepL's terms (deepl.com/pro-license, 3.1.2, 3.3.2) and privacy policy (deepl.com/privacy, section 4), as of November 2026.",
+      "sentTitle": "What is sent?",
+      "targetFollowUi": "App language ({language})",
+      "targetHint": "Mail already in this language gets no Translate button.",
+      "targetLabel": "Translate into",
+      "termsFree": "DeepL's terms forbid personal data on the free API and allow it to keep what is sent. Satchel sends no mail with a free key; Test still shows its plan and allowance.",
+      "termsPro": "With a Pro key, DeepL keeps the text only for the translation and does not use it to improve its service; up to 72 hours when an error occurs.",
+      "test": "Test",
+      "testHint": "Checks the key with one request and shows the allowance left.",
+      "testing": "Testing…",
+      "title": "Translation",
+      "usage": "{used} of {limit} characters used this billing period",
+      "usageMeter": "DeepL characters used",
+      "usageUnlimited": "{used} characters used this billing period, no limit set"
+    },
     "tray": {
       "autostart": "Start Satchel automatically at login",
       "hint": "While Satchel runs in the background it can receive new mail immediately over IMAP IDLE and show notifications — even when the window is closed.",
@@ -3188,7 +3901,11 @@
       "defaultSubject": "Out of office",
       "enable": "Enable auto-reply",
       "hint": "An automatic reply, set at your mail server so it works while Satchel is closed.",
+      "imapNoVacation": "This server cannot send automatic replies. Use your provider's webmail.",
+      "imapNoWindow": "This server cannot start or stop the reply on a date.",
+      "imapServerRulesHint": "Turn on server rules for this account (Settings → Accounts) to set the reply on your server, or set it in your provider's webmail.",
       "imapWarning": "Set the automatic reply in your provider's webmail. Satchel can set it for you only on Gmail and Outlook accounts.",
+      "imapWrapperOrder": "Satchel's script runs before “{script}”. If “{script}” sends its own auto-reply, turn that one off.",
       "onlyContacts": "Only reply to known contacts",
       "openWebmail": "Open webmail",
       "saved": "Saved.",
@@ -3206,6 +3923,18 @@
         "keywords": "archive done",
         "label": "Mark as done (second key)"
       },
+      "cleanupKeepLatest": {
+        "keywords": "cleanup keep latest archive rest",
+        "label": "Keep the latest, archive the rest"
+      },
+      "cleanupRule": {
+        "keywords": "cleanup rule from now on",
+        "label": "Set a rule for the sender"
+      },
+      "cleanupUnsubscribe": {
+        "keywords": "cleanup unsubscribe newsletter",
+        "label": "Unsubscribe from the sender"
+      },
       "clearSelection": {
         "keywords": "clear selection",
         "label": "Clear selection"
@@ -3217,6 +3946,10 @@
       "copyLink": {
         "keywords": "link url share",
         "label": "Copy link to this email"
+      },
+      "createTask": {
+        "keywords": "task todo",
+        "label": "Add mail as task"
       },
       "fileTo": {
         "keywords": "file move folder topic label",
@@ -3237,6 +3970,10 @@
       "markDone": {
         "keywords": "done archive",
         "label": "Mark as done"
+      },
+      "markNotSpam": {
+        "keywords": "not spam ham wanted",
+        "label": "Not spam"
       },
       "markSpam": {
         "keywords": "spam junk",
@@ -3298,6 +4035,10 @@
         "keywords": "aside later",
         "label": "Set aside"
       },
+      "sweepSender": {
+        "keywords": "sweep clean up sender archive delete older",
+        "label": "Clean up mail from sender"
+      },
       "toggleAllMessages": {
         "keywords": "all messages collapse expand",
         "label": "Expand / collapse all messages"
@@ -3318,6 +4059,10 @@
         "keywords": "select toggle",
         "label": "Toggle selection"
       },
+      "translateMessage": {
+        "keywords": "translate translation deepl language original",
+        "label": "Translate message"
+      },
       "trash": {
         "keywords": "delete trash",
         "label": "Delete"
@@ -3329,6 +4074,7 @@
     },
     "close": "Close keyboard shortcuts",
     "contexts": {
+      "cleanup": "Cleanup",
       "global": "Always",
       "mail": "Email focused",
       "mailbox": "Mailbox focused",
@@ -3362,6 +4108,66 @@
     "subtitle": "Everything that matters stays under your fingers.",
     "title": "Keyboard shortcuts"
   },
+  "sweep": {
+    "from": "From {email}",
+    "inboxCount": "No conversations in the Inbox | One conversation in the Inbox | {count} conversations in the Inbox",
+    "menuItem": "Clean up mail from sender…",
+    "noSender": "Only you write in this conversation; there is no sender to clean up.",
+    "now": {
+      "archiveAll": "Archive all",
+      "heading": "Now",
+      "keepLatestArchive": "Keep the latest, archive the rest",
+      "keepLatestTrash": "Keep the latest, move the rest to Trash",
+      "trashAll": "Move all to Trash"
+    },
+    "result": {
+      "archivedOf": "{count} of {total} conversations done",
+      "failed": "Could not clean up this sender's mail.",
+      "nothing": "Nothing from {sender} to clean up in the Inbox.",
+      "trashed": "One conversation moved to Trash | {count} conversations moved to Trash",
+      "trashedOf": "{count} of {total} conversations moved to Trash"
+    },
+    "rule": {
+      "actionLabel": "What happens to the mail",
+      "archive": "Archive",
+      "customDays": "Custom…",
+      "customInvalid": "Enter a number of days between 1 and 3650.",
+      "customLabel": "Days (1–3650)",
+      "customTitle": "Older than how many days?",
+      "days": "{count} day | {count} days",
+      "folder": "Folder",
+      "heading": "From now on",
+      "hint": "Runs on this sender's mail in the Inbox once right away, then every 15 minutes.",
+      "keepLatest": "Always keep the latest",
+      "matchesNow": "Nothing qualifies yet. | One conversation qualifies now. | {count} conversations qualify now.",
+      "move": "Move to folder",
+      "needsFolder": "Its folder is gone. Pick another one; until then the rule does nothing.",
+      "olderThan": "Once it is older than",
+      "remove": "Remove rule",
+      "removeFailed": "Could not remove the rule: {error}",
+      "removed": "Rule for {sender} removed.",
+      "save": "Save rule",
+      "saveFailed": "Could not save the rule: {error}",
+      "saved": "Rule saved for {sender}.",
+      "trash": "Move to Trash",
+      "trashConfirmBody": "From then on, mail from {sender} goes to Trash every 15 minutes once it is a day old. A rule's moves have no Undo. | From then on, mail from {sender} goes to Trash every 15 minutes once it is {count} days old. A rule's moves have no Undo.",
+      "trashConfirmTitle": "Save the rule? Nothing goes to Trash yet. | Save the rule and move one conversation to Trash now? | Save the rule and move {count} conversations to Trash now?",
+      "update": "Update rule"
+    },
+    "skipped": {
+      "shared": "One conversation with other participants, your replies or a draft is left alone. | {count} conversations with other participants, your replies or drafts are left alone.",
+      "starred": "One pinned conversation stays. | {count} pinned conversations stay."
+    },
+    "summary": {
+      "archive": "Archive everything",
+      "archiveAfter": "Archive after {count} day | Archive after {count} days",
+      "keepingLatest": "{rule}, keeping the latest",
+      "move": "Move to {folder}",
+      "moveNeedsFolder": "Move to a folder: needs a folder",
+      "trashAfter": "Move to Trash after {count} day | Move to Trash after {count} days"
+    },
+    "title": "Clean up mail from {sender}"
+  },
   "swipe": {
     "aside": "Set aside",
     "done": "Done",
@@ -3370,8 +4176,116 @@
     "toggleRead": "Read / unread",
     "trash": "Delete"
   },
+  "tasks": {
+    "due": {
+      "today": "Today",
+      "tomorrow": "Tomorrow",
+      "yesterday": "Yesterday"
+    },
+    "editor": {
+      "changedRetry": "This task changed on another device in the meantime. Save again to keep your version.",
+      "completed": "Done",
+      "dueDate": "Due date",
+      "dueTime": "Time (optional)",
+      "editTitle": "Edit task",
+      "fromMail": "Made from a mail.",
+      "list": "List",
+      "newTitle": "New task",
+      "notes": "Notes",
+      "notesPlaceholder": "Details, links, next steps",
+      "priority": "Priority",
+      "readOnlyHint": "This list is read-only on the server, so the task cannot be changed here.",
+      "remind": "Remind me",
+      "reminderAt": "Reminder",
+      "syncedHint": "This list syncs with your account's server. Changes made here reach it in the background.",
+      "title": "Title",
+      "titlePlaceholder": "What needs doing?"
+    },
+    "empty": {
+      "description": "Add a task above, or press T on a mail to turn it into one.",
+      "title": "Nothing to do"
+    },
+    "groups": {
+      "completed": "Completed",
+      "overdue": "Overdue",
+      "someday": "No date",
+      "today": "Today",
+      "upcoming": "Upcoming"
+    },
+    "hasReminder": "Reminder set",
+    "hideCompleted": "Hide completed tasks",
+    "keys": {
+      "add": "Add",
+      "complete": "Done / not done",
+      "delete": "Delete",
+      "edit": "Edit",
+      "move": "Move",
+      "title": "Keyboard"
+    },
+    "lists": {
+      "account": "Account",
+      "all": "All tasks",
+      "create": "Create list",
+      "defaultName": "My tasks",
+      "delete": "Delete list",
+      "deleteBody": "Its {count} task is deleted with it. | Its {count} tasks are deleted with it.",
+      "deleteTitle": "Delete “{list}”?",
+      "goneHint": "This list was removed on the server. Its tasks stay here, read-only, until you delete the list.",
+      "name": "Name",
+      "new": "New list…",
+      "newTitle": "New task list",
+      "onThisDevice": "On this device",
+      "readOnlyHint": "This list is read-only on the server.",
+      "rename": "Rename list",
+      "renameTitle": "Rename task list",
+      "title": "Task lists",
+      "withAccount": "{list} · {account}"
+    },
+    "loadFailed": "Could not load your tasks.",
+    "markDone": "Mark as done",
+    "markOpen": "Mark as not done",
+    "new": "New task",
+    "notices": {
+      "conflicts": "{count} task was updated on the server; its version replaced your change. | {count} tasks were updated on the server; their versions replaced your changes.",
+      "keptLocal": "A task deleted on the server kept your change and is now in My tasks. | {count} tasks deleted on the server kept your changes and are now in My tasks.",
+      "listsGone": "A task list was removed on the server. It stays here, read-only, until you delete it. | {count} task lists were removed on the server. They stay here, read-only, until you delete them.",
+      "readOnlyDropped": "A change was not saved: the list is read-only on the server. | {count} changes were not saved: the list is read-only on the server.",
+      "readOnlyKept": "A new task could not be added to a read-only list; it is in My tasks. | {count} new tasks could not be added to a read-only list; they are in My tasks.",
+      "restored": "A task you deleted came back: it had been changed on the server. | {count} tasks you deleted came back: they had been changed on the server."
+    },
+    "openMail": "Open mail",
+    "pending": "Not synced yet",
+    "priority": {
+      "high": "High",
+      "low": "Low",
+      "medium": "Medium",
+      "none": "None"
+    },
+    "quickAdd": {
+      "label": "Add a task",
+      "placeholder": "Add a task, e.g. “Call Anna tomorrow 15:00”",
+      "preview": "“{title}”, due {due}"
+    },
+    "recurring": {
+      "completeSeries": "Complete series",
+      "confirmBody": "This task repeats. Completing it here ends the series for all your devices.",
+      "confirmTitle": "Complete the whole series?"
+    },
+    "repeats": "Repeats",
+    "showCompleted": "Show {count} completed task | Show {count} completed tasks",
+    "sync": "Sync tasks",
+    "title": "Tasks",
+    "toast": {
+      "completed": "Done: {title}",
+      "created": "Task added",
+      "createdFromMail": "Task added, linked to the mail",
+      "deleted": "Task deleted",
+      "nextOccurrence": "Next: “{title}”, due {due}"
+    }
+  },
   "thread": {
     "actions": {
+      "addTask": "Add as task",
       "aside": "Aside",
       "blockSender": "Block sender",
       "fileTo": "File…",
@@ -3382,6 +4296,7 @@
       "moveToInbox": "Back to the inbox",
       "mute": "Mute conversation",
       "none": "No action",
+      "notSpam": "Not spam",
       "pin": "Pin",
       "priority": "Priority",
       "read": "Read",
@@ -3488,7 +4403,8 @@
     "move": {
       "failed": "Moving failed: {error}",
       "fallbackFolder": "folder",
-      "moved": "Moved to “{folder}”."
+      "moved": "Moved to “{folder}”.",
+      "partlyMoved": "Moved {applied} of {total} to “{folder}”; the rest could not be moved. {reason}"
     },
     "newSenders": {
       "acceptExisting": "Allow {count} sender | Allow all {count} senders",
@@ -3527,6 +4443,11 @@
       "inLater": "Waiting in Later",
       "inbox": "Email in the inbox | {count} emails in the inbox",
       "muteChanged": "Mute updated",
+      "notSpam": "Thread marked as not spam | {count} threads marked as not spam",
+      "notSpamFailed": "Marking as not spam failed.",
+      "notSpamMoved": "Thread moved back to the Inbox | {count} threads moved back to the Inbox",
+      "notSpamUndoFailed": "Undoing Not spam failed.",
+      "partlyFiled": "Moved {applied} of {total}; the rest could not be moved. {reason}",
       "permanentlyDeleted": "Thread permanently deleted | {count} threads permanently deleted",
       "pinChanged": "Pin updated",
       "pinFailed": "Pinning failed.",
@@ -3568,6 +4489,16 @@
       "summaryMore": "and {count} more",
       "summaryTitle": "{count} conversation selected | {count} conversations selected",
       "toInbox": "To inbox ({count})"
+    },
+    "spam": {
+      "bannerDetail": "The spam filter on this device flagged it. If it is wanted mail, say so and the filter learns from it.",
+      "bannerTitle": "This looks like spam",
+      "likely": "Likely spam",
+      "moved": "Moved by filter",
+      "movedBannerDetail": "The spam filter on this device was sure this is spam. If it is wanted mail, say so: it goes back to the Inbox and the filter learns from it.",
+      "movedBannerTitle": "Moved to Spam by Satchel's filter",
+      "movedHint": "The spam filter on this device moved this thread to Spam",
+      "rowHint": "The spam filter on this device flagged this thread"
     },
     "state": {
       "aside": "Set aside",
@@ -3743,6 +4674,22 @@
       "undo": "Undo"
     }
   },
+  "translation": {
+    "consent": {
+      "body": "Satchel sends the body of this message to DeepL ({plan}): text and formatting. Links and addresses starting with http(s)://, //, www. or mailto: are held back as Satchel recognises them; a link broken across lines of a plain-text mail may go in part. Host names without those prefixes and e-mail addresses in the text go as text. Sender, recipients, subject and attachments stay here. Applies to all mail of {account} on this device.",
+      "confirm": "Allow and translate",
+      "detail": "You can withdraw it in Settings → Translation, where the request log shows what was sent.",
+      "title": "Send this message to DeepL?"
+    },
+    "reader": {
+      "openSettings": "Settings",
+      "showOriginal": "Show original",
+      "translate": "Translate",
+      "translated": "Translated",
+      "translatedFrom": "Translated from {language}",
+      "translating": "Translating…"
+    }
+  },
   "tray": {
     "actionFailed": "Action failed: {detail}",
     "allClear": {
@@ -3814,5 +4761,11 @@
     "noPath": "No file path was passed.",
     "openFailed": "The message could not be read.",
     "untitled": "Message"
+  },
+  "workflowSync": {
+    "gmailImapBody": "This account reaches Gmail over IMAP, where Satchel's keywords would turn into Gmail labels. Done and Snooze stay on this device; signing in with Google instead syncs them. Done mail is still moved to Archive.",
+    "localOnlyBody": "This mail server does not store custom keywords, so other devices and mail apps do not see what you marked Done or snoozed. Done mail is still moved to Archive.",
+    "localOnlyTitle": "Done and Snooze stay on this device",
+    "storeRefusedBody": "The mail server refused to store Satchel's keywords, so for now other devices and mail apps do not see what you marked Done or snoozed. Satchel tries again in a few hours. Done mail is still moved to Archive."
   }
 }

@@ -14,7 +14,9 @@ const DraftsView = () => import('@/views/DraftsView.vue');
 const OutboxView = () => import('@/views/OutboxView.vue');
 const CalendarView = () => import('@/views/CalendarView.vue');
 const ContactsView = () => import('@/views/ContactsView.vue');
+const TasksView = () => import('@/views/TasksView.vue');
 const NewSendersView = () => import('@/views/NewSendersView.vue');
+const CleanupView = () => import('@/views/CleanupView.vue');
 const TopicView = () => import('@/views/TopicView.vue');
 
 export const router = createRouter({
@@ -39,7 +41,9 @@ export const router = createRouter({
     // Waiting for a reply lives in Later now.
     { path: '/follow-ups', name: 'followups', redirect: { name: 'later' } },
     { path: '/contacts', name: 'contacts', component: ContactsView },
+    { path: '/tasks', name: 'tasks', component: TasksView },
     { path: '/new-senders', name: 'new-senders', component: NewSendersView },
+    { path: '/cleanup', name: 'cleanup', component: CleanupView },
     { path: '/topics/:id', name: 'topic', component: TopicView },
     { path: '/search', name: 'search', component: SearchView },
     { path: '/settings', name: 'settings', component: SettingsView },

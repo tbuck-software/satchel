@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { BackendCalendarEvent, BackendCalendarInvite } from '@/services/backend';
 import {
+  deleteConfirmKey,
   collectSources,
   calendarSourceKey,
   descriptionToText,
@@ -437,6 +438,21 @@ describe('calendar sources', () => {
     expect(sources[0]!.count).toBe(2);
   });
 
+  it('gives every Outlook calendar its own bucket, color and declared name', () => {
+    expect(calendarSourceKey('outlook', 'AAMkAGI2')).toBe('outlook:AAMkAGI2');
+    expect(sourceLabel('outlook:AAMkAGI2')).toBe('Outlook calendar');
+    const map = sourceColorMap(['outlook:b', 'google:a@x', 'outlook:a']);
+    expect(new Set([map.get('outlook:a'), map.get('outlook:b'), map.get('google:a@x')]).size).toBe(3);
+    const sources = collectSources(
+      [makeItem({ key: 'e:1', sourceKey: 'local' }), makeItem({ key: 'e:2', sourceKey: 'outlook:a' })],
+      [{ key: calendarSourceKey('outlook', 'a'), label: 'Team' }],
+    );
+    expect(sources.map((source) => [source.key, source.label])).toEqual([
+      ['outlook:a', 'Team'],
+      ['local', 'Local'],
+    ]);
+  });
+
   it('keeps empty declared calendars and uses their display names', () => {
     const sources = collectSources([], [
       {
@@ -538,5 +554,19 @@ describe('all-day mirror boundaries', () => {
       source: 'local', collection_href: null, description: null, location: null, created_at: '', updated_at: '' });
     expect(dateOnly.start).toEqual(event.start);
     expect(dateOnly.end).toEqual(event.end);
+  });
+});
+
+describe('Outlook event flags', () => {
+  it('carry from the mirror into the item and the delete question', () => {
+    const outlook = (fields: Partial<CalendarItem>) => makeItem({ source: 'outlook', attendees: [], ...fields });
+    expect(deleteConfirmKey(outlook({}))).toBe('calendar.event.deleteConfirmRemote');
+    expect(deleteConfirmKey(outlook({ attendees: ['a@example.test'] }))).toBe('calendar.event.deleteConfirmAttendees');
+    expect(deleteConfirmKey(outlook({ occurrence: true }))).toBe('calendar.event.deleteConfirmOccurrence');
+    expect(deleteConfirmKey(outlook({ occurrence: true, attendees: ['a@example.test'] })))
+      .toBe('calendar.event.deleteConfirmOccurrenceAttendees');
+    // CalDAV schedules on its own; nothing changes for it or for local events.
+    expect(deleteConfirmKey(makeItem({ source: 'caldav', attendees: ['a@example.test'] }))).toBe('calendar.event.deleteConfirmRemote');
+    expect(deleteConfirmKey(makeItem({ source: 'local' }))).toBe('calendar.event.deleteConfirmBody');
   });
 });

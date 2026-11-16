@@ -11,6 +11,7 @@ pub mod thread_resolution;
 pub mod threading;
 pub mod watcher;
 pub mod worker;
+pub mod workflow_markers;
 
 /// Whether an account is the seeded local demo account rather than a real one.
 ///

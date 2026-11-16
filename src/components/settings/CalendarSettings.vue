@@ -4,10 +4,12 @@ import { useI18n } from 'vue-i18n';
 import AppButton from '@/components/ui/AppButton.vue';
 import NavItem from '@/components/ui/NavItem.vue';
 import GoogleConnections from '@/components/settings/GoogleConnections.vue';
+import AvailabilitySettings from '@/components/settings/AvailabilitySettings.vue';
 import { useCalendarUiStore } from '@/stores/calendarUi';
 import { useInvitesStore } from '@/stores/invites';
 import { translateBackendError } from '@/services/backend';
 import {
+  calendarSourceKey,
   collectSources,
   itemFromEvent,
   itemFromInvite,
@@ -30,7 +32,12 @@ const sources = computed(() => {
     ...invites.events.map(itemFromEvent),
     ...invites.items.map(itemFromInvite).filter((item): item is CalendarItem => item !== null),
   ];
-  return collectSources(items);
+  // Declared names: Outlook calendar ids are opaque, Google's often too.
+  const definitions = invites.sources.map((source) => ({
+    key: calendarSourceKey(source.source, source.remote_id),
+    label: source.name,
+  }));
+  return collectSources(items, definitions);
 });
 
 onMounted(() => void invites.load());
@@ -62,6 +69,7 @@ async function syncNow() {
     </header>
 
     <GoogleConnections purpose="calendar" @connected="syncNow" />
+    <GoogleConnections provider="outlook" purpose="calendar" @connected="syncNow" />
 
     <div class="source-panel">
       <div class="source-panel__heading">
@@ -107,6 +115,9 @@ async function syncNow() {
     </div>
 
     <p v-if="syncMessage" class="sync-message" role="status">{{ syncMessage }}</p>
+
+    <!-- Invitations are not a calendar: one accepted counts until a calendar mirrors it. -->
+    <AvailabilitySettings :sources="sources.filter((source) => source.key !== 'invites')" />
   </section>
 </template>
 

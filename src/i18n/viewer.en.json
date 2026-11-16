@@ -3,6 +3,7 @@
     "errors": {
       "mailActionFailed": "The mail action could not be saved. Please try again.",
       "notAMessageFile": "Only .eml and .msg files can be opened this way.",
+      "readSourceNotChosen": "Satchel only reads a file or folder chosen in its own dialog. Choose {path} again.",
       "revealTargetBlocked": "This target cannot be opened in the file manager.",
       "unexpected": "An unexpected backend error occurred."
     }
@@ -43,11 +44,16 @@
       "openWithDefault": "Open with default app",
       "openWithDefaultNamed": "Open {filename} with the default app",
       "pdfFailed": "This PDF could not be displayed.",
+      "pdfNext": "Next page",
+      "pdfPage": "Page {page} of {total}",
+      "pdfPages": "PDF pages",
       "pdfPreview": "PDF preview",
+      "pdfPrevious": "Previous page",
       "previewLabel": "Attachment preview",
       "previewUnavailable": "No preview available for {mime}.",
       "quickLookFailed": "Could not open Quick Look: {error}",
       "readFailed": "“{name}” could not be read.",
+      "removeNamed": "Remove {name}",
       "save": "Save attachment",
       "saveEllipsis": "Save…",
       "saveFailed": "Could not save the attachment: {error}",
@@ -55,6 +61,9 @@
       "showInFolder": "Show in folder",
       "tooLarge": "“{name}” is larger than {limit}.",
       "totalExceeded": "Total size exceeded: “{name}” no longer fits the {limit} budget ({used} already in use).",
+      "unknownTypeBody": "Satchel does not know the file type .{extension}. Opening it hands it to the operating system, which may run it. Check the full name below before you decide.",
+      "unknownTypeNoExtensionBody": "This file has no extension, so Satchel cannot tell what it is. Opening it hands it to the operating system, which may run it.",
+      "unknownTypeTitle": "Open this attachment?",
       "useAsAttachment": "Send image as a regular attachment",
       "viewInSatchel": "View in Satchel",
       "viewInSatchelNamed": "View {filename} in Satchel"
@@ -153,6 +162,18 @@
         "keywords": "archive done",
         "label": "Mark as done (second key)"
       },
+      "cleanupKeepLatest": {
+        "keywords": "cleanup keep latest archive rest",
+        "label": "Keep the latest, archive the rest"
+      },
+      "cleanupRule": {
+        "keywords": "cleanup rule from now on",
+        "label": "Set a rule for the sender"
+      },
+      "cleanupUnsubscribe": {
+        "keywords": "cleanup unsubscribe newsletter",
+        "label": "Unsubscribe from the sender"
+      },
       "clearSelection": {
         "keywords": "clear selection",
         "label": "Clear selection"
@@ -164,6 +185,10 @@
       "copyLink": {
         "keywords": "link url share",
         "label": "Copy link to this email"
+      },
+      "createTask": {
+        "keywords": "task todo",
+        "label": "Add mail as task"
       },
       "fileTo": {
         "keywords": "file move folder topic label",
@@ -184,6 +209,10 @@
       "markDone": {
         "keywords": "done archive",
         "label": "Mark as done"
+      },
+      "markNotSpam": {
+        "keywords": "not spam ham wanted",
+        "label": "Not spam"
       },
       "markSpam": {
         "keywords": "spam junk",
@@ -245,6 +274,10 @@
         "keywords": "aside later",
         "label": "Set aside"
       },
+      "sweepSender": {
+        "keywords": "sweep clean up sender archive delete older",
+        "label": "Clean up mail from sender"
+      },
       "toggleAllMessages": {
         "keywords": "all messages collapse expand",
         "label": "Expand / collapse all messages"
@@ -265,6 +298,10 @@
         "keywords": "select toggle",
         "label": "Toggle selection"
       },
+      "translateMessage": {
+        "keywords": "translate translation deepl language original",
+        "label": "Translate message"
+      },
       "trash": {
         "keywords": "delete trash",
         "label": "Delete"
@@ -275,6 +312,7 @@
       }
     },
     "contexts": {
+      "cleanup": "Cleanup",
       "global": "Always",
       "mail": "Email focused",
       "mailbox": "Mailbox focused",

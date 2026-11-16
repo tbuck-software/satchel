@@ -9,6 +9,7 @@ const harness = vi.hoisted(() => ({
   listTargets: null as string[] | null,
   listSharesSelection: false,
   settings: { singleKeyShortcuts: true, keybindings: {} as Record<string, string> },
+  thread: { likelySpam: false, mailboxNames: ['INBOX'] },
   ui: {
     omniOpen: false,
     shortcutsOpen: false,
@@ -24,7 +25,8 @@ const harness = vi.hoisted(() => ({
   threads: {
     selectedThreadIds: [] as string[],
     activeThreadId: 'thread-1',
-    find: () => ({ id: 'thread-1', unreadCount: 0, isMuted: false }),
+    find: (id = 'thread-1') => ({ id, unreadCount: 0, isMuted: false, ...harness.thread }),
+    mailboxFilter: { kind: 'section', value: 'inbox' },
     nextThread: vi.fn(),
     prevThread: vi.fn(),
     toggleSelectionForThread: vi.fn(),
@@ -44,6 +46,7 @@ const harness = vi.hoisted(() => ({
     togglePinned: vi.fn(),
     setMuted: vi.fn(),
     markSpam: vi.fn(),
+    markNotSpam: vi.fn(),
   },
   topics: { openPicker: vi.fn() },
   router: { push: vi.fn(), replace: vi.fn(), back: vi.fn() },
@@ -125,6 +128,7 @@ beforeEach(() => {
   harness.ui.shortcutsOpen = false;
   harness.ui.modalOpen = false;
   harness.composer.isOpen = false;
+  harness.thread = { likelySpam: false, mailboxNames: ['INBOX'] };
 });
 
 afterEach(() => {
@@ -423,6 +427,22 @@ describe('mail list search key', () => {
     expect(focus).toHaveBeenCalledTimes(1);
     expect(harness.ui.openOmni).not.toHaveBeenCalled();
     unregister();
+  });
+
+  it('answers Shift+I only where Not spam applies, like the menus', () => {
+    mountKeyboard();
+
+    press('I', { shiftKey: true });
+    expect(harness.actions.markNotSpam).not.toHaveBeenCalled();
+
+    harness.thread = { likelySpam: true, mailboxNames: ['INBOX'] };
+    press('I', { shiftKey: true });
+    expect(harness.actions.markNotSpam).toHaveBeenCalledWith(['thread-1']);
+
+    harness.actions.markNotSpam.mockClear();
+    harness.thread = { likelySpam: false, mailboxNames: ['Junk'] };
+    press('I', { shiftKey: true });
+    expect(harness.actions.markNotSpam).toHaveBeenCalledWith(['thread-1']);
   });
 
   it('keeps Cmd/Ctrl+K on the palette above a list', () => {

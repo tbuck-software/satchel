@@ -6,6 +6,7 @@ import type { SearchWarningDto as WireSearchWarningDto } from '../services/backe
 import type { MessageSearchResponseDto as WireMessageSearchResponseDto } from '../services/backend/generated/core/db/messages/MessageSearchResponseDto';
 import type { ThreadListScope as WireThreadListScope } from '../services/backend/generated/core/db/threads/ThreadListScope';
 import type { UnsubscribeResult as WireUnsubscribeResult } from '../services/backend/generated/app/commands/unsubscribe/UnsubscribeResult';
+import type { UnsubscribeMail as WireUnsubscribeMail } from '../services/backend/generated/app/commands/unsubscribe/UnsubscribeMail';
 import type { AttachmentDto as WireAttachmentDto } from '../services/backend/generated/app/commands/attachments/AttachmentDto';
 import type { DownloadAttachmentResult as WireDownloadAttachmentResult } from '../services/backend/generated/app/commands/attachments/DownloadAttachmentResult';
 import type { ServerSearchHit as WireServerSearchHit } from '../services/backend/generated/app/commands/server_search/ServerSearchHit';
@@ -28,6 +29,8 @@ export type BackendMessageSearchResponse = WireMessageSearchResponseDto;
 export type BackendSearchListScope = WireThreadListScope;
 
 export type BackendUnsubscribeResult = WireUnsubscribeResult;
+
+export type BackendUnsubscribeMail = WireUnsubscribeMail;
 
 export type BackendAttachmentDto = OptionalWireFields<WireAttachmentDto, 'filename' | 'size' | 'content_id' | 'cached_path'>;
 

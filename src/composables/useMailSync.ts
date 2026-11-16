@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue';
 import { useConnectionStore } from '@/stores/connection';
+import { useAccountQuotaStore } from '@/stores/accountQuota';
 import { useToast } from '@/composables/useToast';
 import { backendRunImapSync } from '@/services/backend';
 import { transportErrorCause } from '@/utils/transportLabels';
@@ -20,6 +21,8 @@ export function useMailSync() {
     try {
       const summary = await backendRunImapSync();
       connection.applySyncSummary(summary);
+      // A manual sync may have read a fresh quota; the automatic path reloads too.
+      void useAccountQuotaStore().load();
       // The run's own verdict replaces the banner's: a clean run clears a
       // failure the last automatic run left standing, a failing one is shown
       // there, where it names the account — not as a "done" toast.

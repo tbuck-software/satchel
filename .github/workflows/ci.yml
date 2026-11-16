@@ -20,7 +20,7 @@ jobs:
     name: Migration versions
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: actions/setup-node@v7
@@ -41,7 +41,7 @@ jobs:
     name: Frontend (types, unit, smoke)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Isolate Playwright browser cache
         # Other jobs on this runner may install a different Playwright version.
@@ -116,9 +116,10 @@ jobs:
             try {
               servers.push(await reserve());
               servers.push(await reserve());
-              const [smoke, csp] = servers.map((server) => server.address().port);
+              servers.push(await reserve());
+              const [smoke, csp, i18n] = servers.map((server) => server.address().port);
               fs.appendFileSync(process.env.GITHUB_ENV,
-                `SATCHEL_SMOKE_PORT=${smoke}\nSATCHEL_CSP_PORT=${csp}\n`);
+                `SATCHEL_SMOKE_PORT=${smoke}\nSATCHEL_CSP_PORT=${csp}\nSATCHEL_I18N_PORT=${i18n}\n`);
             } finally {
               await Promise.all(servers.map((server) => new Promise((resolve) => server.close(resolve))));
             }
@@ -131,10 +132,26 @@ jobs:
       - name: Smoke tests
         run: pnpm run test:smoke
 
+      # Flaky attempts pass on retry and leave no trace in the log; keep their context.
+      - name: Keep smoke test output
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-output
+          path: output/playwright/smoke
+          if-no-files-found: ignore
+          retention-days: 7
+
       # Verifies the production CSP against the real build. A policy that
       # blocks the app's own assets otherwise only shows up in the desktop app.
       - name: CSP tests
         run: pnpm run test:csp
+
+      # The independent check of the split catalogue (ADR 0017): a mock
+      # production build, chunks precompiled and hashed as they ship, crawled
+      # in en and de for raw keys and missing-key warnings.
+      - name: Raw-key crawl over the mock production build
+        run: pnpm run test:i18n
 
       - name: Upload Playwright artifacts on failure
         if: failure()
@@ -147,6 +164,27 @@ jobs:
           # Failure output is useful immediately, but keeping it longer adds
           # little value and consumes the account-wide Actions storage quota.
           retention-days: 1
+
+  # The release builds the Windows installer from this frontend build. Vite
+  # writes module ids with `/` there and `path` with `\`, so build-time
+  # scripts that compare paths can pass on Linux and fail only in the nightly
+  # (the i18n split did, for four days).
+  frontend-windows:
+    name: Frontend build (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Check the i18n split and its Vite plugin
+        run: pnpm exec vitest run src/i18n/split.test.ts scripts/vite-i18n-chunks.test.mjs
+      - name: Build the frontend
+        run: pnpm exec vite build
 
   backend-portability:
     name: Native compile (${{ matrix.platform }})
@@ -162,7 +200,7 @@ jobs:
             runner: [windows-latest]
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
@@ -193,7 +231,7 @@ jobs:
     name: Backend (fmt, clippy, tests)
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:

@@ -63,7 +63,7 @@ struct RestoreManifest {
 }
 
 fn key_hash(key: &[u8; 32]) -> String {
-    format!("{:x}", Sha256::digest(key))
+    crate::utils::hex::lower_hex(&Sha256::digest(key))
 }
 
 fn file_hash(path: &Path) -> Result<String, String> {
@@ -77,7 +77,7 @@ fn file_hash(path: &Path) -> Result<String, String> {
         }
         digest.update(&buffer[..read]);
     }
-    Ok(format!("{:x}", digest.finalize()))
+    Ok(crate::utils::hex::lower_hex(&digest.finalize()))
 }
 
 fn sync_directory(path: &Path) -> Result<(), String> {
@@ -200,6 +200,7 @@ async fn rewrap_secrets(
             "armored_key" => crypto::SecretContext::pgp_armored_key(),
             "passphrase" => crypto::SecretContext::pgp_passphrase(),
             "pem_private_key_encrypted" => crypto::SecretContext::smime_private_key(),
+            "encrypted_api_key" => crypto::SecretContext::translation_api_key(row_id),
             _ => crypto::SecretContext::oauth_code_verifier(row_id),
         }
     }
@@ -209,6 +210,7 @@ async fn rewrap_secrets(
         ("pgp_keys", "id", "passphrase"),
         ("smime_certificates", "id", "pem_private_key_encrypted"),
         ("oauth_flow_sessions", "state", "encrypted_code_verifier"),
+        ("translation_engine_keys", "engine", "encrypted_api_key"),
     ] {
         let exists: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?")
@@ -444,6 +446,15 @@ pub fn apply_pending_restore(
 mod tests {
     use super::*;
 
+    /// Backup manifests record this hash next to the key they carry.
+    #[test]
+    fn key_hash_is_pinned() {
+        assert_eq!(
+            key_hash(&[0; 32]),
+            "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925"
+        );
+    }
+
     /// Every fixture row is `row-1`.
     fn test_context(column: &str) -> crypto::SecretContext<'static> {
         match column {
@@ -451,6 +462,7 @@ mod tests {
             "armored_key" => crypto::SecretContext::pgp_armored_key(),
             "passphrase" => crypto::SecretContext::pgp_passphrase(),
             "pem_private_key_encrypted" => crypto::SecretContext::smime_private_key(),
+            "encrypted_api_key" => crypto::SecretContext::translation_api_key("row-1"),
             _ => crypto::SecretContext::oauth_code_verifier("row-1"),
         }
     }
@@ -478,6 +490,11 @@ mod tests {
                 "oauth_flow_sessions",
                 "state",
                 vec!["encrypted_code_verifier"],
+            ),
+            (
+                "translation_engine_keys",
+                "engine",
+                vec!["encrypted_api_key"],
             ),
         ] {
             sqlx::query(&format!(
@@ -560,6 +577,7 @@ mod tests {
             ("pgp_keys", "passphrase"),
             ("smime_certificates", "pem_private_key_encrypted"),
             ("oauth_flow_sessions", "encrypted_code_verifier"),
+            ("translation_engine_keys", "encrypted_api_key"),
         ] {
             let value: String = sqlx::query_scalar(&format!("SELECT {column} FROM {table}"))
                 .fetch_one(&pool)

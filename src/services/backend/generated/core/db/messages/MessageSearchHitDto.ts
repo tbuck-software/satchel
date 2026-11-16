@@ -20,6 +20,10 @@ export type MessageSearchHitDto = {
     date: string;
     is_read: boolean;
     /**
+     * An unsent draft: it opens in the composer and has no original to attach.
+     */
+    is_draft: boolean;
+    /**
      * Thread workflow state ('inbox' | 'todo' | 'waiting' | 'aside' | 'done' | 'snoozed').
      */
     workflow_state: string;

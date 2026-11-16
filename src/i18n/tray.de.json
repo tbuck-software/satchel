@@ -8,6 +8,11 @@
       "unexpected": "Ein unerwarteter Backend-Fehler ist aufgetreten."
     }
   },
+  "calendar": {
+    "event": {
+      "untitled": "(ohne Titel)"
+    }
+  },
   "common": {
     "retry": "Erneut versuchen",
     "today": "Heute",

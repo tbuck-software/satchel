@@ -108,6 +108,14 @@ pub enum RemoteMutationPayload {
     DeleteFolder {
         path: String,
     },
+    /// Satchel's Done/Snooze marker for the listed threads (ADR 0009).
+    /// Absolute: the provider replaces whatever Satchel marker the copies
+    /// carry with this one, so a newer marker for a thread takes it out of an
+    /// unsent row (`workflow_markers::enqueue_workflow_marker_in_transaction`).
+    WorkflowMarker {
+        threads: Vec<crate::sync::workflow_markers::MarkedThread>,
+        marker: crate::workflow::remote_marker::WorkflowMarker,
+    },
     /// File the copy of a mail that has already been delivered.
     ///
     /// Only ever appends: the message left over SMTP before this row existed,
@@ -133,6 +141,22 @@ pub fn remote_move_thread_id(payload: &RemoteMutationPayload) -> Option<&str> {
         _ => None,
     }
 }
+
+/// SQL over a `sync_queue` row: the thread of a queued provider move, as
+/// [`remote_move_thread_id_from_json`] reads it from `payload`, NULL for any
+/// other row. Migration 0160 indexes it, so guards find a thread's moves
+/// without parsing every queued payload; a query must spell it exactly like
+/// this for SQLite to use the index.
+pub(crate) const QUEUED_MOVE_THREAD_ID: &str = "CASE WHEN json_valid(payload) THEN
+    CASE json_extract(payload, '$.kind')
+        WHEN 'workflow_move' THEN json_extract(payload, '$.workflow_thread_id')
+        WHEN 'blocked_move' THEN json_extract(payload, '$.blocked_thread_id')
+    END END";
+
+/// SQL over a `sync_queue` row: the payload's `kind`, NULL for a payload that
+/// is not JSON. Migration 0160 indexes it, with the account.
+pub(crate) const QUEUED_KIND: &str =
+    "CASE WHEN json_valid(payload) THEN json_extract(payload, '$.kind') END";
 
 /// Parse and extract a durable remote-move thread id. Malformed and unrelated
 /// queue payloads are intentionally ignored by lifecycle guards.
@@ -261,19 +285,12 @@ pub async fn prepare_thread_workflow_moves_in_transaction(
     source_folder_type: &str,
     target_folder_type: &str,
 ) -> Result<Vec<PreparedWorkflowMove>, String> {
-    let rows = sqlx::query_as::<_, (String, String, Option<String>, String, Option<i64>, String)>(
+    let rows = sqlx::query_as::<_, (String, String, Option<String>, String, Option<i64>)>(
         "SELECT m.account_id,
                 m.remote_id,
                 f.remote_id,
                 f.full_path,
-                f.uidvalidity,
-                (
-                  SELECT COALESCE(NULLIF(TRIM(target.remote_id), ''), target.full_path)
-                  FROM folders target
-                  WHERE target.account_id = m.account_id
-                    AND LOWER(TRIM(target.folder_type)) = LOWER(TRIM(?))
-                  ORDER BY target.updated_at DESC LIMIT 1
-                ) AS target_remote_folder_id
+                f.uidvalidity
          FROM messages m
          JOIN accounts a ON a.id = m.account_id
          JOIN folders f ON f.id = m.folder_id
@@ -282,23 +299,33 @@ pub async fn prepare_thread_workflow_moves_in_transaction(
            AND m.remote_id IS NOT NULL
            AND LOWER(TRIM(f.folder_type)) = LOWER(TRIM(?))",
     )
-    .bind(target_folder_type)
     .bind(thread_id)
     .bind(source_folder_type)
     .fetch_all(&mut **tx)
     .await
     .map_err(|err| err.to_string())?;
 
+    let mut targets = HashMap::<String, String>::new();
     let mut grouped = HashMap::<(String, String), Vec<MessageRef>>::new();
-    for (
-        account_id,
-        remote_id,
-        folder_remote_id,
-        folder_path,
-        folder_uidvalidity,
-        target_remote_id,
-    ) in rows
-    {
+    for (account_id, remote_id, folder_remote_id, folder_path, folder_uidvalidity) in rows {
+        let target_remote_id = match targets.get(&account_id) {
+            Some(target) => target.clone(),
+            None => {
+                let target = crate::db::folders::preferred_folder_of_type(
+                    &mut **tx,
+                    &account_id,
+                    target_folder_type,
+                )
+                .await
+                .map_err(|err| err.to_string())?
+                .ok_or_else(|| {
+                    format!("local target folder missing for workflow move: {target_folder_type}")
+                })?
+                .remote_path;
+                targets.insert(account_id.clone(), target.clone());
+                target
+            }
+        };
         grouped
             .entry((account_id, target_remote_id))
             .or_default()
@@ -330,11 +357,12 @@ pub async fn cancel_scheduled_workflow_moves_in_transaction(
     thread_id: &str,
     target_folder_type: &str,
 ) -> Result<Vec<PreparedWorkflowMove>, String> {
-    let rows = sqlx::query_as::<_, (String, String, String)>(
+    let rows = sqlx::query_as::<_, (String, String, String)>(&format!(
         "SELECT id, account_id, payload FROM sync_queue
-         WHERE action_type = ? AND status = 'scheduled'",
-    )
-    .bind(ACTION_REMOTE_MUTATION)
+             WHERE action_type = 'remote_mutation' AND +status = 'scheduled'
+               AND {QUEUED_MOVE_THREAD_ID} = ?"
+    ))
+    .bind(thread_id)
     .fetch_all(&mut **tx)
     .await
     .map_err(|err| err.to_string())?;
@@ -407,7 +435,7 @@ pub async fn enqueue_thread_flags_with_stable_ids(
 }
 
 pub fn stable_queue_id(prefix: &str, purpose: &str, account_id: &str) -> String {
-    let account_hash = format!("{:x}", Sha256::digest(account_id.as_bytes()));
+    let account_hash = crate::utils::hex::lower_hex(&Sha256::digest(account_id.as_bytes()));
     format!("{prefix}:{purpose}:{}", &account_hash[..16])
 }
 
@@ -435,7 +463,7 @@ pub fn stable_blocked_move_id(
         "{thread_id}\0{account_id}\0{source_folder}\0{remote_id}\0{}\0{generation}",
         target_remote_folder_id.trim()
     );
-    let operation_hash = format!("{:x}", Sha256::digest(operation_key.as_bytes()));
+    let operation_hash = crate::utils::hex::lower_hex(&Sha256::digest(operation_key.as_bytes()));
     stable_queue_id(
         &format!("blocked-sender-move:{operation_hash}"),
         "move",
@@ -607,6 +635,19 @@ pub async fn execute_remote_mutation(
 ) -> crate::sync::errors::SyncResult<()> {
     let mutation: RemoteMutationPayload =
         serde_json::from_value(payload).map_err(|err| format!("decode remote mutation: {err}"))?;
+    let mutation = match mutation {
+        RemoteMutationPayload::WorkflowMarker { threads, marker } => {
+            // Compare-and-clear entries whose thread moved on are dropped
+            // before any network work, like superseded flags below.
+            let threads =
+                crate::sync::workflow_markers::retain_current_entries(pool, threads).await?;
+            if threads.is_empty() {
+                return Ok(());
+            }
+            RemoteMutationPayload::WorkflowMarker { threads, marker }
+        }
+        other => other,
+    };
     if let RemoteMutationPayload::Flags {
         refs,
         read,
@@ -719,6 +760,16 @@ pub async fn execute_remote_mutation(
             provider.rename_folder(&from_path, &to_path).await
         }
         RemoteMutationPayload::DeleteFolder { path } => provider.delete_folder(&path).await,
+        RemoteMutationPayload::WorkflowMarker { threads, marker } => {
+            crate::sync::workflow_markers::execute_marker_write(
+                pool,
+                account_id,
+                provider.as_ref(),
+                &threads,
+                &marker,
+            )
+            .await
+        }
         RemoteMutationPayload::AppendSent {
             raw_base64,
             folder_hint,
@@ -767,16 +818,11 @@ pub async fn apply_completed_workflow_move_projection(
     refs: &[MessageRef],
     target_folder_type: &str,
 ) -> Result<(), String> {
-    let target_folder_id: Option<String> = sqlx::query_scalar(
-        "SELECT id FROM folders
-         WHERE account_id = ? AND folder_type = ?
-         ORDER BY updated_at DESC LIMIT 1",
-    )
-    .bind(account_id)
-    .bind(target_folder_type)
-    .fetch_optional(pool)
-    .await
-    .map_err(|err| err.to_string())?;
+    let target_folder_id =
+        crate::db::folders::preferred_folder_of_type(pool, account_id, target_folder_type)
+            .await
+            .map_err(|err| err.to_string())?
+            .map(|folder| folder.id);
     let Some(target_folder_id) = target_folder_id else {
         return Err(format!(
             "local target folder missing for workflow move: {target_folder_type}"
@@ -1060,19 +1106,12 @@ async fn remote_folder_for_kind(
     account_id: &str,
     folder_type: &str,
 ) -> Result<String, String> {
-    if let Some(row) = sqlx::query_as::<_, FolderTargetRow>(
-        "SELECT f.account_id, f.remote_id, f.full_path
-         FROM folders f
-         WHERE f.account_id = ? AND f.folder_type = ?
-         LIMIT 1",
-    )
-    .bind(account_id)
-    .bind(folder_type)
-    .fetch_optional(pool)
-    .await
-    .map_err(|err| err.to_string())?
+    if let Some(folder) =
+        crate::db::folders::preferred_folder_of_type(pool, account_id, folder_type)
+            .await
+            .map_err(|err| err.to_string())?
     {
-        return Ok(row.remote_id.unwrap_or(row.full_path));
+        return Ok(folder.remote_path);
     }
 
     let provider: String = sqlx::query_scalar("SELECT provider FROM accounts WHERE id = ?")
@@ -1090,6 +1129,15 @@ async fn remote_folder_for_kind(
 mod tests {
     use super::*;
     use sqlx::sqlite::SqlitePoolOptions;
+
+    /// Queue ids are persisted, and a re-enqueue matches on them.
+    #[test]
+    fn stable_queue_id_digest_is_pinned() {
+        assert_eq!(
+            stable_queue_id("p", "move", "acct"),
+            "p:move:def0b17f603285ef"
+        );
+    }
 
     #[test]
     fn remote_move_thread_id_extractor_covers_workflow_and_blocked_moves() {

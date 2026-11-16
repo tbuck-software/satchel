@@ -142,6 +142,14 @@ describe('shortcut labels', () => {
 });
 
 describe('keybinding conflicts', () => {
+  it('keeps Translate on L, clear of Add as task on T', () => {
+    expect(DEFAULT_KEYBINDINGS.translateMessage).toBe('L');
+    // The Tasks feature binds Shift+t in the mail context, as Gmail does.
+    const conflicts = keybindingConflicts({ ...DEFAULT_KEYBINDINGS, createTask: 'T' });
+    expect(conflicts.get('translateMessage')).toBeUndefined();
+    expect(conflicts.get('createTask')).toBeUndefined();
+  });
+
   it('reports nothing for the defaults', () => {
     expect([...keybindingConflicts(DEFAULT_KEYBINDINGS).keys()]).toEqual([]);
   });

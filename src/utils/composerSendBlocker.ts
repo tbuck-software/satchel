@@ -11,6 +11,11 @@ export interface ComposerSendState {
   body: string;
   attachmentCount: number;
   scheduledFor: string | null;
+  /**
+   * Rows of the mail merge list, or absent outside merge mode. The list takes
+   * the place of To/Cc/Bcc; the review step checks each row.
+   */
+  mergeRecipients?: number | null;
 }
 
 export type ComposerSendBlocker =
@@ -35,6 +40,11 @@ export function composerSendBlocker(state: ComposerSendState, now = Date.now()):
   // A draft that could not be loaded must not be sent as an empty message.
   if (state.draftLoadFailed) return { reason: 'draftLoadFailed' };
   if (!state.hasAccount) return { reason: 'noAccount' };
+  if (state.mergeRecipients != null) {
+    if (state.mergeRecipients === 0) return { reason: 'noRecipients' };
+    if (state.body.trim().length === 0 && state.attachmentCount === 0) return { reason: 'empty' };
+    return null;
+  }
   const recipients = [...state.to, ...state.cc, ...state.bcc];
   if (recipients.length === 0) return { reason: 'noRecipients' };
   // A chip the backend cannot turn into a mailbox must not reach the queue.

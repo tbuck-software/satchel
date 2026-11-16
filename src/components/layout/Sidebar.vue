@@ -18,21 +18,36 @@ import AppIcon from '@/components/ui/AppIcon.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import SidebarMailNav from './SidebarMailNav.vue';
 import SyncButton from './SyncButton.vue';
+import { useConnectionStore } from '@/stores/connection';
+const SyncStatusLine = defineAsyncComponent(() => import('./SyncStatusLine.vue'));
 
 // Route-specific sidebars used to pull calendar grids and the complete
 // settings navigation into the Inbox bundle even though their v-if was false.
 const CalendarSidebar = defineAsyncComponent(() => import('@/components/calendar/CalendarSidebar.vue'));
 const ContactsSidebar = defineAsyncComponent(() => import('@/components/contacts/ContactsSidebar.vue'));
+const TasksSidebar = defineAsyncComponent(() => import('@/components/tasks/TasksSidebar.vue'));
 const SettingsSidebar = defineAsyncComponent(() => import('@/components/settings/SettingsSidebar.vue'));
 const FolderBrowserPanel = defineAsyncComponent(() => import('./FolderBrowserPanel.vue'));
 // Async so the calendar utilities stay out of the inbox bundle: the card is a
 // footnote in the sidebar, not a reason to parse the grid code at startup.
 const SidebarAgenda = defineAsyncComponent(() => import('./SidebarAgenda.vue'));
+// Standing notices live here, beside the sync button, as cards: not as a
+// band across the top of the window. ConnectionBanner stays mounted (it hosts
+// the certificate dialog); the reauth notice loads only when it has a case.
+const ConnectionBanner = defineAsyncComponent(() => import('./ConnectionBanner.vue'));
+const AccountReauthBanner = defineAsyncComponent(() => import('@/components/settings/AccountReauthBanner.vue'));
 
 const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 const accounts = useAccountsStore();
+const connection = useConnectionStore();
+const syncStatusReady = ref(false);
+watch(() => connection.syncProgress.some(row => row.backfill_remaining > 0), (active) => {
+  if (active) syncStatusReady.value = true;
+}, { immediate: true });
+const reauthNeeded = computed(() =>
+  Boolean(accounts.credentialLock) || accounts.accountsWithAuthError.length > 0);
 const threads = useThreadsStore();
 const settings = useSettingsStore();
 const composer = useComposerStore();
@@ -112,9 +127,11 @@ const updateLabel = computed(() => {
 
 const calendarModuleActive = computed(() => route.name === 'calendar');
 const contactsModuleActive = computed(() => route.name === 'contacts');
+const tasksModuleActive = computed(() => route.name === 'tasks');
 const settingsModuleActive = computed(() => route.name === 'settings');
 const contextualSidebarActive = computed(
-  () => calendarModuleActive.value || contactsModuleActive.value || settingsModuleActive.value,
+  () => calendarModuleActive.value || contactsModuleActive.value || tasksModuleActive.value
+    || settingsModuleActive.value,
 );
 
 // Reading the contact projection unguarded would rebuild it on every thread
@@ -185,6 +202,7 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
       <SettingsSidebar v-if="settingsModuleActive" />
       <CalendarSidebar v-else-if="calendarModuleActive" />
       <ContactsSidebar v-else-if="contactsModuleActive" />
+      <TasksSidebar v-else-if="tasksModuleActive" />
       <template v-else>
       <SidebarMailNav @open-folders-panel="foldersPanelOpen = true" />
       <!-- Frequent contacts -->
@@ -241,6 +259,9 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
     <!-- Kept outside the scroll container so every primary destination stays
          anchored to the bottom, even with a long mailbox tree. -->
     <footer class="sidebar-footer">
+      <SyncStatusLine v-if="syncStatusReady" hide-idle progress-only />
+      <AccountReauthBanner v-if="reauthNeeded" variant="card" />
+      <ConnectionBanner variant="card" />
       <Suspense v-if="!contextualSidebarActive">
         <SidebarAgenda />
       </Suspense>
@@ -270,6 +291,14 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
             @click="goTo('contacts')"
           >
             <AppIcon><circle cx="6" cy="5.5" r="2.5" /><path d="M1.5 13.5c0-2.2 2-4 4.5-4s4.5 1.8 4.5 4M10.5 3.2a2.5 2.5 0 0 1 0 4.6M11.5 9.7c1.7.5 3 2 3 3.8" /></AppIcon>
+          </IconButton>
+          <IconButton
+            :title="$t('nav.tasks')"
+            :active="tasksModuleActive"
+            :aria-current="tasksModuleActive ? 'page' : undefined"
+            @click="goTo('tasks')"
+          >
+            <AppIcon><path d="M8 2.5a5.5 5.5 0 1 1 0 11a5.5 5.5 0 1 1 0-11Z" /><path d="M5.5 8.2l1.8 1.8L10.7 6.4" /></AppIcon>
           </IconButton>
         </nav>
         <IconButton

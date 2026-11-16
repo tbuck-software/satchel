@@ -9,6 +9,7 @@ import {
   backendListSmartInboxSummary,
   backendListThreads,
   backendMarkThreadsSpam,
+  backendMarkThreadsNotSpam,
   backendSetSenderPreference,
   backendSetThreadCategory,
   backendSetThreadMuted,
@@ -22,6 +23,7 @@ import {
   type BackendThreadCursor,
   type BackendThreadPage,
   type BackendTrashReceipt,
+  type BackendNotSpamReceipt,
 } from '@/services/backend';
 import type { Account, Thread } from '@/types/mail';
 import type { InboxSenderBucket } from '@/stores/settings';
@@ -131,6 +133,7 @@ export interface ThreadPersistenceSurface {
     bucket: InboxSenderBucket,
   ): Promise<void>;
   markThreadsSpam(threadIds: string[]): Promise<BackendTrashReceipt>;
+  markThreadsNotSpam(threadIds: string[]): Promise<BackendNotSpamReceipt>;
   setThreadsRead(threadIds: string[], isRead: boolean): Promise<void>;
   trashThreads(threadIds: string[]): Promise<BackendTrashReceipt>;
   setAssignee(threadId: string, assignee?: string): Promise<void>;
@@ -322,6 +325,17 @@ export function createThreadPersistence({
     };
   }
 
+  /**
+   * A move a later batch stopped filed only `applied`: the rest goes back
+   * into the list, as if the backend had refused it.
+   */
+  function keepRemoved(rollback: () => void, receipt: BackendTrashReceipt) {
+    const stopped = receipt.stopped_early;
+    if (!stopped) return;
+    rollback();
+    removeOptimistically(new Set(stopped.applied));
+  }
+
   async function setPriority(threadId: string, priority: Thread['priority']) {
     if (!collection.find(threadId)) return;
     await writeOptimistically([{ id: threadId, values: { priority } }],
@@ -433,7 +447,9 @@ export function createThreadPersistence({
     const receipt = await serializeMutation(async () => {
       const rollback = removeOptimistically(targets);
       try {
-        return await backendMarkThreadsSpam(normalized);
+        const filed = await backendMarkThreadsSpam(normalized);
+        keepRemoved(rollback, filed);
+        return filed;
       } catch (error) {
         if (!backendCommandsAvailable()) return empty;
         rollback();
@@ -441,6 +457,24 @@ export function createThreadPersistence({
       }
     });
     // A refresh failure cannot roll back a committed action or lose its Undo receipt.
+    await Promise.allSettled([refreshHead(), reloadMailboxes()]);
+    return receipt;
+  }
+
+  /**
+   * Not spam clears the mark at once; threads that were in Spam leave a Spam
+   * list with the refresh, as they would after any move back to the Inbox.
+   */
+  async function markThreadsNotSpam(threadIds: string[]): Promise<BackendNotSpamReceipt> {
+    const normalized = Array.from(new Set(threadIds.map((id) => id.trim()).filter(Boolean)));
+    let receipt: BackendNotSpamReceipt = {
+      thread_ids: [], moved_thread_ids: [], undo_token: null, move_receipts: [], restored_thread_ids: [],
+    };
+    if (normalized.length === 0) return receipt;
+    await writeOptimistically(
+      normalized.map((id) => ({ id, values: { likelySpam: false, spamMoved: false } })),
+      async () => { receipt = await backendMarkThreadsNotSpam(normalized); },
+    );
     await Promise.allSettled([refreshHead(), reloadMailboxes()]);
     return receipt;
   }
@@ -542,6 +576,7 @@ export function createThreadPersistence({
         email: sender.senderEmail,
         previous: settings.dismissedNewSenders()[sender.senderEmail],
         through: sender.lastMessageAt,
+        threadIds: sender.threadIds,
       }));
     dismissed.forEach((sender) => settings.setDismissedNewSender(sender.email, sender.through));
 
@@ -553,6 +588,15 @@ export function createThreadPersistence({
       dismissed.forEach((sender) => settings.setDismissedNewSender(sender.email, sender.previous ?? null));
       rollback();
       throw error;
+    }
+    keepRemoved(rollback, receipt);
+    const stopped = receipt.stopped_early;
+    if (stopped) {
+      // A sender none of whose mail moved stays in the new-sender stack.
+      const applied = new Set(stopped.applied);
+      dismissed
+        .filter((sender) => !sender.threadIds.some((threadId) => applied.has(threadId)))
+        .forEach((sender) => settings.setDismissedNewSender(sender.email, sender.previous ?? null));
     }
     // A refresh failure cannot roll back a committed action or lose its Undo receipt.
     await Promise.allSettled([backendDismissMobileNotifications(normalized), refreshHead(), reloadMailboxes()]);
@@ -1019,6 +1063,7 @@ export function createThreadPersistence({
       setSenderPriorityByEmail,
       setSenderCategory,
       markThreadsSpam,
+      markThreadsNotSpam,
       setThreadsRead,
       trashThreads,
       setAssignee,

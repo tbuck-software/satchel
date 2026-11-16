@@ -156,19 +156,28 @@ pub async fn start_oauth_flow(
         return Err(CommandError::new("backend.errors.accountNotFound"));
     }
 
-    if matches!(provider, oauth::OAuthProvider::Gmail) {
-        let account_config = AccountRepository::new(pool.inner())
-            .load_provider_config(&input.account_id)
-            .await
-            .map_err(CommandError::from)?;
-        let previous = account_config
-            .as_ref()
-            .and_then(|account| oauth::load_stored_oauth(&account.config).ok());
-        oauth::configure_google_grants(&mut provider_config, purpose, previous.as_ref());
-    } else if purpose != oauth::OAuthPurpose::Mail {
+    // Outlook's base sign-in already covers contacts; only the calendar is
+    // an optional feature there.
+    if matches!(provider, oauth::OAuthProvider::Outlook) && purpose == oauth::OAuthPurpose::Contacts
+    {
         return Err(CommandError::new(
             "backend.errors.oauthConfigurationInvalid",
         ));
+    }
+    let account_config = AccountRepository::new(pool.inner())
+        .load_provider_config(&input.account_id)
+        .await
+        .map_err(CommandError::from)?;
+    let previous = account_config
+        .as_ref()
+        .and_then(|account| oauth::load_stored_oauth(&account.config).ok());
+    match provider {
+        oauth::OAuthProvider::Gmail => {
+            oauth::configure_google_grants(&mut provider_config, purpose, previous.as_ref());
+        }
+        oauth::OAuthProvider::Outlook => {
+            oauth::configure_outlook_grants(&mut provider_config, purpose, previous.as_ref());
+        }
     }
     let authorization_context = oauth::OAuthGrantRequest {
         purpose,
@@ -458,9 +467,14 @@ async fn complete_oauth_flow_inner(
         oauth::exchange_code_for_token(&provider_config, &input.code, &session.code_verifier)
             .await
             .map_err(|error| oauth_provider_error("OAuth token exchange failed", error))?;
-    if matches!(provider, oauth::OAuthProvider::Gmail) {
-        if let Some(request) = session.authorization_context.as_ref() {
-            oauth::validate_google_grant(&mut token, request).map_err(CommandError::new)?;
+    if let Some(request) = session.authorization_context.as_ref() {
+        match provider {
+            oauth::OAuthProvider::Gmail => {
+                oauth::validate_google_grant(&mut token, request).map_err(CommandError::new)?;
+            }
+            oauth::OAuthProvider::Outlook => {
+                oauth::validate_outlook_grant(&token, request).map_err(CommandError::new)?;
+            }
         }
     }
     let identity = oauth::fetch_identity(provider, &token.access_token)

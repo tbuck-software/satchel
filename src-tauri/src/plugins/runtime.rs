@@ -47,8 +47,7 @@ impl Default for PluginRuntimeLimits {
 }
 
 /// Upper bound for a single plugin command response handed to the frontend.
-/// Matches the local API's request body limit; plugin outputs are UI content,
-/// not data transfers.
+/// Plugin outputs are UI content, not data transfers.
 pub const MAX_PLUGIN_OUTPUT_BYTES: usize = 256 * 1024;
 
 fn validate_plugin_output(plugin_id: &str, output: &str) -> Result<(), String> {

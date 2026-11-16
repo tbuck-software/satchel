@@ -21,12 +21,14 @@ export type SettingsSection =
   | 'swipes'
   | 'senders'
   | 'encryption'
+  | 'translation'
   | 'calendar'
   | 'contacts'
   | 'shortcuts'
   | 'plugins'
   | 'storage'
   | 'diagnostics'
+  | 'labs'
   | 'about';
 
 /**
@@ -39,6 +41,7 @@ const MOVED_SECTIONS: Record<string, SettingsSection> = {
   pgp: 'encryption',
   blocked: 'senders',
   images: 'senders',
+  spam: 'senders',
   data: 'storage',
   backup: 'storage',
   sources: 'accounts',
@@ -96,9 +99,9 @@ const BASE_GROUPS: SettingsSectionGroupDefinition[] = [
   { id: 'essentials', items: ['general', 'accounts', 'notifications'] },
   { id: 'writing', items: ['composing', 'signatures', 'templates', 'aliases', 'vacation'] },
   { id: 'organising', items: ['rules', 'smart-folders', 'swipes'] },
-  { id: 'privacy', items: ['senders', 'encryption'] },
+  { id: 'privacy', items: ['senders', 'encryption', 'translation'] },
   { id: 'people', items: ['calendar', 'contacts'] },
-  { id: 'app', items: ['shortcuts', 'plugins', 'storage', 'diagnostics', 'about'] },
+  { id: 'app', items: ['shortcuts', 'plugins', 'storage', 'diagnostics', 'labs', 'about'] },
 ];
 
 export const settingsSectionIcons: Record<SettingsSection, string> = {
@@ -115,12 +118,14 @@ export const settingsSectionIcons: Record<SettingsSection, string> = {
   vacation: '<path d="M9 17 4 12l5-5"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/>',
   'smart-folders': '<path d="M10.7 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v4.1"/><circle cx="17" cy="17" r="3"/><path d="m21 21-1.9-1.9"/>',
   diagnostics: '<path d="M3 12h4l3 8 4-16 3 8h4"/>',
+  labs: '<path d="M9 3h6M10 3v6.5L4.6 18.3A1.8 1.8 0 0 0 6.1 21h11.8a1.8 1.8 0 0 0 1.5-2.7L14 9.5V3M7 15h10"/>',
   templates: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7ZM14 2v4a2 2 0 0 0 2 2h4M10 9H8M16 13H8M16 17H8"/>',
   rules: '<path d="M22 3H2l8 9.46V19l4 2v-8.54Z"/>',
   plugins: '<path d="M12 2v5M12 17v5M4.93 4.93l3.54 3.54M15.53 15.53l3.54 3.54M2 12h5M17 12h5M4.93 19.07l3.54-3.54M15.53 8.47l3.54-3.54"/><circle cx="12" cy="12" r="3"/>',
   composing: '<path d="M22 2 11 13M22 2 15 22l-4-9-9-4Z"/>',
   senders: '<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
   encryption: '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1zM9 12l2 2 4-4"/>',
+  translation: '<path d="m5 8 6 6M4 14l6-6 2-3M2 5h12M7 2h1M22 22l-5-10-5 10M14 18h6"/>',
   storage: '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5M3 12a9 3 0 0 0 18 0"/>',
 };
 

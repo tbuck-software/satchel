@@ -35,6 +35,19 @@ describe('confirm dialog', () => {
     expect(mountDialog().find('.confirm').exists()).toBe(false);
   });
 
+  it('lists labelled fields verbatim', async () => {
+    const view = mountDialog();
+    void useConfirm().ask({
+      title: 'Send?',
+      confirmLabel: 'Send',
+      fields: [{ label: 'To', value: 'leave@list.example' }, { label: 'Message', value: 'line 1\nline 2' }],
+    });
+    await view.vm.$nextTick();
+
+    const values = [...document.body.querySelectorAll('.confirm__fields dd')].map((node) => node.textContent);
+    expect(values).toEqual(['leave@list.example', 'line 1\nline 2']);
+  });
+
   it('shows the question and resolves true on the confirming button', async () => {
     const view = mountDialog();
     const answered = useConfirm().ask({

@@ -1,0 +1,5867 @@
+{
+  "after_undo": {
+    "folders": [
+      [
+        "fld-mail-v2-0a84c29585a25353105639ffaf5abba10b53ddd3f2ceb5e3b2aa1f4e25b18d42",
+        "imap-a",
+        "Papierkorb",
+        "Trash",
+        "trash",
+        "Trash",
+        0,
+        0
+      ],
+      [
+        "fld-mail-v2-1fb2c47ccfa5a2f6fad04822bf3ea3f5dc433800bddcf896569a21b336c63c82",
+        "imap-b",
+        "Papierkorb",
+        "Trash",
+        "trash",
+        "Trash",
+        0,
+        0
+      ],
+      [
+        "fld-mail-v2-474118d63c9a12fa9253fbe1bf40309f740b9f0ffde41071222651fa17ffd9f6",
+        "pop",
+        "Papierkorb",
+        "Trash",
+        "trash",
+        "Trash",
+        0,
+        0
+      ],
+      [
+        "fld-mail-v2-59876617403801961688094ee5f82742d8161d836ae19cd4dc16f2bcda534135",
+        "pop",
+        "Archiviert",
+        "Archive",
+        "archive",
+        "Archive",
+        3,
+        0
+      ],
+      [
+        "fld-mail-v2-6187dc141a4a14c64a7cef78cbfc6e754b19d2245cc21bbe07dbdea375005db0",
+        "gmail",
+        "SPAM",
+        "SPAM",
+        "spam",
+        "SPAM",
+        0,
+        0
+      ],
+      [
+        "fld-mail-v2-9b201e578b899cb7fe3bd9fc64f0bfae4e0c7a7aa4a12e46bf3f75605763791a",
+        "imap-b",
+        "Archiviert",
+        "Archive",
+        "archive",
+        "Archive",
+        3,
+        0
+      ],
+      [
+        "fld-mail-v2-b862fc3c04211c7f6a8fe308a72a2ee98b767c76c2d7afc2f79c5e36a1d46cd5",
+        "gmail",
+        "Archiviert",
+        "Archive",
+        "archive",
+        "ARCHIVE",
+        3,
+        0
+      ],
+      [
+        "fld-mail-v2-be75bdf4c97021971604d956cae2941fdf4b27a4ff910f87ff9981007612a6ea",
+        "pop",
+        "Spam",
+        "Spam",
+        "spam",
+        "Spam",
+        0,
+        0
+      ],
+      [
+        "gmail-inbox",
+        "gmail",
+        "INBOX",
+        "INBOX",
+        "inbox",
+        "INBOX",
+        4,
+        3
+      ],
+      [
+        "gmail-projects",
+        "gmail",
+        "Label_7",
+        "Label_7",
+        "custom",
+        "Label_7",
+        0,
+        0
+      ],
+      [
+        "gmail-sent",
+        "gmail",
+        "SENT",
+        "SENT",
+        "sent",
+        "SENT",
+        7,
+        0
+      ],
+      [
+        "gmail-trash",
+        "gmail",
+        "TRASH",
+        "TRASH",
+        "trash",
+        "TRASH",
+        0,
+        0
+      ],
+      [
+        "imap-a-archive",
+        "imap-a",
+        "Archive",
+        "Archive",
+        "archive",
+        "Archive",
+        3,
+        0
+      ],
+      [
+        "imap-a-inbox",
+        "imap-a",
+        "INBOX",
+        "INBOX",
+        "inbox",
+        "INBOX",
+        2,
+        2
+      ],
+      [
+        "imap-a-projects",
+        "imap-a",
+        "Projects",
+        "Projects",
+        "custom",
+        "Projects",
+        3,
+        3
+      ],
+      [
+        "imap-a-sent",
+        "imap-a",
+        "Sent",
+        "Sent",
+        "sent",
+        "Sent",
+        5,
+        0
+      ],
+      [
+        "imap-b-inbox",
+        "imap-b",
+        "INBOX",
+        "INBOX",
+        "inbox",
+        "INBOX",
+        4,
+        4
+      ],
+      [
+        "imap-b-projects",
+        "imap-b",
+        "Projects",
+        "Projects",
+        "custom",
+        "Projects",
+        2,
+        2
+      ],
+      [
+        "imap-b-sent",
+        "imap-b",
+        "Sent",
+        "Sent",
+        "sent",
+        "Sent",
+        7,
+        0
+      ],
+      [
+        "imap-b-spam",
+        "imap-b",
+        "Junk",
+        "Junk",
+        "spam",
+        "Junk",
+        0,
+        0
+      ],
+      [
+        "pop-inbox",
+        "pop",
+        "INBOX",
+        "INBOX",
+        "inbox",
+        "INBOX",
+        4,
+        3
+      ],
+      [
+        "pop-projects",
+        "pop",
+        "Projects",
+        "Projects",
+        "custom",
+        "Projects",
+        0,
+        0
+      ],
+      [
+        "pop-sent",
+        "pop",
+        "Sent",
+        "Sent",
+        "sent",
+        "Sent",
+        7,
+        0
+      ]
+    ],
+    "messages": [
+      [
+        "spam-1-m0",
+        "imap-b-spam",
+        "imap-b-inbox",
+        0,
+        "spam-1"
+      ],
+      [
+        "spam-1-m1",
+        "imap-b-spam",
+        "imap-b-inbox",
+        0,
+        "spam-1"
+      ],
+      [
+        "spam-1-m2",
+        "imap-b-inbox",
+        null,
+        0,
+        "spam-1"
+      ],
+      [
+        "t00000-m0",
+        "imap-a-inbox",
+        "imap-a-archive",
+        1,
+        "t00000"
+      ],
+      [
+        "t00000-m1",
+        "imap-a-projects",
+        "imap-a-archive",
+        1,
+        "t00000"
+      ],
+      [
+        "t00000-m2",
+        "imap-a-sent",
+        null,
+        1,
+        "t00000"
+      ],
+      [
+        "t00001-m0",
+        "imap-b-inbox",
+        "fld-mail-v2-9b201e578b899cb7fe3bd9fc64f0bfae4e0c7a7aa4a12e46bf3f75605763791a",
+        1,
+        "t00001"
+      ],
+      [
+        "t00001-m1",
+        "imap-b-inbox",
+        "fld-mail-v2-9b201e578b899cb7fe3bd9fc64f0bfae4e0c7a7aa4a12e46bf3f75605763791a",
+        1,
+        "t00001"
+      ],
+      [
+        "t00001-m2",
+        "imap-b-sent",
+        null,
+        1,
+        "t00001"
+      ],
+      [
+        "t00002-m0",
+        "gmail-inbox",
+        "fld-mail-v2-b862fc3c04211c7f6a8fe308a72a2ee98b767c76c2d7afc2f79c5e36a1d46cd5",
+        1,
+        "t00002"
+      ],
+      [
+        "t00002-m1",
+        "gmail-inbox",
+        "fld-mail-v2-b862fc3c04211c7f6a8fe308a72a2ee98b767c76c2d7afc2f79c5e36a1d46cd5",
+        1,
+        "t00002"
+      ],
+      [
+        "t00002-m2",
+        "gmail-sent",
+        null,
+        1,
+        "t00002"
+      ],
+      [
+        "t00003-m0",
+        "fld-mail-v2-59876617403801961688094ee5f82742d8161d836ae19cd4dc16f2bcda534135",
+        null,
+        1,
+        "t00003"
+      ],
+      [
+        "t00003-m1",
+        "fld-mail-v2-59876617403801961688094ee5f82742d8161d836ae19cd4dc16f2bcda534135",
+        null,
+        1,
+        "t00003"
+      ],
+      [
+        "t00003-m2",
+        "pop-sent",
+        null,
+        1,
+        "t00003"
+      ],
+      [
+        "t00004-m0",
+        "imap-a-inbox",
+        "imap-a-archive",
+        1,
+        "t00004"
+      ],
+      [
+        "t00004-m1",
+        "imap-a-inbox",
+        "imap-a-archive",
+        1,
+        "t00004"
+      ],
+      [
+        "t00004-m2",
+        "imap-a-sent",
+        null,
+        1,
+        "t00004"
+      ],
+      [
+        "t00005-m0",
+        "imap-b-inbox",
+        "fld-mail-v2-9b201e578b899cb7fe3bd9fc64f0bfae4e0c7a7aa4a12e46bf3f75605763791a",
+        1,
+        "t00005"
+      ],
+      [
+        "t00005-m1",
+        "imap-b-inbox",
+        "fld-mail-v2-9b201e578b899cb7fe3bd9fc64f0bfae4e0c7a7aa4a12e46bf3f75605763791a",
+        1,
+        "t00005"
+      ],
+      [
+        "t00005-m2",
+        "imap-b-sent",
+        null,
+        1,
+        "t00005"
+      ],
+      [
+        "t00006-m0",
+        "gmail-inbox",
+        "fld-mail-v2-b862fc3c04211c7f6a8fe308a72a2ee98b767c76c2d7afc2f79c5e36a1d46cd5",
+        1,
+        "t00006"
+      ],
+      [
+        "t00006-m1",
+        "gmail-inbox",
+        "fld-mail-v2-b862fc3c04211c7f6a8fe308a72a2ee98b767c76c2d7afc2f79c5e36a1d46cd5",
+        1,
+        "t00006"
+      ],
+      [
+        "t00006-m2",
+        "gmail-sent",
+        null,
+        1,
+        "t00006"
+      ],
+      [
+        "t00007-m0",
+        "fld-mail-v2-59876617403801961688094ee5f82742d8161d836ae19cd4dc16f2bcda534135",
+        null,
+        1,
+        "t00007"
+      ],
+      [
+        "t00007-m1",
+        "fld-mail-v2-59876617403801961688094ee5f82742d8161d836ae19cd4dc16f2bcda534135",
+        null,
+        1,
+        "t00007"
+      ],
+      [
+        "t00007-m2",
+        "pop-sent",
+        null,
+        1,
+        "t00007"
+      ],
+      [
+        "t00008-m0",
+        "imap-a-inbox",
+        "imap-a-archive",
+        1,
+        "t00008"
+      ],
+      [
+        "t00008-m1",
+        "imap-a-inbox",
+        "imap-a-archive",
+        1,
+        "t00008"
+      ],
+      [
+        "t00008-m2",
+        "imap-a-sent",
+        null,
+        1,
+        "t00008"
+      ],
+      [
+        "t00009-m0",
+        "imap-b-inbox",
+        "fld-mail-v2-9b201e578b899cb7fe3bd9fc64f0bfae4e0c7a7aa4a12e46bf3f75605763791a",
+        1,
+        "t00009"
+      ],
+      [
+        "t00009-m1",
+        "imap-b-projects",
+        "fld-mail-v2-9b201e578b899cb7fe3bd9fc64f0bfae4e0c7a7aa4a12e46bf3f75605763791a",
+        1,
+        "t00009"
+      ],
+      [
+        "t00009-m2",
+        "imap-b-sent",
+        null,
+        1,
+        "t00009"
+      ],
+      [
+        "t00010-m0",
+        "gmail-inbox",
+        "fld-mail-v2-b862fc3c04211c7f6a8fe308a72a2ee98b767c76c2d7afc2f79c5e36a1d46cd5",
+        1,
+        "t00010"
+      ],
+      [
+        "t00010-m1",
+        "gmail-inbox",
+        "fld-mail-v2-b862fc3c04211c7f6a8fe308a72a2ee98b767c76c2d7afc2f79c5e36a1d46cd5",
+        1,
+        "t00010"
+      ],
+      [
+        "t00010-m2",
+        "gmail-sent",
+        null,
+        1,
+        "t00010"
+      ],
+      [
+        "t00011-m0",
+        "fld-mail-v2-59876617403801961688094ee5f82742d8161d836ae19cd4dc16f2bcda534135",
+        null,
+        1,
+        "t00011"
+      ],
+      [
+        "t00011-m1",
+        "fld-mail-v2-59876617403801961688094ee5f82742d8161d836ae19cd4dc16f2bcda534135",
+        null,
+        1,
+        "t00011"
+      ],
+      [
+        "t00011-m2",
+        "pop-sent",
+        null,
+        1,
+        "t00011"
+      ],
+      [
+        "t00012-m0",
+        "imap-a-inbox",
+        null,
+        0,
+        "t00012"
+      ],
+      [
+        "t00012-m1",
+        "imap-a-projects",
+        null,
+        0,
+        "t00012"
+      ],
+      [
+        "t00012-m2",
+        "imap-a-sent",
+        null,
+        1,
+        "t00012"
+      ],
+      [
+        "t00013-m0",
+        "imap-b-inbox",
+        null,
+        0,
+        "t00013"
+      ],
+      [
+        "t00013-m1",
+        "imap-b-inbox",
+        null,
+        0,
+        "t00013"
+      ],
+      [
+        "t00013-m2",
+        "imap-b-sent",
+        null,
+        1,
+        "t00013"
+      ],
+      [
+        "t00014-m0",
+        "gmail-inbox",
+        null,
+        0,
+        "t00014"
+      ],
+      [
+        "t00014-m1",
+        "gmail-inbox",
+        null,
+        0,
+        "t00014"
+      ],
+      [
+        "t00014-m2",
+        "gmail-sent",
+        null,
+        1,
+        "t00014"
+      ],
+      [
+        "t00015-m0",
+        "pop-inbox",
+        null,
+        0,
+        "t00015"
+      ],
+      [
+        "t00015-m1",
+        "pop-inbox",
+        null,
+        0,
+        "t00015"
+      ],
+      [
+        "t00015-m2",
+        "pop-sent",
+        null,
+        1,
+        "t00015"
+      ],
+      [
+        "t00016-m0",
+        "imap-a-inbox",
+        null,
+        0,
+        "t00016"
+      ],
+      [
+        "t00016-m1",
+        "imap-a-inbox",
+        null,
+        0,
+        "t00016"
+      ],
+      [
+        "t00016-m2",
+        "imap-a-sent",
+        null,
+        1,
+        "t00016"
+      ],
+      [
+        "t00017-m0",
+        "imap-b-inbox",
+        null,
+        0,
+        "t00017"
+      ],
+      [
+        "t00017-m1",
+        "imap-b-inbox",
+        null,
+        0,
+        "t00017"
+      ],
+      [
+        "t00017-m2",
+        "imap-b-sent",
+        null,
+        1,
+        "t00017"
+      ],
+      [
+        "t00018-m0",
+        "gmail-inbox",
+        null,
+        1,
+        "t00018"
+      ],
+      [
+        "t00018-m1",
+        "gmail-inbox",
+        null,
+        1,
+        "t00018"
+      ],
+      [
+        "t00018-m2",
+        "gmail-sent",
+        null,
+        1,
+        "t00018"
+      ],
+      [
+        "t00019-m0",
+        "pop-inbox",
+        null,
+        1,
+        "t00019"
+      ],
+      [
+        "t00019-m1",
+        "pop-inbox",
+        null,
+        1,
+        "t00019"
+      ],
+      [
+        "t00019-m2",
+        "pop-sent",
+        null,
+        1,
+        "t00019"
+      ],
+      [
+        "t00020-m0",
+        "imap-a-inbox",
+        "imap-a-projects",
+        0,
+        "t00020"
+      ],
+      [
+        "t00020-m1",
+        "imap-a-inbox",
+        "imap-a-projects",
+        0,
+        "t00020"
+      ],
+      [
+        "t00020-m2",
+        "imap-a-sent",
+        "imap-a-projects",
+        1,
+        "t00020"
+      ],
+      [
+        "t00021-m0",
+        "imap-b-inbox",
+        null,
+        0,
+        "t00021"
+      ],
+      [
+        "t00021-m1",
+        "imap-b-projects",
+        null,
+        0,
+        "t00021"
+      ],
+      [
+        "t00021-m2",
+        "imap-b-sent",
+        null,
+        1,
+        "t00021"
+      ],
+      [
+        "t00022-m0",
+        "gmail-inbox",
+        null,
+        0,
+        "t00022"
+      ],
+      [
+        "t00022-m1",
+        "gmail-inbox",
+        null,
+        0,
+        "t00022"
+      ],
+      [
+        "t00022-m2",
+        "gmail-sent",
+        null,
+        1,
+        "t00022"
+      ],
+      [
+        "t00023-m0",
+        "pop-inbox",
+        null,
+        0,
+        "t00023"
+      ],
+      [
+        "t00023-m1",
+        "pop-inbox",
+        null,
+        0,
+        "t00023"
+      ],
+      [
+        "t00023-m2",
+        "pop-sent",
+        null,
+        1,
+        "t00023"
+      ],
+      [
+        "t00024-m0",
+        "imap-a-inbox",
+        "imap-a-projects",
+        0,
+        "t00024"
+      ],
+      [
+        "t00024-m1",
+        "imap-a-projects",
+        null,
+        0,
+        "t00024"
+      ],
+      [
+        "t00024-m2",
+        "imap-a-sent",
+        "imap-a-projects",
+        1,
+        "t00024"
+      ],
+      [
+        "t00025-m0",
+        "imap-b-inbox",
+        "imap-b-projects",
+        0,
+        "t00025"
+      ],
+      [
+        "t00025-m1",
+        "imap-b-inbox",
+        "imap-b-projects",
+        0,
+        "t00025"
+      ],
+      [
+        "t00025-m2",
+        "imap-b-sent",
+        null,
+        1,
+        "t00025"
+      ],
+      [
+        "t00026-m0",
+        "gmail-inbox",
+        null,
+        0,
+        "t00026"
+      ],
+      [
+        "t00026-m1",
+        "gmail-inbox",
+        null,
+        0,
+        "t00026"
+      ],
+      [
+        "t00026-m2",
+        "gmail-sent",
+        null,
+        1,
+        "t00026"
+      ],
+      [
+        "t00027-m0",
+        "pop-inbox",
+        null,
+        0,
+        "t00027"
+      ],
+      [
+        "t00027-m1",
+        "pop-inbox",
+        null,
+        0,
+        "t00027"
+      ],
+      [
+        "t00027-m2",
+        "pop-sent",
+        null,
+        1,
+        "t00027"
+      ]
+    ],
+    "queue": [
+      {
+        "account": "imap-a",
+        "id": "q21",
+        "payload": {
+          "kind": "flags",
+          "read": false,
+          "refs": [
+            {
+              "remote_id": "14",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "999",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            }
+          ],
+          "starred": true,
+          "superseded": [
+            {
+              "read": true,
+              "reference_index": 0,
+              "starred": false
+            }
+          ]
+        },
+        "scheduled": false,
+        "status": "failed",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-a",
+        "id": "q22",
+        "payload": {
+          "kind": "flags",
+          "read": false,
+          "refs": [
+            {
+              "remote_id": "25",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            }
+          ],
+          "starred": null,
+          "superseded": [
+            {
+              "read": true,
+              "reference_index": 0,
+              "starred": false
+            }
+          ]
+        },
+        "scheduled": false,
+        "status": "sending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-a",
+        "id": "m0",
+        "payload": {
+          "kind": "workflow_marker",
+          "marker": "done",
+          "threads": [
+            {
+              "refs": [
+                {
+                  "remote_id": "1",
+                  "source_folder": "INBOX",
+                  "source_uidvalidity": 7
+                },
+                {
+                  "remote_id": "2",
+                  "source_folder": "Projects",
+                  "source_uidvalidity": 9
+                },
+                {
+                  "remote_id": "3",
+                  "source_folder": "Sent",
+                  "source_uidvalidity": 8
+                }
+              ],
+              "thread_id": "t00000"
+            },
+            {
+              "refs": [
+                {
+                  "remote_id": "13",
+                  "source_folder": "INBOX",
+                  "source_uidvalidity": 7
+                },
+                {
+                  "remote_id": "14",
+                  "source_folder": "INBOX",
+                  "source_uidvalidity": 7
+                },
+                {
+                  "remote_id": "15",
+                  "source_folder": "Sent",
+                  "source_uidvalidity": 8
+                }
+              ],
+              "thread_id": "t00004"
+            },
+            {
+              "refs": [
+                {
+                  "remote_id": "25",
+                  "source_folder": "INBOX",
+                  "source_uidvalidity": 7
+                },
+                {
+                  "remote_id": "26",
+                  "source_folder": "INBOX",
+                  "source_uidvalidity": 7
+                },
+                {
+                  "remote_id": "27",
+                  "source_folder": "Sent",
+                  "source_uidvalidity": 8
+                }
+              ],
+              "thread_id": "t00008"
+            }
+          ]
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-b",
+        "id": "m1",
+        "payload": {
+          "kind": "workflow_marker",
+          "marker": "done",
+          "threads": [
+            {
+              "refs": [
+                {
+                  "remote_id": "4",
+                  "source_folder": "INBOX",
+                  "source_uidvalidity": 7
+                },
+                {
+                  "remote_id": "5",
+                  "source_folder": "INBOX",
+                  "source_uidvalidity": 7
+                },
+                {
+                  "remote_id": "6",
+                  "source_folder": "Sent",
+                  "source_uidvalidity": 8
+                }
+              ],
+              "thread_id": "t00001"
+            },
+            {
+              "refs": [
+                {
+                  "remote_id": "16",
+                  "source_folder": "INBOX",
+                  "source_uidvalidity": 7
+                },
+                {
+                  "remote_id": "17",
+                  "source_folder": "INBOX",
+                  "source_uidvalidity": 7
+                },
+                {
+                  "remote_id": "18",
+                  "source_folder": "Sent",
+                  "source_uidvalidity": 8
+                }
+              ],
+              "thread_id": "t00005"
+            },
+            {
+              "refs": [
+                {
+                  "remote_id": "28",
+                  "source_folder": "INBOX",
+                  "source_uidvalidity": 7
+                },
+                {
+                  "remote_id": "29",
+                  "source_folder": "Projects",
+                  "source_uidvalidity": 9
+                },
+                {
+                  "remote_id": "30",
+                  "source_folder": "Sent",
+                  "source_uidvalidity": 8
+                }
+              ],
+              "thread_id": "t00009"
+            }
+          ]
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "gmail",
+        "id": "m2",
+        "payload": {
+          "kind": "workflow_marker",
+          "marker": "done",
+          "threads": [
+            {
+              "refs": [
+                {
+                  "remote_id": "g2x0",
+                  "source_folder": "INBOX"
+                },
+                {
+                  "remote_id": "g2x1",
+                  "source_folder": "INBOX"
+                },
+                {
+                  "remote_id": "g2x2",
+                  "source_folder": "SENT"
+                }
+              ],
+              "thread_id": "t00002"
+            },
+            {
+              "refs": [
+                {
+                  "remote_id": "g6x0",
+                  "source_folder": "INBOX"
+                },
+                {
+                  "remote_id": "g6x1",
+                  "source_folder": "INBOX"
+                },
+                {
+                  "remote_id": "g6x2",
+                  "source_folder": "SENT"
+                }
+              ],
+              "thread_id": "t00006"
+            },
+            {
+              "refs": [
+                {
+                  "remote_id": "g10x0",
+                  "source_folder": "INBOX"
+                },
+                {
+                  "remote_id": "g10x1",
+                  "source_folder": "INBOX"
+                },
+                {
+                  "remote_id": "g10x2",
+                  "source_folder": "SENT"
+                }
+              ],
+              "thread_id": "t00010"
+            }
+          ]
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-a",
+        "id": "q0",
+        "payload": {
+          "kind": "flags",
+          "read": true,
+          "refs": [
+            {
+              "remote_id": "1",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "2",
+              "source_folder": "Projects",
+              "source_uidvalidity": 9
+            }
+          ],
+          "starred": null
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-a",
+        "id": "q1",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "1",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "2",
+              "source_folder": "Projects",
+              "source_uidvalidity": 9
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "archive",
+          "target_remote_folder_id": "Archive",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "t00000"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-b",
+        "id": "q2",
+        "payload": {
+          "kind": "flags",
+          "read": true,
+          "refs": [
+            {
+              "remote_id": "4",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "5",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            }
+          ],
+          "starred": null
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-b",
+        "id": "q3",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "4",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "5",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "archive",
+          "target_remote_folder_id": "Archive",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "t00001"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "gmail",
+        "id": "q4",
+        "payload": {
+          "kind": "flags",
+          "read": true,
+          "refs": [
+            {
+              "remote_id": "g2x0",
+              "source_folder": "INBOX"
+            },
+            {
+              "remote_id": "g2x1",
+              "source_folder": "INBOX"
+            }
+          ],
+          "starred": null
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "gmail",
+        "id": "q5",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "g2x0",
+              "source_folder": "INBOX"
+            },
+            {
+              "remote_id": "g2x1",
+              "source_folder": "INBOX"
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "archive",
+          "target_remote_folder_id": "ARCHIVE",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "t00002"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-a",
+        "id": "q6",
+        "payload": {
+          "kind": "flags",
+          "read": true,
+          "refs": [
+            {
+              "remote_id": "13",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "14",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            }
+          ],
+          "starred": null
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-a",
+        "id": "q7",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "13",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "14",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "archive",
+          "target_remote_folder_id": "Archive",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "t00004"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-b",
+        "id": "q8",
+        "payload": {
+          "kind": "flags",
+          "read": true,
+          "refs": [
+            {
+              "remote_id": "16",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "17",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            }
+          ],
+          "starred": null
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-b",
+        "id": "q9",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "16",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "17",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "archive",
+          "target_remote_folder_id": "Archive",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "t00005"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "gmail",
+        "id": "q10",
+        "payload": {
+          "kind": "flags",
+          "read": true,
+          "refs": [
+            {
+              "remote_id": "g6x0",
+              "source_folder": "INBOX"
+            },
+            {
+              "remote_id": "g6x1",
+              "source_folder": "INBOX"
+            }
+          ],
+          "starred": null
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "gmail",
+        "id": "q11",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "g6x0",
+              "source_folder": "INBOX"
+            },
+            {
+              "remote_id": "g6x1",
+              "source_folder": "INBOX"
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "archive",
+          "target_remote_folder_id": "ARCHIVE",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "t00006"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-a",
+        "id": "q12",
+        "payload": {
+          "kind": "flags",
+          "read": true,
+          "refs": [
+            {
+              "remote_id": "25",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "26",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            }
+          ],
+          "starred": null
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-a",
+        "id": "q13",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "25",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "26",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "archive",
+          "target_remote_folder_id": "Archive",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "t00008"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-b",
+        "id": "q14",
+        "payload": {
+          "kind": "flags",
+          "read": true,
+          "refs": [
+            {
+              "remote_id": "28",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "29",
+              "source_folder": "Projects",
+              "source_uidvalidity": 9
+            }
+          ],
+          "starred": null
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-b",
+        "id": "q15",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "28",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "29",
+              "source_folder": "Projects",
+              "source_uidvalidity": 9
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "archive",
+          "target_remote_folder_id": "Archive",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "t00009"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "gmail",
+        "id": "q16",
+        "payload": {
+          "kind": "flags",
+          "read": true,
+          "refs": [
+            {
+              "remote_id": "g10x0",
+              "source_folder": "INBOX"
+            },
+            {
+              "remote_id": "g10x1",
+              "source_folder": "INBOX"
+            }
+          ],
+          "starred": null
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "gmail",
+        "id": "q17",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "g10x0",
+              "source_folder": "INBOX"
+            },
+            {
+              "remote_id": "g10x1",
+              "source_folder": "INBOX"
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "archive",
+          "target_remote_folder_id": "ARCHIVE",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "t00010"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "gmail",
+        "id": "q28",
+        "payload": {
+          "kind": "delete",
+          "refs": [
+            {
+              "remote_id": "gt0",
+              "source_folder": "TRASH"
+            },
+            {
+              "remote_id": "gt1",
+              "source_folder": "TRASH"
+            }
+          ]
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-b",
+        "id": "q18",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "501",
+              "source_folder": "Junk",
+              "source_uidvalidity": 11
+            },
+            {
+              "remote_id": "502",
+              "source_folder": "Junk",
+              "source_uidvalidity": 11
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "inbox",
+          "target_remote_folder_id": "INBOX",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "spam-1"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-a",
+        "id": "q19",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "61",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "62",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "63",
+              "source_folder": "Sent",
+              "source_uidvalidity": 8
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "custom",
+          "target_remote_folder_id": "Projects",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "t00020"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-a",
+        "id": "q20",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "73",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "75",
+              "source_folder": "Sent",
+              "source_uidvalidity": 8
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "custom",
+          "target_remote_folder_id": "Projects",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "t00024"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-b",
+        "id": "q31",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "76",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "77",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "custom",
+          "target_remote_folder_id": "Projects",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "t00025"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      }
+    ],
+    "receipt_messages": [
+      [
+        "r0",
+        "t00012-m0",
+        "imap-a-inbox",
+        "fld-mail-v2-0a84c29585a25353105639ffaf5abba10b53ddd3f2ceb5e3b2aa1f4e25b18d42"
+      ],
+      [
+        "r0",
+        "t00012-m1",
+        "imap-a-projects",
+        "fld-mail-v2-0a84c29585a25353105639ffaf5abba10b53ddd3f2ceb5e3b2aa1f4e25b18d42"
+      ],
+      [
+        "r0",
+        "t00012-m2",
+        "imap-a-sent",
+        "fld-mail-v2-0a84c29585a25353105639ffaf5abba10b53ddd3f2ceb5e3b2aa1f4e25b18d42"
+      ],
+      [
+        "r0",
+        "t00013-m0",
+        "imap-b-inbox",
+        "fld-mail-v2-1fb2c47ccfa5a2f6fad04822bf3ea3f5dc433800bddcf896569a21b336c63c82"
+      ],
+      [
+        "r0",
+        "t00013-m1",
+        "imap-b-inbox",
+        "fld-mail-v2-1fb2c47ccfa5a2f6fad04822bf3ea3f5dc433800bddcf896569a21b336c63c82"
+      ],
+      [
+        "r0",
+        "t00013-m2",
+        "imap-b-sent",
+        "fld-mail-v2-1fb2c47ccfa5a2f6fad04822bf3ea3f5dc433800bddcf896569a21b336c63c82"
+      ],
+      [
+        "r0",
+        "t00014-m0",
+        "gmail-inbox",
+        "gmail-trash"
+      ],
+      [
+        "r0",
+        "t00014-m1",
+        "gmail-inbox",
+        "gmail-trash"
+      ],
+      [
+        "r0",
+        "t00014-m2",
+        "gmail-sent",
+        "gmail-trash"
+      ],
+      [
+        "r0",
+        "t00015-m0",
+        "pop-inbox",
+        "fld-mail-v2-474118d63c9a12fa9253fbe1bf40309f740b9f0ffde41071222651fa17ffd9f6"
+      ],
+      [
+        "r0",
+        "t00015-m1",
+        "pop-inbox",
+        "fld-mail-v2-474118d63c9a12fa9253fbe1bf40309f740b9f0ffde41071222651fa17ffd9f6"
+      ],
+      [
+        "r0",
+        "t00015-m2",
+        "pop-sent",
+        "fld-mail-v2-474118d63c9a12fa9253fbe1bf40309f740b9f0ffde41071222651fa17ffd9f6"
+      ],
+      [
+        "r0",
+        "t00016-m0",
+        "imap-a-inbox",
+        "fld-mail-v2-0a84c29585a25353105639ffaf5abba10b53ddd3f2ceb5e3b2aa1f4e25b18d42"
+      ],
+      [
+        "r0",
+        "t00016-m1",
+        "imap-a-inbox",
+        "fld-mail-v2-0a84c29585a25353105639ffaf5abba10b53ddd3f2ceb5e3b2aa1f4e25b18d42"
+      ],
+      [
+        "r0",
+        "t00016-m2",
+        "imap-a-sent",
+        "fld-mail-v2-0a84c29585a25353105639ffaf5abba10b53ddd3f2ceb5e3b2aa1f4e25b18d42"
+      ],
+      [
+        "r0",
+        "t00017-m0",
+        "imap-b-inbox",
+        "fld-mail-v2-1fb2c47ccfa5a2f6fad04822bf3ea3f5dc433800bddcf896569a21b336c63c82"
+      ],
+      [
+        "r0",
+        "t00017-m1",
+        "imap-b-inbox",
+        "fld-mail-v2-1fb2c47ccfa5a2f6fad04822bf3ea3f5dc433800bddcf896569a21b336c63c82"
+      ],
+      [
+        "r0",
+        "t00017-m2",
+        "imap-b-sent",
+        "fld-mail-v2-1fb2c47ccfa5a2f6fad04822bf3ea3f5dc433800bddcf896569a21b336c63c82"
+      ],
+      [
+        "r1",
+        "t00018-m0",
+        "gmail-inbox",
+        "fld-mail-v2-6187dc141a4a14c64a7cef78cbfc6e754b19d2245cc21bbe07dbdea375005db0"
+      ],
+      [
+        "r1",
+        "t00018-m1",
+        "gmail-inbox",
+        "fld-mail-v2-6187dc141a4a14c64a7cef78cbfc6e754b19d2245cc21bbe07dbdea375005db0"
+      ],
+      [
+        "r1",
+        "t00018-m2",
+        "gmail-sent",
+        "fld-mail-v2-6187dc141a4a14c64a7cef78cbfc6e754b19d2245cc21bbe07dbdea375005db0"
+      ],
+      [
+        "r1",
+        "t00019-m0",
+        "pop-inbox",
+        "fld-mail-v2-be75bdf4c97021971604d956cae2941fdf4b27a4ff910f87ff9981007612a6ea"
+      ],
+      [
+        "r1",
+        "t00019-m1",
+        "pop-inbox",
+        "fld-mail-v2-be75bdf4c97021971604d956cae2941fdf4b27a4ff910f87ff9981007612a6ea"
+      ],
+      [
+        "r1",
+        "t00019-m2",
+        "pop-sent",
+        "fld-mail-v2-be75bdf4c97021971604d956cae2941fdf4b27a4ff910f87ff9981007612a6ea"
+      ]
+    ],
+    "receipt_queue": [
+      [
+        "r0",
+        "q23"
+      ],
+      [
+        "r0",
+        "q24"
+      ],
+      [
+        "r0",
+        "q25"
+      ],
+      [
+        "r0",
+        "q26"
+      ],
+      [
+        "r0",
+        "q27"
+      ],
+      [
+        "r1",
+        "q29"
+      ],
+      [
+        "r1",
+        "q30"
+      ]
+    ],
+    "receipt_threads": [
+      [
+        "r0",
+        "t00012",
+        "imap-a",
+        "inbox",
+        "inbox",
+        null
+      ],
+      [
+        "r0",
+        "t00013",
+        "imap-b",
+        "inbox",
+        "inbox",
+        null
+      ],
+      [
+        "r0",
+        "t00014",
+        "gmail",
+        "inbox",
+        "inbox",
+        null
+      ],
+      [
+        "r0",
+        "t00015",
+        "pop",
+        "inbox",
+        "inbox",
+        null
+      ],
+      [
+        "r0",
+        "t00016",
+        "imap-a",
+        "inbox",
+        "inbox",
+        null
+      ],
+      [
+        "r0",
+        "t00017",
+        "imap-b",
+        "inbox",
+        "inbox",
+        null
+      ],
+      [
+        "r1",
+        "t00018",
+        "gmail",
+        "inbox",
+        "inbox",
+        null
+      ],
+      [
+        "r1",
+        "t00019",
+        "pop",
+        "inbox",
+        "inbox",
+        null
+      ]
+    ],
+    "receipts": [
+      [
+        "r0",
+        "consumed"
+      ],
+      [
+        "r1",
+        "consumed"
+      ]
+    ],
+    "thread_folders": [
+      [
+        "fld-mail-v2-59876617403801961688094ee5f82742d8161d836ae19cd4dc16f2bcda534135",
+        "t00003",
+        2,
+        0,
+        1
+      ],
+      [
+        "fld-mail-v2-59876617403801961688094ee5f82742d8161d836ae19cd4dc16f2bcda534135",
+        "t00007",
+        2,
+        0,
+        1
+      ],
+      [
+        "fld-mail-v2-59876617403801961688094ee5f82742d8161d836ae19cd4dc16f2bcda534135",
+        "t00011",
+        2,
+        0,
+        1
+      ],
+      [
+        "fld-mail-v2-9b201e578b899cb7fe3bd9fc64f0bfae4e0c7a7aa4a12e46bf3f75605763791a",
+        "t00001",
+        2,
+        0,
+        1
+      ],
+      [
+        "fld-mail-v2-9b201e578b899cb7fe3bd9fc64f0bfae4e0c7a7aa4a12e46bf3f75605763791a",
+        "t00005",
+        2,
+        0,
+        1
+      ],
+      [
+        "fld-mail-v2-9b201e578b899cb7fe3bd9fc64f0bfae4e0c7a7aa4a12e46bf3f75605763791a",
+        "t00009",
+        2,
+        0,
+        1
+      ],
+      [
+        "fld-mail-v2-b862fc3c04211c7f6a8fe308a72a2ee98b767c76c2d7afc2f79c5e36a1d46cd5",
+        "t00002",
+        2,
+        0,
+        1
+      ],
+      [
+        "fld-mail-v2-b862fc3c04211c7f6a8fe308a72a2ee98b767c76c2d7afc2f79c5e36a1d46cd5",
+        "t00006",
+        2,
+        0,
+        1
+      ],
+      [
+        "fld-mail-v2-b862fc3c04211c7f6a8fe308a72a2ee98b767c76c2d7afc2f79c5e36a1d46cd5",
+        "t00010",
+        2,
+        0,
+        1
+      ],
+      [
+        "gmail-inbox",
+        "t00014",
+        2,
+        2,
+        1
+      ],
+      [
+        "gmail-inbox",
+        "t00018",
+        2,
+        0,
+        1
+      ],
+      [
+        "gmail-inbox",
+        "t00022",
+        2,
+        2,
+        1
+      ],
+      [
+        "gmail-inbox",
+        "t00026",
+        2,
+        2,
+        1
+      ],
+      [
+        "gmail-sent",
+        "t00002",
+        1,
+        0,
+        1
+      ],
+      [
+        "gmail-sent",
+        "t00006",
+        1,
+        0,
+        1
+      ],
+      [
+        "gmail-sent",
+        "t00010",
+        1,
+        0,
+        1
+      ],
+      [
+        "gmail-sent",
+        "t00014",
+        1,
+        0,
+        1
+      ],
+      [
+        "gmail-sent",
+        "t00018",
+        1,
+        0,
+        1
+      ],
+      [
+        "gmail-sent",
+        "t00022",
+        1,
+        0,
+        1
+      ],
+      [
+        "gmail-sent",
+        "t00026",
+        1,
+        0,
+        1
+      ],
+      [
+        "imap-a-archive",
+        "t00000",
+        2,
+        0,
+        1
+      ],
+      [
+        "imap-a-archive",
+        "t00004",
+        2,
+        0,
+        1
+      ],
+      [
+        "imap-a-archive",
+        "t00008",
+        2,
+        0,
+        1
+      ],
+      [
+        "imap-a-inbox",
+        "t00012",
+        1,
+        1,
+        1
+      ],
+      [
+        "imap-a-inbox",
+        "t00016",
+        2,
+        2,
+        1
+      ],
+      [
+        "imap-a-projects",
+        "t00012",
+        1,
+        1,
+        1
+      ],
+      [
+        "imap-a-projects",
+        "t00020",
+        3,
+        2,
+        1
+      ],
+      [
+        "imap-a-projects",
+        "t00024",
+        3,
+        2,
+        1
+      ],
+      [
+        "imap-a-sent",
+        "t00000",
+        1,
+        0,
+        1
+      ],
+      [
+        "imap-a-sent",
+        "t00004",
+        1,
+        0,
+        1
+      ],
+      [
+        "imap-a-sent",
+        "t00008",
+        1,
+        0,
+        1
+      ],
+      [
+        "imap-a-sent",
+        "t00012",
+        1,
+        0,
+        1
+      ],
+      [
+        "imap-a-sent",
+        "t00016",
+        1,
+        0,
+        1
+      ],
+      [
+        "imap-b-inbox",
+        "spam-1",
+        3,
+        3,
+        1
+      ],
+      [
+        "imap-b-inbox",
+        "t00013",
+        2,
+        2,
+        1
+      ],
+      [
+        "imap-b-inbox",
+        "t00017",
+        2,
+        2,
+        1
+      ],
+      [
+        "imap-b-inbox",
+        "t00021",
+        1,
+        1,
+        1
+      ],
+      [
+        "imap-b-projects",
+        "t00021",
+        1,
+        1,
+        1
+      ],
+      [
+        "imap-b-projects",
+        "t00025",
+        2,
+        2,
+        1
+      ],
+      [
+        "imap-b-sent",
+        "t00001",
+        1,
+        0,
+        1
+      ],
+      [
+        "imap-b-sent",
+        "t00005",
+        1,
+        0,
+        1
+      ],
+      [
+        "imap-b-sent",
+        "t00009",
+        1,
+        0,
+        1
+      ],
+      [
+        "imap-b-sent",
+        "t00013",
+        1,
+        0,
+        1
+      ],
+      [
+        "imap-b-sent",
+        "t00017",
+        1,
+        0,
+        1
+      ],
+      [
+        "imap-b-sent",
+        "t00021",
+        1,
+        0,
+        1
+      ],
+      [
+        "imap-b-sent",
+        "t00025",
+        1,
+        0,
+        1
+      ],
+      [
+        "pop-inbox",
+        "t00015",
+        2,
+        2,
+        1
+      ],
+      [
+        "pop-inbox",
+        "t00019",
+        2,
+        0,
+        1
+      ],
+      [
+        "pop-inbox",
+        "t00023",
+        2,
+        2,
+        1
+      ],
+      [
+        "pop-inbox",
+        "t00027",
+        2,
+        2,
+        1
+      ],
+      [
+        "pop-sent",
+        "t00003",
+        1,
+        0,
+        1
+      ],
+      [
+        "pop-sent",
+        "t00007",
+        1,
+        0,
+        1
+      ],
+      [
+        "pop-sent",
+        "t00011",
+        1,
+        0,
+        1
+      ],
+      [
+        "pop-sent",
+        "t00015",
+        1,
+        0,
+        1
+      ],
+      [
+        "pop-sent",
+        "t00019",
+        1,
+        0,
+        1
+      ],
+      [
+        "pop-sent",
+        "t00023",
+        1,
+        0,
+        1
+      ],
+      [
+        "pop-sent",
+        "t00027",
+        1,
+        0,
+        1
+      ]
+    ],
+    "threads": [
+      [
+        "spam-1",
+        "inbox",
+        "inbox",
+        null,
+        3,
+        3,
+        0,
+        0,
+        "Other",
+        null,
+        "2026-01-02",
+        true
+      ],
+      [
+        "t00000",
+        "done",
+        "done",
+        null,
+        3,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00001",
+        "done",
+        "done",
+        null,
+        3,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00002",
+        "done",
+        "done",
+        null,
+        3,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00003",
+        "done",
+        "done",
+        null,
+        3,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00004",
+        "done",
+        "done",
+        null,
+        3,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00005",
+        "done",
+        "done",
+        null,
+        3,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00006",
+        "done",
+        "done",
+        null,
+        3,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00007",
+        "done",
+        "done",
+        null,
+        3,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00008",
+        "done",
+        "done",
+        null,
+        3,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00009",
+        "done",
+        "done",
+        null,
+        3,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00010",
+        "done",
+        "done",
+        null,
+        3,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00011",
+        "done",
+        "done",
+        null,
+        3,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00012",
+        "inbox",
+        "inbox",
+        null,
+        3,
+        2,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00013",
+        "inbox",
+        "inbox",
+        null,
+        3,
+        2,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00014",
+        "inbox",
+        "inbox",
+        null,
+        3,
+        2,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00015",
+        "inbox",
+        "inbox",
+        null,
+        3,
+        2,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00016",
+        "inbox",
+        "inbox",
+        null,
+        3,
+        2,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00017",
+        "inbox",
+        "inbox",
+        null,
+        3,
+        2,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00018",
+        "inbox",
+        "inbox",
+        null,
+        3,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00019",
+        "inbox",
+        "inbox",
+        null,
+        3,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00020",
+        "inbox",
+        "inbox",
+        null,
+        3,
+        2,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        false
+      ],
+      [
+        "t00021",
+        "inbox",
+        "inbox",
+        null,
+        1,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01",
+        false
+      ],
+      [
+        "t00022",
+        "inbox",
+        "inbox",
+        null,
+        1,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01",
+        false
+      ],
+      [
+        "t00023",
+        "inbox",
+        "inbox",
+        null,
+        1,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01",
+        false
+      ],
+      [
+        "t00024",
+        "inbox",
+        "inbox",
+        null,
+        3,
+        2,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        false
+      ],
+      [
+        "t00025",
+        "inbox",
+        "inbox",
+        null,
+        3,
+        2,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        false
+      ],
+      [
+        "t00026",
+        "inbox",
+        "inbox",
+        null,
+        1,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01",
+        false
+      ],
+      [
+        "t00027",
+        "inbox",
+        "inbox",
+        null,
+        1,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01",
+        false
+      ]
+    ]
+  },
+  "state": {
+    "folders": [
+      [
+        "fld-mail-v2-0a84c29585a25353105639ffaf5abba10b53ddd3f2ceb5e3b2aa1f4e25b18d42",
+        "imap-a",
+        "Papierkorb",
+        "Trash",
+        "trash",
+        "Trash",
+        2,
+        2
+      ],
+      [
+        "fld-mail-v2-1fb2c47ccfa5a2f6fad04822bf3ea3f5dc433800bddcf896569a21b336c63c82",
+        "imap-b",
+        "Papierkorb",
+        "Trash",
+        "trash",
+        "Trash",
+        2,
+        2
+      ],
+      [
+        "fld-mail-v2-474118d63c9a12fa9253fbe1bf40309f740b9f0ffde41071222651fa17ffd9f6",
+        "pop",
+        "Papierkorb",
+        "Trash",
+        "trash",
+        "Trash",
+        1,
+        1
+      ],
+      [
+        "fld-mail-v2-59876617403801961688094ee5f82742d8161d836ae19cd4dc16f2bcda534135",
+        "pop",
+        "Archiviert",
+        "Archive",
+        "archive",
+        "Archive",
+        3,
+        0
+      ],
+      [
+        "fld-mail-v2-6187dc141a4a14c64a7cef78cbfc6e754b19d2245cc21bbe07dbdea375005db0",
+        "gmail",
+        "SPAM",
+        "SPAM",
+        "spam",
+        "SPAM",
+        1,
+        0
+      ],
+      [
+        "fld-mail-v2-9b201e578b899cb7fe3bd9fc64f0bfae4e0c7a7aa4a12e46bf3f75605763791a",
+        "imap-b",
+        "Archiviert",
+        "Archive",
+        "archive",
+        "Archive",
+        3,
+        0
+      ],
+      [
+        "fld-mail-v2-b862fc3c04211c7f6a8fe308a72a2ee98b767c76c2d7afc2f79c5e36a1d46cd5",
+        "gmail",
+        "Archiviert",
+        "Archive",
+        "archive",
+        "ARCHIVE",
+        3,
+        0
+      ],
+      [
+        "fld-mail-v2-be75bdf4c97021971604d956cae2941fdf4b27a4ff910f87ff9981007612a6ea",
+        "pop",
+        "Spam",
+        "Spam",
+        "spam",
+        "Spam",
+        1,
+        0
+      ],
+      [
+        "gmail-inbox",
+        "gmail",
+        "INBOX",
+        "INBOX",
+        "inbox",
+        "INBOX",
+        2,
+        2
+      ],
+      [
+        "gmail-projects",
+        "gmail",
+        "Label_7",
+        "Label_7",
+        "custom",
+        "Label_7",
+        0,
+        0
+      ],
+      [
+        "gmail-sent",
+        "gmail",
+        "SENT",
+        "SENT",
+        "sent",
+        "SENT",
+        5,
+        0
+      ],
+      [
+        "gmail-trash",
+        "gmail",
+        "TRASH",
+        "TRASH",
+        "trash",
+        "TRASH",
+        1,
+        1
+      ],
+      [
+        "imap-a-archive",
+        "imap-a",
+        "Archive",
+        "Archive",
+        "archive",
+        "Archive",
+        3,
+        0
+      ],
+      [
+        "imap-a-inbox",
+        "imap-a",
+        "INBOX",
+        "INBOX",
+        "inbox",
+        "INBOX",
+        0,
+        0
+      ],
+      [
+        "imap-a-projects",
+        "imap-a",
+        "Projects",
+        "Projects",
+        "custom",
+        "Projects",
+        2,
+        2
+      ],
+      [
+        "imap-a-sent",
+        "imap-a",
+        "Sent",
+        "Sent",
+        "sent",
+        "Sent",
+        3,
+        0
+      ],
+      [
+        "imap-b-inbox",
+        "imap-b",
+        "INBOX",
+        "INBOX",
+        "inbox",
+        "INBOX",
+        3,
+        3
+      ],
+      [
+        "imap-b-projects",
+        "imap-b",
+        "Projects",
+        "Projects",
+        "custom",
+        "Projects",
+        1,
+        1
+      ],
+      [
+        "imap-b-sent",
+        "imap-b",
+        "Sent",
+        "Sent",
+        "sent",
+        "Sent",
+        5,
+        0
+      ],
+      [
+        "imap-b-spam",
+        "imap-b",
+        "Junk",
+        "Junk",
+        "spam",
+        "Junk",
+        0,
+        0
+      ],
+      [
+        "pop-inbox",
+        "pop",
+        "INBOX",
+        "INBOX",
+        "inbox",
+        "INBOX",
+        2,
+        2
+      ],
+      [
+        "pop-projects",
+        "pop",
+        "Projects",
+        "Projects",
+        "custom",
+        "Projects",
+        0,
+        0
+      ],
+      [
+        "pop-sent",
+        "pop",
+        "Sent",
+        "Sent",
+        "sent",
+        "Sent",
+        5,
+        0
+      ]
+    ],
+    "messages": [
+      [
+        "spam-1-m0",
+        "imap-b-spam",
+        "imap-b-inbox",
+        0,
+        "spam-1"
+      ],
+      [
+        "spam-1-m1",
+        "imap-b-spam",
+        "imap-b-inbox",
+        0,
+        "spam-1"
+      ],
+      [
+        "spam-1-m2",
+        "imap-b-inbox",
+        null,
+        0,
+        "spam-1"
+      ],
+      [
+        "t00000-m0",
+        "imap-a-inbox",
+        "imap-a-archive",
+        1,
+        "t00000"
+      ],
+      [
+        "t00000-m1",
+        "imap-a-projects",
+        "imap-a-archive",
+        1,
+        "t00000"
+      ],
+      [
+        "t00000-m2",
+        "imap-a-sent",
+        null,
+        1,
+        "t00000"
+      ],
+      [
+        "t00001-m0",
+        "imap-b-inbox",
+        "fld-mail-v2-9b201e578b899cb7fe3bd9fc64f0bfae4e0c7a7aa4a12e46bf3f75605763791a",
+        1,
+        "t00001"
+      ],
+      [
+        "t00001-m1",
+        "imap-b-inbox",
+        "fld-mail-v2-9b201e578b899cb7fe3bd9fc64f0bfae4e0c7a7aa4a12e46bf3f75605763791a",
+        1,
+        "t00001"
+      ],
+      [
+        "t00001-m2",
+        "imap-b-sent",
+        null,
+        1,
+        "t00001"
+      ],
+      [
+        "t00002-m0",
+        "gmail-inbox",
+        "fld-mail-v2-b862fc3c04211c7f6a8fe308a72a2ee98b767c76c2d7afc2f79c5e36a1d46cd5",
+        1,
+        "t00002"
+      ],
+      [
+        "t00002-m1",
+        "gmail-inbox",
+        "fld-mail-v2-b862fc3c04211c7f6a8fe308a72a2ee98b767c76c2d7afc2f79c5e36a1d46cd5",
+        1,
+        "t00002"
+      ],
+      [
+        "t00002-m2",
+        "gmail-sent",
+        null,
+        1,
+        "t00002"
+      ],
+      [
+        "t00003-m0",
+        "fld-mail-v2-59876617403801961688094ee5f82742d8161d836ae19cd4dc16f2bcda534135",
+        null,
+        1,
+        "t00003"
+      ],
+      [
+        "t00003-m1",
+        "fld-mail-v2-59876617403801961688094ee5f82742d8161d836ae19cd4dc16f2bcda534135",
+        null,
+        1,
+        "t00003"
+      ],
+      [
+        "t00003-m2",
+        "pop-sent",
+        null,
+        1,
+        "t00003"
+      ],
+      [
+        "t00004-m0",
+        "imap-a-inbox",
+        "imap-a-archive",
+        1,
+        "t00004"
+      ],
+      [
+        "t00004-m1",
+        "imap-a-inbox",
+        "imap-a-archive",
+        1,
+        "t00004"
+      ],
+      [
+        "t00004-m2",
+        "imap-a-sent",
+        null,
+        1,
+        "t00004"
+      ],
+      [
+        "t00005-m0",
+        "imap-b-inbox",
+        "fld-mail-v2-9b201e578b899cb7fe3bd9fc64f0bfae4e0c7a7aa4a12e46bf3f75605763791a",
+        1,
+        "t00005"
+      ],
+      [
+        "t00005-m1",
+        "imap-b-inbox",
+        "fld-mail-v2-9b201e578b899cb7fe3bd9fc64f0bfae4e0c7a7aa4a12e46bf3f75605763791a",
+        1,
+        "t00005"
+      ],
+      [
+        "t00005-m2",
+        "imap-b-sent",
+        null,
+        1,
+        "t00005"
+      ],
+      [
+        "t00006-m0",
+        "gmail-inbox",
+        "fld-mail-v2-b862fc3c04211c7f6a8fe308a72a2ee98b767c76c2d7afc2f79c5e36a1d46cd5",
+        1,
+        "t00006"
+      ],
+      [
+        "t00006-m1",
+        "gmail-inbox",
+        "fld-mail-v2-b862fc3c04211c7f6a8fe308a72a2ee98b767c76c2d7afc2f79c5e36a1d46cd5",
+        1,
+        "t00006"
+      ],
+      [
+        "t00006-m2",
+        "gmail-sent",
+        null,
+        1,
+        "t00006"
+      ],
+      [
+        "t00007-m0",
+        "fld-mail-v2-59876617403801961688094ee5f82742d8161d836ae19cd4dc16f2bcda534135",
+        null,
+        1,
+        "t00007"
+      ],
+      [
+        "t00007-m1",
+        "fld-mail-v2-59876617403801961688094ee5f82742d8161d836ae19cd4dc16f2bcda534135",
+        null,
+        1,
+        "t00007"
+      ],
+      [
+        "t00007-m2",
+        "pop-sent",
+        null,
+        1,
+        "t00007"
+      ],
+      [
+        "t00008-m0",
+        "imap-a-inbox",
+        "imap-a-archive",
+        1,
+        "t00008"
+      ],
+      [
+        "t00008-m1",
+        "imap-a-inbox",
+        "imap-a-archive",
+        1,
+        "t00008"
+      ],
+      [
+        "t00008-m2",
+        "imap-a-sent",
+        null,
+        1,
+        "t00008"
+      ],
+      [
+        "t00009-m0",
+        "imap-b-inbox",
+        "fld-mail-v2-9b201e578b899cb7fe3bd9fc64f0bfae4e0c7a7aa4a12e46bf3f75605763791a",
+        1,
+        "t00009"
+      ],
+      [
+        "t00009-m1",
+        "imap-b-projects",
+        "fld-mail-v2-9b201e578b899cb7fe3bd9fc64f0bfae4e0c7a7aa4a12e46bf3f75605763791a",
+        1,
+        "t00009"
+      ],
+      [
+        "t00009-m2",
+        "imap-b-sent",
+        null,
+        1,
+        "t00009"
+      ],
+      [
+        "t00010-m0",
+        "gmail-inbox",
+        "fld-mail-v2-b862fc3c04211c7f6a8fe308a72a2ee98b767c76c2d7afc2f79c5e36a1d46cd5",
+        1,
+        "t00010"
+      ],
+      [
+        "t00010-m1",
+        "gmail-inbox",
+        "fld-mail-v2-b862fc3c04211c7f6a8fe308a72a2ee98b767c76c2d7afc2f79c5e36a1d46cd5",
+        1,
+        "t00010"
+      ],
+      [
+        "t00010-m2",
+        "gmail-sent",
+        null,
+        1,
+        "t00010"
+      ],
+      [
+        "t00011-m0",
+        "fld-mail-v2-59876617403801961688094ee5f82742d8161d836ae19cd4dc16f2bcda534135",
+        null,
+        1,
+        "t00011"
+      ],
+      [
+        "t00011-m1",
+        "fld-mail-v2-59876617403801961688094ee5f82742d8161d836ae19cd4dc16f2bcda534135",
+        null,
+        1,
+        "t00011"
+      ],
+      [
+        "t00011-m2",
+        "pop-sent",
+        null,
+        1,
+        "t00011"
+      ],
+      [
+        "t00012-m0",
+        "imap-a-inbox",
+        "fld-mail-v2-0a84c29585a25353105639ffaf5abba10b53ddd3f2ceb5e3b2aa1f4e25b18d42",
+        0,
+        "t00012"
+      ],
+      [
+        "t00012-m1",
+        "imap-a-projects",
+        "fld-mail-v2-0a84c29585a25353105639ffaf5abba10b53ddd3f2ceb5e3b2aa1f4e25b18d42",
+        0,
+        "t00012"
+      ],
+      [
+        "t00012-m2",
+        "imap-a-sent",
+        "fld-mail-v2-0a84c29585a25353105639ffaf5abba10b53ddd3f2ceb5e3b2aa1f4e25b18d42",
+        1,
+        "t00012"
+      ],
+      [
+        "t00013-m0",
+        "imap-b-inbox",
+        "fld-mail-v2-1fb2c47ccfa5a2f6fad04822bf3ea3f5dc433800bddcf896569a21b336c63c82",
+        0,
+        "t00013"
+      ],
+      [
+        "t00013-m1",
+        "imap-b-inbox",
+        "fld-mail-v2-1fb2c47ccfa5a2f6fad04822bf3ea3f5dc433800bddcf896569a21b336c63c82",
+        0,
+        "t00013"
+      ],
+      [
+        "t00013-m2",
+        "imap-b-sent",
+        "fld-mail-v2-1fb2c47ccfa5a2f6fad04822bf3ea3f5dc433800bddcf896569a21b336c63c82",
+        1,
+        "t00013"
+      ],
+      [
+        "t00014-m0",
+        "gmail-inbox",
+        "gmail-trash",
+        0,
+        "t00014"
+      ],
+      [
+        "t00014-m1",
+        "gmail-inbox",
+        "gmail-trash",
+        0,
+        "t00014"
+      ],
+      [
+        "t00014-m2",
+        "gmail-sent",
+        "gmail-trash",
+        1,
+        "t00014"
+      ],
+      [
+        "t00015-m0",
+        "fld-mail-v2-474118d63c9a12fa9253fbe1bf40309f740b9f0ffde41071222651fa17ffd9f6",
+        null,
+        0,
+        "t00015"
+      ],
+      [
+        "t00015-m1",
+        "fld-mail-v2-474118d63c9a12fa9253fbe1bf40309f740b9f0ffde41071222651fa17ffd9f6",
+        null,
+        0,
+        "t00015"
+      ],
+      [
+        "t00015-m2",
+        "fld-mail-v2-474118d63c9a12fa9253fbe1bf40309f740b9f0ffde41071222651fa17ffd9f6",
+        null,
+        1,
+        "t00015"
+      ],
+      [
+        "t00016-m0",
+        "imap-a-inbox",
+        "fld-mail-v2-0a84c29585a25353105639ffaf5abba10b53ddd3f2ceb5e3b2aa1f4e25b18d42",
+        0,
+        "t00016"
+      ],
+      [
+        "t00016-m1",
+        "imap-a-inbox",
+        "fld-mail-v2-0a84c29585a25353105639ffaf5abba10b53ddd3f2ceb5e3b2aa1f4e25b18d42",
+        0,
+        "t00016"
+      ],
+      [
+        "t00016-m2",
+        "imap-a-sent",
+        "fld-mail-v2-0a84c29585a25353105639ffaf5abba10b53ddd3f2ceb5e3b2aa1f4e25b18d42",
+        1,
+        "t00016"
+      ],
+      [
+        "t00017-m0",
+        "imap-b-inbox",
+        "fld-mail-v2-1fb2c47ccfa5a2f6fad04822bf3ea3f5dc433800bddcf896569a21b336c63c82",
+        0,
+        "t00017"
+      ],
+      [
+        "t00017-m1",
+        "imap-b-inbox",
+        "fld-mail-v2-1fb2c47ccfa5a2f6fad04822bf3ea3f5dc433800bddcf896569a21b336c63c82",
+        0,
+        "t00017"
+      ],
+      [
+        "t00017-m2",
+        "imap-b-sent",
+        "fld-mail-v2-1fb2c47ccfa5a2f6fad04822bf3ea3f5dc433800bddcf896569a21b336c63c82",
+        1,
+        "t00017"
+      ],
+      [
+        "t00018-m0",
+        "gmail-inbox",
+        "fld-mail-v2-6187dc141a4a14c64a7cef78cbfc6e754b19d2245cc21bbe07dbdea375005db0",
+        1,
+        "t00018"
+      ],
+      [
+        "t00018-m1",
+        "gmail-inbox",
+        "fld-mail-v2-6187dc141a4a14c64a7cef78cbfc6e754b19d2245cc21bbe07dbdea375005db0",
+        1,
+        "t00018"
+      ],
+      [
+        "t00018-m2",
+        "gmail-sent",
+        "fld-mail-v2-6187dc141a4a14c64a7cef78cbfc6e754b19d2245cc21bbe07dbdea375005db0",
+        1,
+        "t00018"
+      ],
+      [
+        "t00019-m0",
+        "fld-mail-v2-be75bdf4c97021971604d956cae2941fdf4b27a4ff910f87ff9981007612a6ea",
+        null,
+        1,
+        "t00019"
+      ],
+      [
+        "t00019-m1",
+        "fld-mail-v2-be75bdf4c97021971604d956cae2941fdf4b27a4ff910f87ff9981007612a6ea",
+        null,
+        1,
+        "t00019"
+      ],
+      [
+        "t00019-m2",
+        "fld-mail-v2-be75bdf4c97021971604d956cae2941fdf4b27a4ff910f87ff9981007612a6ea",
+        null,
+        1,
+        "t00019"
+      ],
+      [
+        "t00020-m0",
+        "imap-a-inbox",
+        "imap-a-projects",
+        0,
+        "t00020"
+      ],
+      [
+        "t00020-m1",
+        "imap-a-inbox",
+        "imap-a-projects",
+        0,
+        "t00020"
+      ],
+      [
+        "t00020-m2",
+        "imap-a-sent",
+        "imap-a-projects",
+        1,
+        "t00020"
+      ],
+      [
+        "t00021-m0",
+        "imap-b-inbox",
+        null,
+        0,
+        "t00021"
+      ],
+      [
+        "t00021-m1",
+        "imap-b-projects",
+        null,
+        0,
+        "t00021"
+      ],
+      [
+        "t00021-m2",
+        "imap-b-sent",
+        null,
+        1,
+        "t00021"
+      ],
+      [
+        "t00022-m0",
+        "gmail-inbox",
+        null,
+        0,
+        "t00022"
+      ],
+      [
+        "t00022-m1",
+        "gmail-inbox",
+        null,
+        0,
+        "t00022"
+      ],
+      [
+        "t00022-m2",
+        "gmail-sent",
+        null,
+        1,
+        "t00022"
+      ],
+      [
+        "t00023-m0",
+        "pop-inbox",
+        null,
+        0,
+        "t00023"
+      ],
+      [
+        "t00023-m1",
+        "pop-inbox",
+        null,
+        0,
+        "t00023"
+      ],
+      [
+        "t00023-m2",
+        "pop-sent",
+        null,
+        1,
+        "t00023"
+      ],
+      [
+        "t00024-m0",
+        "imap-a-inbox",
+        "imap-a-projects",
+        0,
+        "t00024"
+      ],
+      [
+        "t00024-m1",
+        "imap-a-projects",
+        null,
+        0,
+        "t00024"
+      ],
+      [
+        "t00024-m2",
+        "imap-a-sent",
+        "imap-a-projects",
+        1,
+        "t00024"
+      ],
+      [
+        "t00025-m0",
+        "imap-b-inbox",
+        null,
+        0,
+        "t00025"
+      ],
+      [
+        "t00025-m1",
+        "imap-b-inbox",
+        null,
+        0,
+        "t00025"
+      ],
+      [
+        "t00025-m2",
+        "imap-b-sent",
+        null,
+        1,
+        "t00025"
+      ],
+      [
+        "t00026-m0",
+        "gmail-inbox",
+        null,
+        0,
+        "t00026"
+      ],
+      [
+        "t00026-m1",
+        "gmail-inbox",
+        null,
+        0,
+        "t00026"
+      ],
+      [
+        "t00026-m2",
+        "gmail-sent",
+        null,
+        1,
+        "t00026"
+      ],
+      [
+        "t00027-m0",
+        "pop-inbox",
+        null,
+        0,
+        "t00027"
+      ],
+      [
+        "t00027-m1",
+        "pop-inbox",
+        null,
+        0,
+        "t00027"
+      ],
+      [
+        "t00027-m2",
+        "pop-sent",
+        null,
+        1,
+        "t00027"
+      ]
+    ],
+    "queue": [
+      {
+        "account": "imap-a",
+        "id": "q21",
+        "payload": {
+          "kind": "flags",
+          "read": false,
+          "refs": [
+            {
+              "remote_id": "14",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "999",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            }
+          ],
+          "starred": true,
+          "superseded": [
+            {
+              "read": true,
+              "reference_index": 0,
+              "starred": false
+            }
+          ]
+        },
+        "scheduled": false,
+        "status": "failed",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-a",
+        "id": "q22",
+        "payload": {
+          "kind": "flags",
+          "read": false,
+          "refs": [
+            {
+              "remote_id": "25",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            }
+          ],
+          "starred": null,
+          "superseded": [
+            {
+              "read": true,
+              "reference_index": 0,
+              "starred": false
+            }
+          ]
+        },
+        "scheduled": false,
+        "status": "sending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-a",
+        "id": "m0",
+        "payload": {
+          "kind": "workflow_marker",
+          "marker": "done",
+          "threads": [
+            {
+              "refs": [
+                {
+                  "remote_id": "1",
+                  "source_folder": "INBOX",
+                  "source_uidvalidity": 7
+                },
+                {
+                  "remote_id": "2",
+                  "source_folder": "Projects",
+                  "source_uidvalidity": 9
+                },
+                {
+                  "remote_id": "3",
+                  "source_folder": "Sent",
+                  "source_uidvalidity": 8
+                }
+              ],
+              "thread_id": "t00000"
+            },
+            {
+              "refs": [
+                {
+                  "remote_id": "13",
+                  "source_folder": "INBOX",
+                  "source_uidvalidity": 7
+                },
+                {
+                  "remote_id": "14",
+                  "source_folder": "INBOX",
+                  "source_uidvalidity": 7
+                },
+                {
+                  "remote_id": "15",
+                  "source_folder": "Sent",
+                  "source_uidvalidity": 8
+                }
+              ],
+              "thread_id": "t00004"
+            },
+            {
+              "refs": [
+                {
+                  "remote_id": "25",
+                  "source_folder": "INBOX",
+                  "source_uidvalidity": 7
+                },
+                {
+                  "remote_id": "26",
+                  "source_folder": "INBOX",
+                  "source_uidvalidity": 7
+                },
+                {
+                  "remote_id": "27",
+                  "source_folder": "Sent",
+                  "source_uidvalidity": 8
+                }
+              ],
+              "thread_id": "t00008"
+            }
+          ]
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-b",
+        "id": "m1",
+        "payload": {
+          "kind": "workflow_marker",
+          "marker": "done",
+          "threads": [
+            {
+              "refs": [
+                {
+                  "remote_id": "4",
+                  "source_folder": "INBOX",
+                  "source_uidvalidity": 7
+                },
+                {
+                  "remote_id": "5",
+                  "source_folder": "INBOX",
+                  "source_uidvalidity": 7
+                },
+                {
+                  "remote_id": "6",
+                  "source_folder": "Sent",
+                  "source_uidvalidity": 8
+                }
+              ],
+              "thread_id": "t00001"
+            },
+            {
+              "refs": [
+                {
+                  "remote_id": "16",
+                  "source_folder": "INBOX",
+                  "source_uidvalidity": 7
+                },
+                {
+                  "remote_id": "17",
+                  "source_folder": "INBOX",
+                  "source_uidvalidity": 7
+                },
+                {
+                  "remote_id": "18",
+                  "source_folder": "Sent",
+                  "source_uidvalidity": 8
+                }
+              ],
+              "thread_id": "t00005"
+            },
+            {
+              "refs": [
+                {
+                  "remote_id": "28",
+                  "source_folder": "INBOX",
+                  "source_uidvalidity": 7
+                },
+                {
+                  "remote_id": "29",
+                  "source_folder": "Projects",
+                  "source_uidvalidity": 9
+                },
+                {
+                  "remote_id": "30",
+                  "source_folder": "Sent",
+                  "source_uidvalidity": 8
+                }
+              ],
+              "thread_id": "t00009"
+            }
+          ]
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "gmail",
+        "id": "m2",
+        "payload": {
+          "kind": "workflow_marker",
+          "marker": "done",
+          "threads": [
+            {
+              "refs": [
+                {
+                  "remote_id": "g2x0",
+                  "source_folder": "INBOX"
+                },
+                {
+                  "remote_id": "g2x1",
+                  "source_folder": "INBOX"
+                },
+                {
+                  "remote_id": "g2x2",
+                  "source_folder": "SENT"
+                }
+              ],
+              "thread_id": "t00002"
+            },
+            {
+              "refs": [
+                {
+                  "remote_id": "g6x0",
+                  "source_folder": "INBOX"
+                },
+                {
+                  "remote_id": "g6x1",
+                  "source_folder": "INBOX"
+                },
+                {
+                  "remote_id": "g6x2",
+                  "source_folder": "SENT"
+                }
+              ],
+              "thread_id": "t00006"
+            },
+            {
+              "refs": [
+                {
+                  "remote_id": "g10x0",
+                  "source_folder": "INBOX"
+                },
+                {
+                  "remote_id": "g10x1",
+                  "source_folder": "INBOX"
+                },
+                {
+                  "remote_id": "g10x2",
+                  "source_folder": "SENT"
+                }
+              ],
+              "thread_id": "t00010"
+            }
+          ]
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-a",
+        "id": "q0",
+        "payload": {
+          "kind": "flags",
+          "read": true,
+          "refs": [
+            {
+              "remote_id": "1",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "2",
+              "source_folder": "Projects",
+              "source_uidvalidity": 9
+            }
+          ],
+          "starred": null
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-a",
+        "id": "q1",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "1",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "2",
+              "source_folder": "Projects",
+              "source_uidvalidity": 9
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "archive",
+          "target_remote_folder_id": "Archive",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "t00000"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-b",
+        "id": "q2",
+        "payload": {
+          "kind": "flags",
+          "read": true,
+          "refs": [
+            {
+              "remote_id": "4",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "5",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            }
+          ],
+          "starred": null
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-b",
+        "id": "q3",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "4",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "5",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "archive",
+          "target_remote_folder_id": "Archive",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "t00001"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "gmail",
+        "id": "q4",
+        "payload": {
+          "kind": "flags",
+          "read": true,
+          "refs": [
+            {
+              "remote_id": "g2x0",
+              "source_folder": "INBOX"
+            },
+            {
+              "remote_id": "g2x1",
+              "source_folder": "INBOX"
+            }
+          ],
+          "starred": null
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "gmail",
+        "id": "q5",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "g2x0",
+              "source_folder": "INBOX"
+            },
+            {
+              "remote_id": "g2x1",
+              "source_folder": "INBOX"
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "archive",
+          "target_remote_folder_id": "ARCHIVE",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "t00002"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-a",
+        "id": "q6",
+        "payload": {
+          "kind": "flags",
+          "read": true,
+          "refs": [
+            {
+              "remote_id": "13",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "14",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            }
+          ],
+          "starred": null
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-a",
+        "id": "q7",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "13",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "14",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "archive",
+          "target_remote_folder_id": "Archive",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "t00004"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-b",
+        "id": "q8",
+        "payload": {
+          "kind": "flags",
+          "read": true,
+          "refs": [
+            {
+              "remote_id": "16",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "17",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            }
+          ],
+          "starred": null
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-b",
+        "id": "q9",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "16",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "17",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "archive",
+          "target_remote_folder_id": "Archive",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "t00005"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "gmail",
+        "id": "q10",
+        "payload": {
+          "kind": "flags",
+          "read": true,
+          "refs": [
+            {
+              "remote_id": "g6x0",
+              "source_folder": "INBOX"
+            },
+            {
+              "remote_id": "g6x1",
+              "source_folder": "INBOX"
+            }
+          ],
+          "starred": null
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "gmail",
+        "id": "q11",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "g6x0",
+              "source_folder": "INBOX"
+            },
+            {
+              "remote_id": "g6x1",
+              "source_folder": "INBOX"
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "archive",
+          "target_remote_folder_id": "ARCHIVE",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "t00006"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-a",
+        "id": "q12",
+        "payload": {
+          "kind": "flags",
+          "read": true,
+          "refs": [
+            {
+              "remote_id": "25",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "26",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            }
+          ],
+          "starred": null
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-a",
+        "id": "q13",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "25",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "26",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "archive",
+          "target_remote_folder_id": "Archive",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "t00008"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-b",
+        "id": "q14",
+        "payload": {
+          "kind": "flags",
+          "read": true,
+          "refs": [
+            {
+              "remote_id": "28",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "29",
+              "source_folder": "Projects",
+              "source_uidvalidity": 9
+            }
+          ],
+          "starred": null
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-b",
+        "id": "q15",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "28",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "29",
+              "source_folder": "Projects",
+              "source_uidvalidity": 9
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "archive",
+          "target_remote_folder_id": "Archive",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "t00009"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "gmail",
+        "id": "q16",
+        "payload": {
+          "kind": "flags",
+          "read": true,
+          "refs": [
+            {
+              "remote_id": "g10x0",
+              "source_folder": "INBOX"
+            },
+            {
+              "remote_id": "g10x1",
+              "source_folder": "INBOX"
+            }
+          ],
+          "starred": null
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "gmail",
+        "id": "q17",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "g10x0",
+              "source_folder": "INBOX"
+            },
+            {
+              "remote_id": "g10x1",
+              "source_folder": "INBOX"
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "archive",
+          "target_remote_folder_id": "ARCHIVE",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "t00010"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-a",
+        "id": "q23",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "37",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "38",
+              "source_folder": "Projects",
+              "source_uidvalidity": 9
+            },
+            {
+              "remote_id": "39",
+              "source_folder": "Sent",
+              "source_uidvalidity": 8
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "trash",
+          "target_remote_folder_id": "Trash",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "t00012"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-b",
+        "id": "q24",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "40",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "41",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "42",
+              "source_folder": "Sent",
+              "source_uidvalidity": 8
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "trash",
+          "target_remote_folder_id": "Trash",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "t00013"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "gmail",
+        "id": "q25",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "g14x0",
+              "source_folder": "INBOX"
+            },
+            {
+              "remote_id": "g14x1",
+              "source_folder": "INBOX"
+            },
+            {
+              "remote_id": "g14x2",
+              "source_folder": "SENT"
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "trash",
+          "target_remote_folder_id": "TRASH",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "t00014"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-a",
+        "id": "q26",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "49",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "50",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "51",
+              "source_folder": "Sent",
+              "source_uidvalidity": 8
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "trash",
+          "target_remote_folder_id": "Trash",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "t00016"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-b",
+        "id": "q27",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "52",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "53",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "54",
+              "source_folder": "Sent",
+              "source_uidvalidity": 8
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "trash",
+          "target_remote_folder_id": "Trash",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "t00017"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "gmail",
+        "id": "q28",
+        "payload": {
+          "kind": "delete",
+          "refs": [
+            {
+              "remote_id": "gt0",
+              "source_folder": "TRASH"
+            },
+            {
+              "remote_id": "gt1",
+              "source_folder": "TRASH"
+            }
+          ]
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "gmail",
+        "id": "q29",
+        "payload": {
+          "kind": "flags",
+          "read": true,
+          "refs": [
+            {
+              "remote_id": "g18x0",
+              "source_folder": "INBOX"
+            },
+            {
+              "remote_id": "g18x1",
+              "source_folder": "INBOX"
+            },
+            {
+              "remote_id": "g18x2",
+              "source_folder": "SENT"
+            }
+          ],
+          "starred": null
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "gmail",
+        "id": "q30",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "g18x0",
+              "source_folder": "INBOX"
+            },
+            {
+              "remote_id": "g18x1",
+              "source_folder": "INBOX"
+            },
+            {
+              "remote_id": "g18x2",
+              "source_folder": "SENT"
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "spam",
+          "target_remote_folder_id": "SPAM",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "t00018"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-b",
+        "id": "q18",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "501",
+              "source_folder": "Junk",
+              "source_uidvalidity": 11
+            },
+            {
+              "remote_id": "502",
+              "source_folder": "Junk",
+              "source_uidvalidity": 11
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "inbox",
+          "target_remote_folder_id": "INBOX",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "spam-1"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-a",
+        "id": "q19",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "61",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "62",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "63",
+              "source_folder": "Sent",
+              "source_uidvalidity": 8
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "custom",
+          "target_remote_folder_id": "Projects",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "t00020"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      },
+      {
+        "account": "imap-a",
+        "id": "q20",
+        "payload": {
+          "kind": "workflow_move",
+          "projection_completed": false,
+          "provider_move_completed": false,
+          "provider_move_started": false,
+          "refs": [
+            {
+              "remote_id": "73",
+              "source_folder": "INBOX",
+              "source_uidvalidity": 7
+            },
+            {
+              "remote_id": "75",
+              "source_folder": "Sent",
+              "source_uidvalidity": 8
+            }
+          ],
+          "source_folder_type": "folder",
+          "source_uidvalidity_before": null,
+          "target_folder_type": "custom",
+          "target_remote_folder_id": "Projects",
+          "target_remote_ids_before": null,
+          "target_uidvalidity_before": null,
+          "workflow_thread_id": "t00024"
+        },
+        "scheduled": false,
+        "status": "pending",
+        "type": "remote_mutation"
+      }
+    ],
+    "receipt_messages": [
+      [
+        "r0",
+        "t00012-m0",
+        "imap-a-inbox",
+        "fld-mail-v2-0a84c29585a25353105639ffaf5abba10b53ddd3f2ceb5e3b2aa1f4e25b18d42"
+      ],
+      [
+        "r0",
+        "t00012-m1",
+        "imap-a-projects",
+        "fld-mail-v2-0a84c29585a25353105639ffaf5abba10b53ddd3f2ceb5e3b2aa1f4e25b18d42"
+      ],
+      [
+        "r0",
+        "t00012-m2",
+        "imap-a-sent",
+        "fld-mail-v2-0a84c29585a25353105639ffaf5abba10b53ddd3f2ceb5e3b2aa1f4e25b18d42"
+      ],
+      [
+        "r0",
+        "t00013-m0",
+        "imap-b-inbox",
+        "fld-mail-v2-1fb2c47ccfa5a2f6fad04822bf3ea3f5dc433800bddcf896569a21b336c63c82"
+      ],
+      [
+        "r0",
+        "t00013-m1",
+        "imap-b-inbox",
+        "fld-mail-v2-1fb2c47ccfa5a2f6fad04822bf3ea3f5dc433800bddcf896569a21b336c63c82"
+      ],
+      [
+        "r0",
+        "t00013-m2",
+        "imap-b-sent",
+        "fld-mail-v2-1fb2c47ccfa5a2f6fad04822bf3ea3f5dc433800bddcf896569a21b336c63c82"
+      ],
+      [
+        "r0",
+        "t00014-m0",
+        "gmail-inbox",
+        "gmail-trash"
+      ],
+      [
+        "r0",
+        "t00014-m1",
+        "gmail-inbox",
+        "gmail-trash"
+      ],
+      [
+        "r0",
+        "t00014-m2",
+        "gmail-sent",
+        "gmail-trash"
+      ],
+      [
+        "r0",
+        "t00015-m0",
+        "pop-inbox",
+        "fld-mail-v2-474118d63c9a12fa9253fbe1bf40309f740b9f0ffde41071222651fa17ffd9f6"
+      ],
+      [
+        "r0",
+        "t00015-m1",
+        "pop-inbox",
+        "fld-mail-v2-474118d63c9a12fa9253fbe1bf40309f740b9f0ffde41071222651fa17ffd9f6"
+      ],
+      [
+        "r0",
+        "t00015-m2",
+        "pop-sent",
+        "fld-mail-v2-474118d63c9a12fa9253fbe1bf40309f740b9f0ffde41071222651fa17ffd9f6"
+      ],
+      [
+        "r0",
+        "t00016-m0",
+        "imap-a-inbox",
+        "fld-mail-v2-0a84c29585a25353105639ffaf5abba10b53ddd3f2ceb5e3b2aa1f4e25b18d42"
+      ],
+      [
+        "r0",
+        "t00016-m1",
+        "imap-a-inbox",
+        "fld-mail-v2-0a84c29585a25353105639ffaf5abba10b53ddd3f2ceb5e3b2aa1f4e25b18d42"
+      ],
+      [
+        "r0",
+        "t00016-m2",
+        "imap-a-sent",
+        "fld-mail-v2-0a84c29585a25353105639ffaf5abba10b53ddd3f2ceb5e3b2aa1f4e25b18d42"
+      ],
+      [
+        "r0",
+        "t00017-m0",
+        "imap-b-inbox",
+        "fld-mail-v2-1fb2c47ccfa5a2f6fad04822bf3ea3f5dc433800bddcf896569a21b336c63c82"
+      ],
+      [
+        "r0",
+        "t00017-m1",
+        "imap-b-inbox",
+        "fld-mail-v2-1fb2c47ccfa5a2f6fad04822bf3ea3f5dc433800bddcf896569a21b336c63c82"
+      ],
+      [
+        "r0",
+        "t00017-m2",
+        "imap-b-sent",
+        "fld-mail-v2-1fb2c47ccfa5a2f6fad04822bf3ea3f5dc433800bddcf896569a21b336c63c82"
+      ],
+      [
+        "r1",
+        "t00018-m0",
+        "gmail-inbox",
+        "fld-mail-v2-6187dc141a4a14c64a7cef78cbfc6e754b19d2245cc21bbe07dbdea375005db0"
+      ],
+      [
+        "r1",
+        "t00018-m1",
+        "gmail-inbox",
+        "fld-mail-v2-6187dc141a4a14c64a7cef78cbfc6e754b19d2245cc21bbe07dbdea375005db0"
+      ],
+      [
+        "r1",
+        "t00018-m2",
+        "gmail-sent",
+        "fld-mail-v2-6187dc141a4a14c64a7cef78cbfc6e754b19d2245cc21bbe07dbdea375005db0"
+      ],
+      [
+        "r1",
+        "t00019-m0",
+        "pop-inbox",
+        "fld-mail-v2-be75bdf4c97021971604d956cae2941fdf4b27a4ff910f87ff9981007612a6ea"
+      ],
+      [
+        "r1",
+        "t00019-m1",
+        "pop-inbox",
+        "fld-mail-v2-be75bdf4c97021971604d956cae2941fdf4b27a4ff910f87ff9981007612a6ea"
+      ],
+      [
+        "r1",
+        "t00019-m2",
+        "pop-sent",
+        "fld-mail-v2-be75bdf4c97021971604d956cae2941fdf4b27a4ff910f87ff9981007612a6ea"
+      ]
+    ],
+    "receipt_queue": [
+      [
+        "r0",
+        "q23"
+      ],
+      [
+        "r0",
+        "q24"
+      ],
+      [
+        "r0",
+        "q25"
+      ],
+      [
+        "r0",
+        "q26"
+      ],
+      [
+        "r0",
+        "q27"
+      ],
+      [
+        "r1",
+        "q29"
+      ],
+      [
+        "r1",
+        "q30"
+      ]
+    ],
+    "receipt_threads": [
+      [
+        "r0",
+        "t00012",
+        "imap-a",
+        "inbox",
+        "inbox",
+        null
+      ],
+      [
+        "r0",
+        "t00013",
+        "imap-b",
+        "inbox",
+        "inbox",
+        null
+      ],
+      [
+        "r0",
+        "t00014",
+        "gmail",
+        "inbox",
+        "inbox",
+        null
+      ],
+      [
+        "r0",
+        "t00015",
+        "pop",
+        "inbox",
+        "inbox",
+        null
+      ],
+      [
+        "r0",
+        "t00016",
+        "imap-a",
+        "inbox",
+        "inbox",
+        null
+      ],
+      [
+        "r0",
+        "t00017",
+        "imap-b",
+        "inbox",
+        "inbox",
+        null
+      ],
+      [
+        "r1",
+        "t00018",
+        "gmail",
+        "inbox",
+        "inbox",
+        null
+      ],
+      [
+        "r1",
+        "t00019",
+        "pop",
+        "inbox",
+        "inbox",
+        null
+      ]
+    ],
+    "receipts": [
+      [
+        "r0",
+        "available"
+      ],
+      [
+        "r1",
+        "available"
+      ]
+    ],
+    "thread_folders": [
+      [
+        "fld-mail-v2-0a84c29585a25353105639ffaf5abba10b53ddd3f2ceb5e3b2aa1f4e25b18d42",
+        "t00012",
+        3,
+        2,
+        1
+      ],
+      [
+        "fld-mail-v2-0a84c29585a25353105639ffaf5abba10b53ddd3f2ceb5e3b2aa1f4e25b18d42",
+        "t00016",
+        3,
+        2,
+        1
+      ],
+      [
+        "fld-mail-v2-1fb2c47ccfa5a2f6fad04822bf3ea3f5dc433800bddcf896569a21b336c63c82",
+        "t00013",
+        3,
+        2,
+        1
+      ],
+      [
+        "fld-mail-v2-1fb2c47ccfa5a2f6fad04822bf3ea3f5dc433800bddcf896569a21b336c63c82",
+        "t00017",
+        3,
+        2,
+        1
+      ],
+      [
+        "fld-mail-v2-474118d63c9a12fa9253fbe1bf40309f740b9f0ffde41071222651fa17ffd9f6",
+        "t00015",
+        3,
+        2,
+        1
+      ],
+      [
+        "fld-mail-v2-59876617403801961688094ee5f82742d8161d836ae19cd4dc16f2bcda534135",
+        "t00003",
+        2,
+        0,
+        1
+      ],
+      [
+        "fld-mail-v2-59876617403801961688094ee5f82742d8161d836ae19cd4dc16f2bcda534135",
+        "t00007",
+        2,
+        0,
+        1
+      ],
+      [
+        "fld-mail-v2-59876617403801961688094ee5f82742d8161d836ae19cd4dc16f2bcda534135",
+        "t00011",
+        2,
+        0,
+        1
+      ],
+      [
+        "fld-mail-v2-6187dc141a4a14c64a7cef78cbfc6e754b19d2245cc21bbe07dbdea375005db0",
+        "t00018",
+        3,
+        0,
+        1
+      ],
+      [
+        "fld-mail-v2-9b201e578b899cb7fe3bd9fc64f0bfae4e0c7a7aa4a12e46bf3f75605763791a",
+        "t00001",
+        2,
+        0,
+        1
+      ],
+      [
+        "fld-mail-v2-9b201e578b899cb7fe3bd9fc64f0bfae4e0c7a7aa4a12e46bf3f75605763791a",
+        "t00005",
+        2,
+        0,
+        1
+      ],
+      [
+        "fld-mail-v2-9b201e578b899cb7fe3bd9fc64f0bfae4e0c7a7aa4a12e46bf3f75605763791a",
+        "t00009",
+        2,
+        0,
+        1
+      ],
+      [
+        "fld-mail-v2-b862fc3c04211c7f6a8fe308a72a2ee98b767c76c2d7afc2f79c5e36a1d46cd5",
+        "t00002",
+        2,
+        0,
+        1
+      ],
+      [
+        "fld-mail-v2-b862fc3c04211c7f6a8fe308a72a2ee98b767c76c2d7afc2f79c5e36a1d46cd5",
+        "t00006",
+        2,
+        0,
+        1
+      ],
+      [
+        "fld-mail-v2-b862fc3c04211c7f6a8fe308a72a2ee98b767c76c2d7afc2f79c5e36a1d46cd5",
+        "t00010",
+        2,
+        0,
+        1
+      ],
+      [
+        "fld-mail-v2-be75bdf4c97021971604d956cae2941fdf4b27a4ff910f87ff9981007612a6ea",
+        "t00019",
+        3,
+        0,
+        1
+      ],
+      [
+        "gmail-inbox",
+        "t00022",
+        2,
+        2,
+        1
+      ],
+      [
+        "gmail-inbox",
+        "t00026",
+        2,
+        2,
+        1
+      ],
+      [
+        "gmail-sent",
+        "t00002",
+        1,
+        0,
+        1
+      ],
+      [
+        "gmail-sent",
+        "t00006",
+        1,
+        0,
+        1
+      ],
+      [
+        "gmail-sent",
+        "t00010",
+        1,
+        0,
+        1
+      ],
+      [
+        "gmail-sent",
+        "t00022",
+        1,
+        0,
+        1
+      ],
+      [
+        "gmail-sent",
+        "t00026",
+        1,
+        0,
+        1
+      ],
+      [
+        "gmail-trash",
+        "t00014",
+        3,
+        2,
+        1
+      ],
+      [
+        "imap-a-archive",
+        "t00000",
+        2,
+        0,
+        1
+      ],
+      [
+        "imap-a-archive",
+        "t00004",
+        2,
+        0,
+        1
+      ],
+      [
+        "imap-a-archive",
+        "t00008",
+        2,
+        0,
+        1
+      ],
+      [
+        "imap-a-projects",
+        "t00020",
+        3,
+        2,
+        1
+      ],
+      [
+        "imap-a-projects",
+        "t00024",
+        3,
+        2,
+        1
+      ],
+      [
+        "imap-a-sent",
+        "t00000",
+        1,
+        0,
+        1
+      ],
+      [
+        "imap-a-sent",
+        "t00004",
+        1,
+        0,
+        1
+      ],
+      [
+        "imap-a-sent",
+        "t00008",
+        1,
+        0,
+        1
+      ],
+      [
+        "imap-b-inbox",
+        "spam-1",
+        3,
+        3,
+        1
+      ],
+      [
+        "imap-b-inbox",
+        "t00021",
+        1,
+        1,
+        1
+      ],
+      [
+        "imap-b-inbox",
+        "t00025",
+        2,
+        2,
+        1
+      ],
+      [
+        "imap-b-projects",
+        "t00021",
+        1,
+        1,
+        1
+      ],
+      [
+        "imap-b-sent",
+        "t00001",
+        1,
+        0,
+        1
+      ],
+      [
+        "imap-b-sent",
+        "t00005",
+        1,
+        0,
+        1
+      ],
+      [
+        "imap-b-sent",
+        "t00009",
+        1,
+        0,
+        1
+      ],
+      [
+        "imap-b-sent",
+        "t00021",
+        1,
+        0,
+        1
+      ],
+      [
+        "imap-b-sent",
+        "t00025",
+        1,
+        0,
+        1
+      ],
+      [
+        "pop-inbox",
+        "t00023",
+        2,
+        2,
+        1
+      ],
+      [
+        "pop-inbox",
+        "t00027",
+        2,
+        2,
+        1
+      ],
+      [
+        "pop-sent",
+        "t00003",
+        1,
+        0,
+        1
+      ],
+      [
+        "pop-sent",
+        "t00007",
+        1,
+        0,
+        1
+      ],
+      [
+        "pop-sent",
+        "t00011",
+        1,
+        0,
+        1
+      ],
+      [
+        "pop-sent",
+        "t00023",
+        1,
+        0,
+        1
+      ],
+      [
+        "pop-sent",
+        "t00027",
+        1,
+        0,
+        1
+      ]
+    ],
+    "threads": [
+      [
+        "spam-1",
+        "inbox",
+        "inbox",
+        null,
+        3,
+        3,
+        0,
+        0,
+        "Other",
+        null,
+        "2026-01-02",
+        true
+      ],
+      [
+        "t00000",
+        "done",
+        "done",
+        null,
+        3,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00001",
+        "done",
+        "done",
+        null,
+        3,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00002",
+        "done",
+        "done",
+        null,
+        3,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00003",
+        "done",
+        "done",
+        null,
+        3,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00004",
+        "done",
+        "done",
+        null,
+        3,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00005",
+        "done",
+        "done",
+        null,
+        3,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00006",
+        "done",
+        "done",
+        null,
+        3,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00007",
+        "done",
+        "done",
+        null,
+        3,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00008",
+        "done",
+        "done",
+        null,
+        3,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00009",
+        "done",
+        "done",
+        null,
+        3,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00010",
+        "done",
+        "done",
+        null,
+        3,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00011",
+        "done",
+        "done",
+        null,
+        3,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00012",
+        "done",
+        "done",
+        null,
+        3,
+        2,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00013",
+        "done",
+        "done",
+        null,
+        3,
+        2,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00014",
+        "done",
+        "done",
+        null,
+        3,
+        2,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00015",
+        "done",
+        "done",
+        null,
+        3,
+        2,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00016",
+        "done",
+        "done",
+        null,
+        3,
+        2,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00017",
+        "done",
+        "done",
+        null,
+        3,
+        2,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00018",
+        "done",
+        "done",
+        null,
+        3,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00019",
+        "done",
+        "done",
+        null,
+        3,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        true
+      ],
+      [
+        "t00020",
+        "inbox",
+        "inbox",
+        null,
+        3,
+        2,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        false
+      ],
+      [
+        "t00021",
+        "inbox",
+        "inbox",
+        null,
+        1,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01",
+        false
+      ],
+      [
+        "t00022",
+        "inbox",
+        "inbox",
+        null,
+        1,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01",
+        false
+      ],
+      [
+        "t00023",
+        "inbox",
+        "inbox",
+        null,
+        1,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01",
+        false
+      ],
+      [
+        "t00024",
+        "inbox",
+        "inbox",
+        null,
+        3,
+        2,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01T00:02:00Z",
+        false
+      ],
+      [
+        "t00025",
+        "inbox",
+        "inbox",
+        null,
+        1,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01",
+        false
+      ],
+      [
+        "t00026",
+        "inbox",
+        "inbox",
+        null,
+        1,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01",
+        false
+      ],
+      [
+        "t00027",
+        "inbox",
+        "inbox",
+        null,
+        1,
+        0,
+        0,
+        0,
+        "Subject",
+        null,
+        "2026-01-01",
+        false
+      ]
+    ]
+  },
+  "steps": [
+    {
+      "queued": [
+        "m0",
+        "m1",
+        "m2",
+        "q0",
+        "q1",
+        "q2",
+        "q3",
+        "q4",
+        "q5",
+        "q6",
+        "q7",
+        "q8",
+        "q9",
+        "q10",
+        "q11",
+        "q12",
+        "q13",
+        "q14",
+        "q15",
+        "q16",
+        "q17"
+      ]
+    },
+    {
+      "permanently_deleted": [
+        "trashed-1"
+      ],
+      "undo_thread_ids": [
+        "t00012",
+        "t00013",
+        "t00014",
+        "t00015",
+        "t00016",
+        "t00017"
+      ],
+      "undo_token": "r0"
+    },
+    {
+      "permanently_deleted": [],
+      "undo_thread_ids": [
+        "t00018",
+        "t00019"
+      ],
+      "undo_token": "r1"
+    },
+    {
+      "queued": [
+        "q18"
+      ]
+    },
+    {
+      "queued": [
+        "q19",
+        "q20"
+      ]
+    },
+    {
+      "error": "backend.errors.mailMovePending"
+    },
+    {
+      "error": "backend.errors.folderAccountMismatch"
+    },
+    {
+      "error": "no rows returned by a query that expected to return at least one row"
+    },
+    {
+      "queued": [
+        "q31"
+      ]
+    }
+  ],
+  "undo": [
+    "undone",
+    "undone"
+  ]
+}

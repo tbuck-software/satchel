@@ -27,6 +27,7 @@ struct GroupwareAccountRow {
 
 #[tauri::command]
 pub async fn configure_groupware(
+    app: tauri::AppHandle,
     pool: tauri::State<'_, SqlitePool>,
     input: ConfigureGroupwareInput,
 ) -> CommandResult<GroupwareSyncSummary> {
@@ -57,13 +58,14 @@ pub async fn configure_groupware(
         .update_dav_config(&input.account_id, caldav, carddav, true)
         .await?;
 
-    dav::sync_groupware_account(pool.inner(), &input.account_id, &config)
-        .await
-        .map_err(Into::into)
+    let summary = dav::sync_groupware_account(pool.inner(), &input.account_id, &config).await?;
+    crate::commands::tasks::announce(&app, &summary.task_summary);
+    Ok(summary)
 }
 
 #[tauri::command]
 pub async fn sync_groupware(
+    app: tauri::AppHandle,
     pool: tauri::State<'_, SqlitePool>,
     account_id: Option<String>,
 ) -> CommandResult<GroupwareSyncSummary> {
@@ -107,5 +109,6 @@ pub async fn sync_groupware(
             }
         }
     }
+    crate::commands::tasks::announce(&app, &total.task_summary);
     Ok(total)
 }

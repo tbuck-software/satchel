@@ -1,5 +1,6 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { blockRemoteImages } from './useImagePolicy';
+import { blockRemoteImages, blockRemoteImagesInDocument } from './useImagePolicy';
 
 function stillLoadsRemote(html: string): boolean {
   return (
@@ -21,9 +22,12 @@ describe('blockRemoteImages', () => {
       '<img src="https://img.example/k.jpg" width="268" height="160" alt="Coffee" style="display:block">'
       + '<img src="https://img.example/p.jpg" width=300 height=200>',
     );
-    expect(html).toContain('<img data-blocked-shape data-blocked-src="https://img.example/k.jpg"');
-    expect(html).toContain('style="aspect-ratio:268/160;display:block"');
-    expect(html).toContain('<img style="aspect-ratio:300/200;" data-blocked-shape');
+    const [coffee, product] = Array.from(new DOMParser().parseFromString(html, 'text/html').images);
+    expect(coffee?.getAttribute('data-blocked-src')).toBe('https://img.example/k.jpg');
+    expect(coffee?.hasAttribute('data-blocked-shape')).toBe(true);
+    expect(coffee?.getAttribute('style')).toBe('aspect-ratio:268/160;display:block');
+    expect(product?.hasAttribute('data-blocked-shape')).toBe(true);
+    expect(product?.getAttribute('style')).toBe('aspect-ratio:300/200;');
   });
 
   it('leaves a tracking pixel and an unsized image as they are', () => {
@@ -70,7 +74,7 @@ describe('blockRemoteImages', () => {
 
   it('strips background url() from style attributes', () => {
     const { html } = blockRemoteImages(
-      '<td style="background: url(https://t.example/x.png); color: red">x</td>',
+      '<table><tr><td style="background: url(https://t.example/x.png); color: red">x</td></tr></table>',
     );
     expect(stillLoadsRemote(html)).toBe(false);
     expect(html).toContain('color: red');
@@ -109,6 +113,68 @@ describe('blockRemoteImages', () => {
     const { html, blockedCount } = blockRemoteImages('<img src="//t.example/p.gif">');
     expect(blockedCount).toBe(1);
     expect(html).toContain('data-blocked-src="//t.example/p.gif"');
+  });
+
+  it('blocks a source whose URL carries the other quote character', () => {
+    const { html, blockedCount } = blockRemoteImages(`<img src="https://t.example/p?a'b" alt='say "hi"'>`);
+    expect(blockedCount).toBe(1);
+    const image = new DOMParser().parseFromString(html, 'text/html').images[0];
+    expect(image?.hasAttribute('src')).toBe(false);
+    expect(image?.getAttribute('data-blocked-src')).toBe("https://t.example/p?a'b");
+  });
+
+  it('blocks a source that follows an attribute containing >', () => {
+    const { html, blockedCount } = blockRemoteImages(
+      '<img alt="a > b" src="https://t.example/p.gif"><table title=">" background="https://t.example/bg.png"></table>',
+    );
+    expect(blockedCount).toBe(2);
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    expect(doc.querySelector('[src], [background]')).toBeNull();
+  });
+
+  it('blocks unquoted and entity-encoded sources', () => {
+    const { html, blockedCount } = blockRemoteImages(
+      '<img src=https://t.example/a.gif><img src="&#104;ttps://t.example/b.gif">',
+    );
+    expect(blockedCount).toBe(2);
+    expect(new DOMParser().parseFromString(html, 'text/html').querySelector('[src]')).toBeNull();
+  });
+
+  it('blocks url() spelled with CSS escapes', () => {
+    const { html, blockedCount } = blockRemoteImages(
+      '<style>.a { background: \\75 rl(https://t.example/a.png) } @\\69mport "https://t.example/b.css";</style>'
+      + '<p style="background-image: u\\72l(https://t.example/c.png)">x</p>',
+    );
+    expect(blockedCount).toBe(3);
+    expect(html).not.toContain('t.example');
+  });
+
+  it('blocks remote strings in image-set(), image() and src()', () => {
+    const { html, blockedCount } = blockRemoteImages(
+      '<style>.a { background: image-set("https://t.example/a.png" 1x, \'data:image/png;base64,AAA\' 2x) }'
+      + ' .b { background: -webkit-image-set(\'//t.example/b.png\' 1x) } .c { background: src("https://t.example/c.png") }</style>'
+      + '<p style="background: image(\'https://t.example/d.png\')">x</p>',
+    );
+    expect(blockedCount).toBe(4);
+    expect(html).not.toContain('t.example');
+  });
+
+  it('keeps local references in image-set() and url()', () => {
+    const source = '<style>.a { background: image-set("data:image/png;base64,AAA" 1x, "cid:logo@x" 2x) }'
+      + ' .b { fill: url(#gradient) }</style><p style="background: url(cid:bg@x)">x</p>';
+    const { html, blockedCount } = blockRemoteImages(source);
+    expect(blockedCount).toBe(0);
+    expect(html).toBe(source);
+  });
+
+  it('cannot close a style element by cutting an import out of it', () => {
+    const doc = new DOMParser().parseFromString(
+      '<style></sty@import;le><link rel="preconnect" href="https://t.example"></style><p>x</p>',
+      'text/html',
+    );
+    blockRemoteImagesInDocument(doc);
+    const reparsed = new DOMParser().parseFromString(doc.head.innerHTML + doc.body.innerHTML, 'text/html');
+    expect(reparsed.querySelector('link')).toBeNull();
   });
 
   it('does not re-block already blocked markup', () => {

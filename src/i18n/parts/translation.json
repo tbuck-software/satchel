@@ -1,0 +1,228 @@
+{
+  "en": {
+    "backend": {
+      "errors": {
+        "translation": {
+          "notConfigured": "Translation is not set up. Choose an engine in Settings → Translation.",
+          "keyMissing": "No API key is saved for the translation engine.",
+          "keyMalformed": "That does not look like an API key. Paste the key without spaces or line breaks.",
+          "invalidKey": "DeepL did not accept the API key. Check it in Settings → Translation.",
+          "quotaExceeded": "The DeepL character allowance is used up for this billing period.",
+          "rateLimited": "DeepL is getting too many requests. Try again in a minute.",
+          "tooLarge": "This message is too long to translate in one go.",
+          "unsupportedLanguage": "The translation engine does not translate into this language.",
+          "rejected": "DeepL refused the request.",
+          "unavailable": "DeepL is not available right now. Try again later.",
+          "network": "DeepL could not be reached. Check the connection.",
+          "invalidResponse": "DeepL's answer could not be read.",
+          "consentRequired": "Mail from this account may not be sent for translation yet.",
+          "messageNotFound": "This message is not stored on this device.",
+          "nothingToTranslate": "This message has no text to translate.",
+          "encrypted": "Encrypted mail is not sent for translation.",
+          "freePlanNotForMail": "DeepL API Free keys can't be used for mail: DeepL forbids personal data on the free API, and every mail contains some. Translating needs a Pro key.",
+          "credentialsUnavailable": "The key store is locked, so the API key cannot be read or saved.",
+          "persistenceFailed": "The translation could not be saved on this device.",
+          "engineUnknown": "Unknown translation engine."
+        }
+      }
+    },
+    "commands": {
+      "translateMessage": "Translate message or show the original"
+    },
+    "shortcuts": {
+      "actions": {
+        "translateMessage": {
+          "keywords": "translate translation deepl language original",
+          "label": "Translate message"
+        }
+      }
+    },
+    "settings": {
+      "sections": {
+        "translation": { "label": "Translation", "description": "DeepL key, target language and what is sent" }
+      },
+      "translation": {
+        "title": "Translation",
+        "purpose": "Translate mail into your language with DeepL. Nothing is sent until you translate a message from an account you allowed.",
+        "engineLabel": "Engine",
+        "engineHint": "DeepL runs on DeepL's servers. It is never a local engine.",
+        "engineOff": "Off",
+        "engineDeepl": "DeepL",
+        "engineAria": "Translation engine",
+        "keyLabel": "DeepL API key",
+        "keyHint": "From your DeepL account under API keys. Satchel needs a DeepL API Pro key; keys ending in :fx are DeepL API Free (also called DeepL API Developer) and can't be used for mail.",
+        "keyPlaceholder": "Paste the API key",
+        "keySaved": "Key saved on this device ({plan})",
+        "planFree": "DeepL API Free",
+        "planPro": "DeepL API Pro",
+        "keyEncrypted": "Stored encrypted and included in backups; Satchel never shows it again. Switching off keeps the key; Remove key deletes it.",
+        "saveKey": "Save key",
+        "replaceKey": "Replace key",
+        "removeKey": "Remove key",
+        "keySavedToast": "API key saved",
+        "keyRemovedToast": "API key removed",
+        "test": "Test",
+        "testing": "Testing…",
+        "testHint": "Checks the key with one request and shows the allowance left.",
+        "usage": "{used} of {limit} characters used this billing period",
+        "usageUnlimited": "{used} characters used this billing period, no limit set",
+        "usageMeter": "DeepL characters used",
+        "targetLabel": "Translate into",
+        "targetHint": "Mail already in this language gets no Translate button.",
+        "targetFollowUi": "App language ({language})",
+        "sentTitle": "What is sent?",
+        "sentBody": "Translating sends the message body to DeepL: text and formatting. Links and addresses starting with http(s)://, //, www. or mailto: are held back as Satchel recognises them, everywhere in HTML and plain-text mail, and put back on this device; a link broken across lines of a plain-text mail may go in part. Host names without those prefixes and e-mail addresses in the text go as text. Sender, recipients, subject, attachments and encrypted mail are never sent.",
+        "sentCache": "Each translation is stored on this device, so opening the message again sends nothing.",
+        "termsFree": "DeepL's terms forbid personal data on the free API and allow it to keep what is sent. Satchel sends no mail with a free key; Test still shows its plan and allowance.",
+        "termsPro": "With a Pro key, DeepL keeps the text only for the translation and does not use it to improve its service; up to 72 hours when an error occurs.",
+        "sentTerms": "Per DeepL's terms (deepl.com/pro-license, 3.1.2, 3.3.2) and privacy policy (deepl.com/privacy, section 4), as of November 2026.",
+        "consentTitle": "Accounts that may be translated",
+        "consentHint": "Off for every account until you switch it on. Applies to this device only.",
+        "consentAria": "Allow translation for {account}",
+        "noAccounts": "No mail accounts yet.",
+        "logTitle": "Request log",
+        "logHint": "Every request that left this device in the last 30 days.",
+        "logKeepText": "Keep the text that was sent",
+        "logKeepTextHint": "Off by default. Turning it off also deletes the text already kept.",
+        "logEmpty": "Nothing has been sent.",
+        "logClear": "Clear log",
+        "logClearConfirm": "Clear the request log?",
+        "logClearConfirmBody": "The entries are deleted from this device. Translations stay cached.",
+        "logEntry": "{provider} · {units}",
+        "logUnits": "{count} characters",
+        "logOk": "Translated",
+        "logShowText": "Show sent text",
+        "logHideText": "Hide sent text"
+      }
+    },
+    "translation": {
+      "reader": {
+        "translate": "Translate",
+        "showOriginal": "Show original",
+        "translated": "Translated",
+        "translatedFrom": "Translated from {language}",
+        "translating": "Translating…",
+        "openSettings": "Settings"
+      },
+      "consent": {
+        "title": "Send this message to DeepL?",
+        "body": "Satchel sends the body of this message to DeepL ({plan}): text and formatting. Links and addresses starting with http(s)://, //, www. or mailto: are held back as Satchel recognises them; a link broken across lines of a plain-text mail may go in part. Host names without those prefixes and e-mail addresses in the text go as text. Sender, recipients, subject and attachments stay here. Applies to all mail of {account} on this device.",
+        "detail": "You can withdraw it in Settings → Translation, where the request log shows what was sent.",
+        "confirm": "Allow and translate"
+      }
+    }
+  },
+  "de": {
+    "backend": {
+      "errors": {
+        "translation": {
+          "notConfigured": "Übersetzung ist nicht eingerichtet. Wähle eine Engine unter Einstellungen → Übersetzung.",
+          "keyMissing": "Für die Übersetzungs-Engine ist kein API-Schlüssel gespeichert.",
+          "keyMalformed": "Das sieht nicht nach einem API-Schlüssel aus. Füge den Schlüssel ohne Leerzeichen und Zeilenumbrüche ein.",
+          "invalidKey": "DeepL hat den API-Schlüssel nicht angenommen. Prüfe ihn unter Einstellungen → Übersetzung.",
+          "quotaExceeded": "Das DeepL-Zeichenkontingent ist für diesen Abrechnungszeitraum aufgebraucht.",
+          "rateLimited": "DeepL bekommt gerade zu viele Anfragen. Versuche es in einer Minute erneut.",
+          "tooLarge": "Diese Nachricht ist zu lang, um sie in einem Stück zu übersetzen.",
+          "unsupportedLanguage": "Die Übersetzungs-Engine übersetzt nicht in diese Sprache.",
+          "rejected": "DeepL hat die Anfrage abgelehnt.",
+          "unavailable": "DeepL ist gerade nicht erreichbar. Versuche es später erneut.",
+          "network": "DeepL konnte nicht erreicht werden. Prüfe die Verbindung.",
+          "invalidResponse": "Die Antwort von DeepL konnte nicht gelesen werden.",
+          "consentRequired": "Mails dieses Kontos dürfen noch nicht zur Übersetzung gesendet werden.",
+          "messageNotFound": "Diese Nachricht ist auf diesem Gerät nicht gespeichert.",
+          "nothingToTranslate": "Diese Nachricht hat keinen Text zum Übersetzen.",
+          "encrypted": "Verschlüsselte Mails werden nicht zur Übersetzung gesendet.",
+          "freePlanNotForMail": "Kostenlose DeepL-API-Schlüssel taugen nicht für Mails: DeepL verbietet über die kostenlose API personenbezogene Daten, und jede Mail enthält welche. Für Übersetzungen braucht es einen Pro-Schlüssel.",
+          "credentialsUnavailable": "Der Schlüsselbund ist gesperrt, der API-Schlüssel kann nicht gelesen oder gespeichert werden.",
+          "persistenceFailed": "Die Übersetzung konnte auf diesem Gerät nicht gespeichert werden.",
+          "engineUnknown": "Unbekannte Übersetzungs-Engine."
+        }
+      }
+    },
+    "commands": {
+      "translateMessage": "Nachricht übersetzen oder Original anzeigen"
+    },
+    "shortcuts": {
+      "actions": {
+        "translateMessage": {
+          "keywords": "übersetzen übersetzung deepl sprache original translate",
+          "label": "Nachricht übersetzen"
+        }
+      }
+    },
+    "settings": {
+      "sections": {
+        "translation": { "label": "Übersetzung", "description": "DeepL-Schlüssel, Zielsprache und was gesendet wird" }
+      },
+      "translation": {
+        "title": "Übersetzung",
+        "purpose": "Übersetze Mails mit DeepL in deine Sprache. Gesendet wird erst, wenn du eine Nachricht aus einem freigegebenen Konto übersetzt.",
+        "engineLabel": "Engine",
+        "engineHint": "DeepL läuft auf den Servern von DeepL. Es ist nie eine lokale Engine.",
+        "engineOff": "Aus",
+        "engineDeepl": "DeepL",
+        "engineAria": "Übersetzungs-Engine",
+        "keyLabel": "DeepL-API-Schlüssel",
+        "keyHint": "Aus deinem DeepL-Konto unter API-Schlüssel. Satchel braucht einen DeepL-API-Pro-Schlüssel; Schlüssel mit :fx sind DeepL API Free (auch DeepL API Developer) und taugen nicht für Mails.",
+        "keyPlaceholder": "API-Schlüssel einfügen",
+        "keySaved": "Schlüssel auf diesem Gerät gespeichert ({plan})",
+        "planFree": "DeepL API Free",
+        "planPro": "DeepL API Pro",
+        "keyEncrypted": "Verschlüsselt gespeichert und Teil von Sicherungen; Satchel zeigt ihn nie wieder an. Ausschalten behält den Schlüssel, „Schlüssel entfernen“ löscht ihn.",
+        "saveKey": "Schlüssel speichern",
+        "replaceKey": "Schlüssel ersetzen",
+        "removeKey": "Schlüssel entfernen",
+        "keySavedToast": "API-Schlüssel gespeichert",
+        "keyRemovedToast": "API-Schlüssel entfernt",
+        "test": "Testen",
+        "testing": "Wird getestet …",
+        "testHint": "Prüft den Schlüssel mit einer Anfrage und zeigt das verbleibende Kontingent.",
+        "usage": "{used} von {limit} Zeichen in diesem Abrechnungszeitraum verbraucht",
+        "usageUnlimited": "{used} Zeichen in diesem Abrechnungszeitraum verbraucht, kein Limit gesetzt",
+        "usageMeter": "Verbrauchte DeepL-Zeichen",
+        "targetLabel": "Übersetzen in",
+        "targetHint": "Mails, die schon in dieser Sprache sind, bekommen keinen Übersetzen-Knopf.",
+        "targetFollowUi": "App-Sprache ({language})",
+        "sentTitle": "Was wird gesendet?",
+        "sentBody": "Übersetzen schickt den Inhalt an DeepL: Text und Formatierung. Links und Adressen, die mit http(s)://, //, www. oder mailto: beginnen, hält Satchel zurück, so wie es sie erkennt, überall in HTML- und Text-Mails, und setzt sie hier wieder ein; ein über Zeilen umbrochener Link einer Text-Mail kann teilweise mitgehen. Hostnamen ohne diese Anfänge und E-Mail-Adressen im Text gehen als Text mit. Absender, Empfänger, Betreff, Anhänge und verschlüsselte Mails gehen nie mit.",
+        "sentCache": "Jede Übersetzung wird auf diesem Gerät gespeichert. Wer die Nachricht erneut öffnet, sendet nichts.",
+        "termsFree": "DeepL verbietet personenbezogene Daten über die kostenlose API und darf Gesendetes behalten. Satchel schickt mit einem kostenlosen Schlüssel keine Mails; „Testen“ zeigt trotzdem Tarif und Kontingent.",
+        "termsPro": "Mit einem Pro-Schlüssel behält DeepL den Text nur für die Übersetzung und nutzt ihn nicht zur Verbesserung des Dienstes; bei einem Fehler bis zu 72 Stunden.",
+        "sentTerms": "Laut Bedingungen (deepl.com/pro-license, 3.1.2, 3.3.2) und Datenschutzerklärung (deepl.com/privacy, Abschnitt 4) von DeepL, Stand November 2026.",
+        "consentTitle": "Konten, die übersetzt werden dürfen",
+        "consentHint": "Für jedes Konto aus, bis du es einschaltest. Gilt nur für dieses Gerät.",
+        "consentAria": "Übersetzung für {account} erlauben",
+        "noAccounts": "Noch keine Mail-Konten.",
+        "logTitle": "Anfrage-Protokoll",
+        "logHint": "Jede Anfrage, die dieses Gerät in den letzten 30 Tagen verlassen hat.",
+        "logKeepText": "Gesendeten Text aufbewahren",
+        "logKeepTextHint": "Standardmäßig aus. Ausschalten löscht auch den bereits aufbewahrten Text.",
+        "logEmpty": "Es wurde nichts gesendet.",
+        "logClear": "Protokoll leeren",
+        "logClearConfirm": "Anfrage-Protokoll leeren?",
+        "logClearConfirmBody": "Die Einträge werden von diesem Gerät gelöscht. Übersetzungen bleiben gespeichert.",
+        "logEntry": "{provider} · {units}",
+        "logUnits": "{count} Zeichen",
+        "logOk": "Übersetzt",
+        "logShowText": "Gesendeten Text zeigen",
+        "logHideText": "Gesendeten Text ausblenden"
+      }
+    },
+    "translation": {
+      "reader": {
+        "translate": "Übersetzen",
+        "showOriginal": "Original anzeigen",
+        "translated": "Übersetzt",
+        "translatedFrom": "Übersetzt aus: {language}",
+        "translating": "Wird übersetzt …",
+        "openSettings": "Einstellungen"
+      },
+      "consent": {
+        "title": "Diese Nachricht an DeepL senden?",
+        "body": "Satchel schickt den Inhalt dieser Nachricht an DeepL ({plan}): Text und Formatierung. Links und Adressen, die mit http(s)://, //, www. oder mailto: beginnen, hält Satchel zurück, so wie es sie erkennt; ein über Zeilen umbrochener Link einer Text-Mail kann teilweise mitgehen. Hostnamen ohne diese Anfänge und E-Mail-Adressen im Text gehen als Text mit. Absender, Empfänger, Betreff und Anhänge bleiben hier. Gilt für alle Mails von {account} auf diesem Gerät.",
+        "detail": "Du kannst das unter Einstellungen → Übersetzung zurücknehmen. Dort zeigt das Anfrage-Protokoll, was gesendet wurde.",
+        "confirm": "Erlauben und übersetzen"
+      }
+    }
+  }
+}

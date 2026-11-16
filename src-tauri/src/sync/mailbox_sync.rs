@@ -11,7 +11,7 @@ use tauri::{AppHandle, Manager};
 use crate::events::bus::{AppEvent, EventBus};
 use crate::providers::{
     cursor::{backfill_pending, backfill_stats},
-    folder_mapping::provider_folder_type,
+    folder_mapping::{kind_folder_type, provider_folder_type},
     imap::imap_checkpoint,
     pop3::POP3_FOLDER,
     provider_for_stored_account,
@@ -235,6 +235,11 @@ struct ImapSyncState {
     /// drop their summary, so the next full sync reports them, once.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     unreported_holds: HashMap<String, BTreeSet<String>>,
+    /// Folders whose UIDVALIDITY changed between one run's sync and its
+    /// snapshot. GroupWise's virtual folders get a new generation on every
+    /// SELECT, so their snapshot can never apply; each run's reset covers them.
+    #[serde(default, skip_serializing_if = "HashSet::is_empty")]
+    volatile_generations: HashSet<String>,
 }
 
 /// The failed resolutions of one owed ID.
@@ -255,6 +260,25 @@ impl ImapSyncState {
         self.pending_snapshots.contains(folder)
     }
 
+    /// Whether this run owes a folder its snapshot, once its batch is in.
+    fn snapshot_after_batch(
+        &mut self,
+        folder: &str,
+        reset: bool,
+        due: bool,
+        required: bool,
+    ) -> bool {
+        // A run without a reset shows the generation held still.
+        if !reset {
+            self.volatile_generations.remove(folder);
+        }
+        // The reset already reconciled it; a snapshot would meet yet another generation.
+        if self.volatile_generations.contains(folder) {
+            return false;
+        }
+        self.request_snapshot(folder, due, required)
+    }
+
     /// Forget every per-folder entry of folders the provider no longer returns.
     fn retain_folders(&mut self, retained: &HashSet<String>) {
         self.cursors.retain(|folder, _| retained.contains(folder));
@@ -270,6 +294,20 @@ impl ImapSyncState {
             .retain(|folder, _| retained.contains(folder));
         self.unreported_holds
             .retain(|folder, _| retained.contains(folder));
+        self.volatile_generations
+            .retain(|folder| retained.contains(folder));
+    }
+
+    /// Stop snapshotting a folder whose generation changes within a run, and
+    /// drop what its snapshots owed: those UIDs named a void generation.
+    /// Returns whether the folder was not marked yet.
+    fn mark_volatile_generation(&mut self, folder: &str) -> bool {
+        self.pending_snapshots.remove(folder);
+        self.snapshot_resolutions.remove(folder);
+        self.resolved_snapshot_copies.remove(folder);
+        self.snapshot_failures.remove(folder);
+        self.unreported_holds.remove(folder);
+        self.volatile_generations.insert(folder.to_string())
     }
 
     /// Whether ordinary polls owe this folder lookups: IDs a completed
@@ -356,7 +394,20 @@ impl ImapSyncState {
 #[derive(Debug, Default)]
 struct SnapshotProgress {
     changed: HashSet<String>,
+    /// Threads whose workflow followed a server marker. Kept apart from
+    /// `changed`: folder reconciliation would put a snoozed Inbox thread
+    /// straight back into the Inbox.
+    markers_applied: HashSet<String>,
     deferred: BTreeMap<String, SnapshotDeferral>,
+}
+
+/// Whether a folder's initial download has finished: it has a cursor and
+/// no backfill left. Until then, the marker baseline waits.
+fn inbox_download_complete(state: &ImapSyncState, folder_id: &str) -> bool {
+    state
+        .cursors
+        .get(folder_id)
+        .is_some_and(|cursor| !backfill_pending(cursor))
 }
 
 /// A provider returns Some only after every snapshot page has succeeded.
@@ -388,6 +439,14 @@ async fn reconcile_folder_snapshot(
                 false,
             )
         } else {
+            // INBOX speaks for the account: every Done and Snooze starts there.
+            let inbox = remote_folder_id.eq_ignore_ascii_case("INBOX");
+            if let Some(support) = snapshot.custom_keywords.filter(|_| inbox) {
+                satchel_core::sync::workflow_markers::record_inbox_keyword_support(
+                    pool, account_id, support,
+                )
+                .await?;
+            }
             let changes = reconcile_imap_folder_snapshot(
                 pool,
                 account_id,
@@ -397,21 +456,43 @@ async fn reconcile_folder_snapshot(
                 snapshot.remote_uidvalidity,
             )
             .await?;
+            let markers_applied =
+                satchel_core::sync::workflow_markers::reconcile_remote_workflow_markers(
+                    pool,
+                    &changes.marker_threads,
+                )
+                .await?;
+            // From the first complete INBOX snapshot on, IMAP snoozes set on
+            // other devices are adopted; the ones it found were only seen.
+            // Complete means the initial download too: older INBOX mail the
+            // backfill still has to bring can carry a keyword years old.
+            if inbox
+                && !changes.skipped_stale_generation
+                && inbox_download_complete(state, context.folder_id)
+            {
+                satchel_core::sync::workflow_markers::mark_snapshot_baseline(pool, account_id)
+                    .await?;
+            }
             (
                 SnapshotProgress {
                     changed: changes.relocated_threads,
+                    markers_applied,
                     ..SnapshotProgress::default()
                 },
                 changes.skipped_stale_generation,
             )
         };
     if skipped_stale_generation {
-        tracing::warn!(
-            account_id,
-            folder = remote_folder_id,
-            snapshot_uidvalidity = ?snapshot.remote_uidvalidity,
-            "folder snapshot named another generation, kept every message"
-        );
+        // This run's sync recorded the folder's generation moments ago.
+        if state.mark_volatile_generation(remote_folder_id) {
+            tracing::info!(
+                account_id,
+                folder = remote_folder_id,
+                snapshot_uidvalidity = ?snapshot.remote_uidvalidity,
+                "folder changed UIDVALIDITY within one run; snapshots paused until it holds still"
+            );
+        }
+        persist_sync_cursors(pool, account_id, state, queue, None).await?;
     } else {
         // Every ID the listing found absent is owed durably by now, so the
         // listing has nothing left to add. Ordinary polls look up what is
@@ -688,10 +769,23 @@ async fn resolve_owed_ids(
                     .await?
                 }
                 Ok(None) => {
-                    crate::sync::gmail_reconcile::reconcile_gmail_snapshot_deletion(
-                        pool, account_id, id,
+                    match crate::sync::gmail_reconcile::gmail_live_drafts_behind(
+                        pool, provider, account_id, id,
                     )
                     .await?
+                    {
+                        Err(error) if error.is_rate_limited() => return Err(error.to_string()),
+                        Err(error) => SnapshotResolution::Deferred(SnapshotDeferral::Failed(error)),
+                        Ok(live_drafts) => {
+                            crate::sync::gmail_reconcile::reconcile_gmail_snapshot_deletion(
+                                pool,
+                                account_id,
+                                id,
+                                &live_drafts,
+                            )
+                            .await?
+                        }
+                    }
                 }
             };
             let threads = match resolution {
@@ -998,6 +1092,33 @@ async fn stamp_inbox_fetch(
     Ok(())
 }
 
+/// Lists the account's folders; when the quota is due, reads it on the same
+/// session and stores it. A quota that cannot be stored is logged, never a
+/// reason to fail the sync.
+async fn list_folders_and_pace_quota(
+    pool: &SqlitePool,
+    account_id: &str,
+    provider: &dyn satchel_core::providers::traits::MailProvider,
+) -> satchel_core::sync::errors::SyncResult<Vec<RemoteFolder>> {
+    let quotas = satchel_core::db::account_quota::AccountQuotaRepository::new(pool);
+    let now = chrono::Utc::now();
+    let due = quotas.due(account_id, now).await.unwrap_or_else(|error| {
+        tracing::warn!(%account_id, %error, "could not read when the quota was last checked");
+        false
+    });
+    if !due {
+        return provider.sync_folders().await;
+    }
+    let (folders, probe) = provider.sync_folders_with_quota().await?;
+    if let satchel_core::providers::quota::QuotaProbe::Failed(reason) = &probe {
+        tracing::info!(%account_id, %reason, "mailbox quota unavailable this time");
+    }
+    if let Err(error) = quotas.record(account_id, &probe, now).await {
+        tracing::warn!(%account_id, %error, "could not store the mailbox quota");
+    }
+    Ok(folders)
+}
+
 const ACCOUNT_SYNC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 
 async fn account_run_with_deadline<T>(
@@ -1140,6 +1261,12 @@ pub(crate) async fn sync_mailboxes(
         .execute(pool)
         .await;
 
+        // Before new mail meets the rules: is Satchel's Sieve script still the
+        // one the server runs? A forward Satchel leaves to the server depends
+        // on it. At most every few minutes, and never holding the sync up long.
+        if account.provider == "imap" {
+            satchel_core::server_rules::service::verify_if_due(pool, &account.id).await;
+        }
         let account_sync_result: Result<(usize, usize, bool, usize, usize), String> = async {
             replay_ingest_effects(pool, &account.id).await?;
             let config = crate::utils::oauth::refresh_account_config(pool, &account.id, &account.provider, &account.config).await.map_err(|err| err.encoded())?;
@@ -1202,28 +1329,22 @@ pub(crate) async fn sync_mailboxes(
             // (the Graph adapter also resolves six well-known folders) and
             // defeats the point of a lightweight freshness check.
             let cached_inbox = if folder_selection == FolderSelection::Inbox {
-                sqlx::query_as::<_, (String, String)>(
-                    "SELECT COALESCE(NULLIF(remote_id, ''), full_path), name
-                     FROM folders
-                     WHERE account_id = ? AND folder_type = 'inbox'
-                     LIMIT 1",
-                )
-                .bind(&account.id)
-                .fetch_optional(pool)
-                .await
-                .map_err(|err| err.to_string())?
-                .map(|(id, name)| RemoteFolder {
-                    id,
-                    name,
-                    kind: Some("inbox".to_string()),
-                })
+                satchel_core::db::folders::preferred_folder_of_type(pool, &account.id, "inbox")
+                    .await
+                    .map_err(|err| err.to_string())?
+                    .map(|folder| RemoteFolder {
+                        id: folder.remote_path,
+                        name: folder.name,
+                        kind: Some("inbox".to_string()),
+                    })
             } else {
                 None
             };
+            // Only a real listing says what the server declares (SPECIAL-USE).
+            let folders_listed = cached_inbox.is_none();
             let mut folders = match cached_inbox {
                 Some(folder) => vec![folder],
-                None => provider
-                    .sync_folders()
+                None => list_folders_and_pace_quota(pool, &account.id, provider.as_ref())
                     .await
                     .map_err(|error| error.to_string())?,
             };
@@ -1308,6 +1429,7 @@ pub(crate) async fn sync_mailboxes(
             let mut owed_folders = Vec::<(String, String, String)>::new();
             let mut snapshot_sync_complete = true;
             let mut externally_changed_threads = HashSet::new();
+            let mut marker_changed_threads = HashSet::<String>::new();
             let mut folder_fetch_failures = Vec::<String>::new();
             let mut blocked_folders = Vec::<String>::new();
             let mut blocked_messages = 0usize;
@@ -1366,13 +1488,14 @@ pub(crate) async fn sync_mailboxes(
                 .await;
 
                 sqlx::query(
-                    "INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, uidvalidity, message_count, unread_count, sync_enabled, sort_order, created_at, updated_at)
-                     VALUES (?, ?, ?, ?, ?, ?, NULL, 0, 0, 1, 0, ?, ?)
+                    "INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, uidvalidity, message_count, unread_count, sync_enabled, sort_order, special_use, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, NULL, 0, 0, 1, 0, ?, ?, ?)
                      ON CONFLICT(id) DO UPDATE SET
                         name = excluded.name,
                         full_path = excluded.full_path,
                         folder_type = excluded.folder_type,
                         remote_id = excluded.remote_id,
+                        special_use = CASE WHEN ? THEN excluded.special_use ELSE folders.special_use END,
                         updated_at = excluded.updated_at",
                 )
                 .bind(&folder_id)
@@ -1381,8 +1504,10 @@ pub(crate) async fn sync_mailboxes(
                 .bind(&folder.id)
                 .bind(folder_type)
                 .bind(&folder.id)
+                .bind(folders_listed && kind_folder_type(folder.kind.as_deref()) == Some(folder_type))
                 .bind(&now)
                 .bind(&now)
+                .bind(folders_listed)
                 .execute(pool)
                 .await
                 .map_err(|err| err.to_string())?;
@@ -1457,7 +1582,7 @@ pub(crate) async fn sync_mailboxes(
                 };
                 externally_changed_threads.extend(reset_thread_ids.iter().cloned());
 
-                if state.request_snapshot(&folder.id, snapshot_due, batch.snapshot_required) {
+                if state.snapshot_after_batch(&folder.id, batch.reset_folder, snapshot_due, batch.snapshot_required) {
                     snapshot_folders.push((folder_id.clone(), folder.id.clone(), folder.name.clone()));
                 } else if account.provider.eq_ignore_ascii_case("gmail")
                     && state.owes_resolutions(&folder.id)
@@ -1590,7 +1715,10 @@ pub(crate) async fn sync_mailboxes(
                     match result {
                         // Deferred IDs stay owed; the folder itself synced.
                         // Their holds wait in the state for a full sync.
-                        Ok(progress) => externally_changed_threads.extend(progress.changed),
+                        Ok(progress) => {
+                            externally_changed_threads.extend(progress.changed);
+                            marker_changed_threads.extend(progress.markers_applied);
+                        }
                         Err(err) => summary.failures.push(encoded_folder_sync_failure(
                             &account.email, &folder_name, err,
                         )),
@@ -1631,8 +1759,12 @@ pub(crate) async fn sync_mailboxes(
                 repair_stale_done_threads_in_inbox(pool, &account.id).await?;
             }
             if let Some(events) = events {
-                if !externally_changed_threads.is_empty() {
-                    events.publish(AppEvent::ThreadsUpdated(externally_changed_threads.iter().cloned().collect()));
+                let updated = externally_changed_threads
+                    .union(&marker_changed_threads)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if !updated.is_empty() {
+                    events.publish(AppEvent::ThreadsUpdated(updated));
                 }
             }
 
@@ -2653,6 +2785,133 @@ mod tests {
 
         assert!(summary.failures.is_empty(), "{:?}", summary.failures);
         assert_eq!(failing_since(&pool).await, None);
+    }
+}
+
+#[cfg(test)]
+mod quota_pacing_tests {
+    use super::list_folders_and_pace_quota;
+    use crate::providers::traits::{
+        FlagUpdate, MailProvider, MessageRef, OutgoingMessage, RemoteFolder, SyncBatch,
+        SyncCheckpoint,
+    };
+    use satchel_core::providers::quota::{MailboxQuota, QuotaProbe, QuotaUsage};
+    use satchel_core::sync::errors::SyncResult;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Counts which listing the sync asked for; the quota is always 95 % full.
+    #[derive(Default)]
+    struct CountingProvider {
+        plain: AtomicUsize,
+        with_quota: AtomicUsize,
+    }
+
+    fn inbox() -> Vec<RemoteFolder> {
+        vec![RemoteFolder {
+            id: "INBOX".into(),
+            name: "INBOX".into(),
+            kind: Some("inbox".into()),
+        }]
+    }
+
+    #[async_trait::async_trait]
+    impl MailProvider for CountingProvider {
+        async fn sync_folders(&self) -> SyncResult<Vec<RemoteFolder>> {
+            self.plain.fetch_add(1, Ordering::SeqCst);
+            Ok(inbox())
+        }
+        async fn sync_folders_with_quota(&self) -> SyncResult<(Vec<RemoteFolder>, QuotaProbe)> {
+            self.with_quota.fetch_add(1, Ordering::SeqCst);
+            Ok((
+                inbox(),
+                QuotaProbe::Read(MailboxQuota {
+                    storage: Some(QuotaUsage {
+                        used: 95,
+                        limit: 100,
+                    }),
+                    messages: None,
+                }),
+            ))
+        }
+        async fn sync_messages(&self, _: &str, _: SyncCheckpoint) -> SyncResult<SyncBatch> {
+            unreachable!()
+        }
+        async fn send(&self, _: OutgoingMessage) -> SyncResult<()> {
+            unreachable!()
+        }
+        async fn set_flags(&self, _: &[MessageRef], _: FlagUpdate) -> SyncResult<()> {
+            unreachable!()
+        }
+        async fn move_messages(&self, _: &[MessageRef], _: &str) -> SyncResult<()> {
+            unreachable!()
+        }
+        async fn delete_messages(&self, _: &[MessageRef]) -> SyncResult<()> {
+            unreachable!()
+        }
+    }
+
+    async fn pool() -> sqlx::SqlitePool {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::db::init(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref,
+                                   created_at, updated_at)
+             VALUES ('acc', 'Work', 'me@example.test', 'imap', '{}', '', '', '')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn the_quota_rides_on_one_full_sync_and_then_waits() {
+        let pool = pool().await;
+        let provider = CountingProvider::default();
+
+        for _ in 0..3 {
+            let folders = list_folders_and_pace_quota(&pool, "acc", &provider)
+                .await
+                .unwrap();
+            assert_eq!(folders.len(), 1);
+        }
+
+        assert_eq!(provider.with_quota.load(Ordering::SeqCst), 1);
+        assert_eq!(provider.plain.load(Ordering::SeqCst), 2);
+        let used: Option<i64> = sqlx::query_scalar(
+            "SELECT storage_used_bytes FROM account_quota WHERE account_id = 'acc'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(used, Some(95));
+    }
+
+    #[tokio::test]
+    async fn a_stale_reading_is_refreshed_on_the_next_full_sync() {
+        let pool = pool().await;
+        let provider = CountingProvider::default();
+        list_folders_and_pace_quota(&pool, "acc", &provider)
+            .await
+            .unwrap();
+        let stale = (chrono::Utc::now()
+            - satchel_core::db::account_quota::QUOTA_REFRESH_INTERVAL
+            - chrono::Duration::minutes(1))
+        .to_rfc3339();
+        sqlx::query("UPDATE account_quota SET checked_at = ?")
+            .bind(stale)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        list_folders_and_pace_quota(&pool, "acc", &provider)
+            .await
+            .unwrap();
+        assert_eq!(provider.with_quota.load(Ordering::SeqCst), 2);
     }
 }
 

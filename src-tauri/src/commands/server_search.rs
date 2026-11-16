@@ -276,14 +276,10 @@ pub(crate) async fn resolve_target_folder(
         return Ok((archive_id, "ARCHIVE".to_string(), "archive".to_string()));
     }
 
-    let inbox: Option<(String, String, String)> = sqlx::query_as(
-        "SELECT id, remote_id, folder_type FROM folders
-         WHERE account_id = ? AND folder_type = 'inbox' LIMIT 1",
-    )
-    .bind(account_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|err| err.to_string())?;
+    let inbox = satchel_core::db::folders::preferred_folder_of_type(pool, account_id, "inbox")
+        .await
+        .map_err(|err| err.to_string())?
+        .map(|folder| (folder.id, folder.remote_path, "inbox".to_string()));
     inbox.ok_or_else(|| "no local folder available for the fetched message".to_string())
 }
 

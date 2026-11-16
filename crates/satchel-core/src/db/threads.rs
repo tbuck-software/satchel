@@ -103,6 +103,13 @@ pub struct ThreadRecord {
     pub has_invite: bool,
     pub invite_status: Option<String>,
     pub invite_cancelled: bool,
+    /// The local spam filter judged a message of this thread spam and nobody
+    /// has said Not spam since.
+    #[serde(default)]
+    pub likely_spam: bool,
+    /// The filter moved mail of this thread to Spam (Move mode).
+    #[serde(default)]
+    pub spam_moved: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -211,6 +218,7 @@ impl ThreadListScope {
                 (Some("section"), Some(section)) => {
                     section != "inbox" && mailbox_section_predicate(section).is_none()
                 }
+                (Some(CHAT_MAILBOX_KIND), _) => false,
                 _ => true,
             }
     }
@@ -307,9 +315,25 @@ pub(crate) fn push_thread_scope_filters(
                 query.push(" AND threads.workflow_state IN ('inbox', 'todo')");
             }
         }
+        // Delta Chat: threads with a message that carries `Chat-Version` and
+        // is not in Trash or Spam. The mail stays in its folders; this is a view.
+        (Some(CHAT_MAILBOX_KIND), _) => {
+            let trash = mailbox_section_predicate("trash").unwrap_or("0");
+            let spam = mailbox_section_predicate("spam").unwrap_or("0");
+            query.push(format!(
+                " AND threads.id IN (SELECT chat_messages.thread_id FROM messages chat_messages
+                    LEFT JOIN folders mailbox_folders
+                      ON mailbox_folders.id = COALESCE(chat_messages.pending_folder_id, chat_messages.folder_id)
+                    WHERE chat_messages.chat_version IS NOT NULL
+                      AND NOT COALESCE({trash}, 0) AND NOT COALESCE({spam}, 0))"
+            ));
+        }
         _ => {}
     }
 }
+
+/// `mailbox_kind` of the Chats list (Labs).
+pub const CHAT_MAILBOX_KIND: &str = "chat";
 
 /// Opens `EXISTS (… WHERE <a message of this thread is in mailbox_folders>`;
 /// the caller appends the folder predicate and the closing parenthesis.
@@ -1415,6 +1439,73 @@ pub async fn refresh_thread_projections_tx(
     Ok(())
 }
 
+/// The key under which copies of one mail count once, as in
+/// [`refresh_thread_projection_tx`].
+macro_rules! message_dedupe_key {
+    () => {
+        "CASE
+            WHEN id LIKE 'm-imap-%' THEN COALESCE(
+                NULLIF(TRIM(CASE
+                    WHEN LOWER(COALESCE(message_id_header, '')) LIKE '%@imap.satchel.local>' OR LOWER(COALESCE(message_id_header, '')) LIKE '%@imap.flowmail.local>' THEN ''
+                    ELSE COALESCE(message_id_header, '')
+                END), ''),
+                COALESCE(NULLIF(TRIM(folder_id), ''), '') || ':' || COALESCE(NULLIF(TRIM(remote_id), ''), id)
+            )
+            ELSE COALESCE(NULLIF(TRIM(message_id_header), ''), NULLIF(TRIM(remote_id), ''), id)
+         END"
+    };
+}
+
+/// [`refresh_thread_projection_tx`] for many threads in a constant number of
+/// statements. Threads left without messages go the single way: they are
+/// removed with their tags, events and topic links.
+pub(crate) async fn refresh_thread_projections_batch_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    thread_ids: &[String],
+    now: &str,
+) -> Result<(), ThreadError> {
+    if thread_ids.is_empty() {
+        return Ok(());
+    }
+    let ids = serde_json::to_string(thread_ids)?;
+    let empty: Vec<String> = sqlx::query_scalar(
+        "SELECT j.value FROM json_each(?) j
+         WHERE NOT EXISTS (SELECT 1 FROM messages WHERE thread_id = j.value)
+         ORDER BY j.key",
+    )
+    .bind(&ids)
+    .fetch_all(&mut **tx)
+    .await?;
+    for thread_id in &empty {
+        refresh_thread_projection_tx(tx, thread_id, now).await?;
+    }
+    sqlx::query(concat!(
+        "UPDATE threads
+         SET message_count = (SELECT COUNT(DISTINCT ",
+        message_dedupe_key!(),
+        ") FROM messages WHERE thread_id = threads.id),
+             unread_count = (SELECT COUNT(DISTINCT ",
+        message_dedupe_key!(),
+        ") FROM messages WHERE thread_id = threads.id AND is_read = 0),
+             is_starred = (SELECT COALESCE(MAX(is_starred), 0) FROM messages WHERE thread_id = threads.id),
+             has_attachments = (SELECT COALESCE(MAX(has_attachments), 0) FROM messages WHERE thread_id = threads.id),
+             subject = COALESCE((SELECT subject FROM messages WHERE thread_id = threads.id
+                                 ORDER BY is_draft ASC, date DESC, id DESC LIMIT 1), subject),
+             snippet = COALESCE((SELECT snippet FROM messages WHERE thread_id = threads.id
+                                 ORDER BY is_draft ASC, date DESC, id DESC LIMIT 1), snippet),
+             last_message_date = COALESCE((SELECT date FROM messages WHERE thread_id = threads.id
+                                 ORDER BY is_draft ASC, date DESC, id DESC LIMIT 1), last_message_date),
+             updated_at = ?
+         WHERE id IN (SELECT value FROM json_each(?))
+           AND EXISTS (SELECT 1 FROM messages WHERE thread_id = threads.id)"
+    ))
+    .bind(now)
+    .bind(&ids)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
 pub(crate) async fn refresh_thread_projection_tx(
     tx: &mut Transaction<'_, Sqlite>,
     thread_id: &str,
@@ -1572,6 +1663,8 @@ struct ThreadRow {
     has_invite: i64,
     invite_status: Option<String>,
     invite_cancelled: i64,
+    likely_spam: i64,
+    spam_moved: i64,
 }
 
 /// Default page size. Small enough that the first paint is fast on a large
@@ -2069,6 +2162,90 @@ mod tests {
         .execute(pool)
         .await
         .expect("thread");
+    }
+
+    #[tokio::test]
+    async fn the_chat_list_holds_threads_with_a_chat_message_and_nothing_moves() {
+        let pool = migrated_pool().await;
+        sqlx::query(
+            "INSERT INTO accounts(id, display_name, email, provider, config, credentials_ref, is_active, created_at, updated_at)
+             VALUES('acc', 'A', 'a@example.test', 'imap', ?, '', 1, '2026-01-01', '2026-01-01')",
+        )
+        .bind(crate::accounts::encrypt_account_config("acc", "{}").unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO folders(id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at)
+             VALUES('inbox', 'acc', 'INBOX', 'INBOX', 'inbox', 'INBOX', '2026-01-01', '2026-01-01')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO folders(id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at)
+             VALUES('trash', 'acc', 'Trash', 'Trash', 'trash', 'Trash', '2026-01-01', '2026-01-01')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        for (thread, folder) in [("mail", "inbox"), ("chat", "inbox"), ("binned", "trash")] {
+            insert_thread(&pool, thread, "acc").await;
+            insert_message(
+                &pool,
+                &format!("{thread}-m"),
+                thread,
+                folder,
+                None,
+                thread,
+                "2026-08-01T00:00:00Z",
+                false,
+                false,
+                false,
+                false,
+                "Subject",
+                "",
+            )
+            .await;
+        }
+        // A chat whose only message is in the Trash is not listed.
+        sqlx::query("UPDATE messages SET chat_version = '1.0' WHERE id IN ('chat-m', 'binned-m')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let repository = ThreadRepository::new(&pool);
+        let ids = |page: ThreadPageRecord| {
+            let mut ids = page
+                .threads
+                .into_iter()
+                .map(|thread| thread.id)
+                .collect::<Vec<_>>();
+            ids.sort();
+            ids
+        };
+        let chats = repository
+            .list(ThreadListRequest {
+                mailbox_kind: Some(CHAT_MAILBOX_KIND.into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(ids(chats), vec!["chat".to_string()]);
+        // The chat stays in the Inbox, next to the mail.
+        let inbox = repository
+            .list(ThreadListRequest {
+                mailbox_kind: Some("section".into()),
+                mailbox_value: Some("inbox".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(ids(inbox), vec!["chat".to_string(), "mail".to_string()]);
+        assert!(!ThreadListScope {
+            mailbox_kind: Some(CHAT_MAILBOX_KIND.into()),
+            ..Default::default()
+        }
+        .is_unbounded());
     }
 
     async fn insert_trash_folder(pool: &sqlx::SqlitePool, id: &str, folder_type: &str) {
@@ -5457,6 +5634,182 @@ mod tests {
         );
     }
 
+    #[test]
+    fn thread_queries_share_the_known_sender_rule() {
+        assert!(THREAD_RECORD_SQL.contains(KNOWN_SENDER_SQL));
+        let list = thread_list_query(&ThreadListRequest::default(), true).expect("list query");
+        assert!(list.sql().contains(KNOWN_SENDER_SQL));
+        assert!(smart_bucket_case_sql().contains(KNOWN_SENDER_SQL));
+    }
+
+    /// Person mail kept landing under Notifications: a person writing from a
+    /// role address, a reply whose subject names an invoice, and a provider's
+    /// explicit Personal overruled by the address list. Only guesses yield to
+    /// a known sender; explicit categories keep deciding.
+    #[tokio::test]
+    async fn known_senders_and_explicit_categories_outrank_notification_guesses() {
+        let pool = migrated_pool().await;
+        seed_thread(&pool).await;
+        for (id, from, category, source) in [
+            // Written to before: a person at a small business.
+            (
+                "role-correspondent",
+                "info@shop.example.test",
+                "updates",
+                "heuristic",
+            ),
+            // Same shape, never written to.
+            (
+                "role-stranger",
+                "info@other.example.test",
+                "updates",
+                "heuristic",
+            ),
+            // In the address book; the subject guess said invoice.
+            (
+                "invoice-reply",
+                "colleague@town.example.test",
+                "updates",
+                "heuristic",
+            ),
+            // The provider said Personal; the address list used to win.
+            (
+                "provider-personal",
+                "hello@studio.example.test",
+                "personal",
+                "provider",
+            ),
+            // Filed as Personal by hand.
+            (
+                "manual-personal",
+                "post@family.example.test",
+                "personal",
+                "manual_sender",
+            ),
+            // The provider said Updates about a known sender: still its call.
+            (
+                "provider-updates",
+                "colleague@town.example.test",
+                "updates",
+                "provider",
+            ),
+            // Machine-shaped and unknown.
+            (
+                "machine",
+                "noreply@service.example.test",
+                "personal",
+                "heuristic",
+            ),
+        ] {
+            insert_thread(&pool, id, "acc").await;
+            insert_message(
+                &pool,
+                &format!("message-{id}"),
+                id,
+                "inbox",
+                None,
+                id,
+                "2026-10-07T10:00:00Z",
+                false,
+                false,
+                false,
+                false,
+                id,
+                "",
+            )
+            .await;
+            sqlx::query("UPDATE threads SET category = ?, category_source = ? WHERE id = ?")
+                .bind(category)
+                .bind(source)
+                .bind(id)
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query("UPDATE messages SET from_address = ? WHERE thread_id = ?")
+                .bind(from)
+                .bind(id)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        // A sent message makes its recipient known (trigger), an address book
+        // sync the rest.
+        sqlx::query(
+            "INSERT INTO messages(id, account_id, folder_id, thread_id, from_address, to_addresses,
+                                  cc_addresses, bcc_addresses, subject, date, is_sent, remote_id,
+                                  created_at, updated_at)
+             VALUES('sent-1', 'acc', 'inbox', 'thread-1', 'a@x.test', '[\"Info@Shop.Example.Test\"]',
+                    '[]', '[]', 'Order', '2026-09-01T00:00:00Z', 1, 'sent-1', '2026-09-01', '2026-09-01')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        crate::db::known_senders::replace_address_book(
+            &pool,
+            crate::db::known_senders::AddressBook::Account {
+                kind: "gmail",
+                account_id: "acc",
+            },
+            ["colleague@town.example.test"],
+        )
+        .await
+        .unwrap();
+
+        let repository = ThreadRepository::new(&pool);
+        let page = repository.list(ThreadListRequest::default()).await.unwrap();
+        let bucket = |id: &str| {
+            page.threads
+                .iter()
+                .find(|thread| thread.id == id)
+                .map(|thread| (thread.smart_bucket.as_str(), thread.sender_known))
+                .unwrap_or_else(|| panic!("{id} listed"))
+        };
+        assert_eq!(bucket("role-correspondent"), ("personal", true));
+        assert_eq!(bucket("role-stranger"), ("notifications", false));
+        assert_eq!(bucket("invoice-reply"), ("personal", true));
+        assert_eq!(bucket("provider-personal"), ("personal", false));
+        assert_eq!(bucket("manual-personal"), ("personal", false));
+        assert_eq!(bucket("provider-updates"), ("notifications", true));
+        assert_eq!(bucket("machine"), ("notifications", false));
+
+        // The bucket filter and the summary count by the same rule.
+        let notifications = repository
+            .list(ThreadListRequest {
+                smart_bucket: Some("notifications".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let mut ids = notifications
+            .threads
+            .iter()
+            .map(|thread| thread.id.as_str())
+            .collect::<Vec<_>>();
+        ids.sort_unstable();
+        assert_eq!(ids, ["machine", "provider-updates", "role-stranger"]);
+        let summary = repository.smart_inbox_summary(Some("acc")).await.unwrap();
+        assert_eq!(
+            summary
+                .buckets
+                .iter()
+                .find(|bucket| bucket.key == "notifications")
+                .map(|bucket| bucket.count),
+            Some(3)
+        );
+
+        // A state change returns the same bucket the list showed.
+        let updated = repository
+            .update_state(ThreadStateUpdateRequest {
+                thread_id: "role-correspondent".into(),
+                next_state: WorkflowState::Done,
+                snooze_until: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(updated.smart_bucket, "personal");
+        assert!(updated.sender_known);
+    }
+
     /// Spellings the front-end heuristic reads as machine senders. Missing one
     /// here builds a bucket row out of local rows that the `smart_bucket` query
     /// then answers with an empty page.
@@ -6144,11 +6497,36 @@ const THREAD_RECORD_SQL: &str = "
             ) AS invite_cancelled,
             EXISTS (
               SELECT 1
+              FROM messages spam_messages
+              JOIN spam_verdicts ON spam_verdicts.message_id = spam_messages.id
+              WHERE spam_messages.thread_id = threads.id
+                AND spam_verdicts.verdict = 'spam'
+                -- Not spam trains one example per sender and thread: a ham
+                -- example from the same sender in the thread clears them all.
+                AND NOT EXISTS (
+                  SELECT 1 FROM spam_training
+                  WHERE spam_training.label = 'ham'
+                    AND (spam_training.message_id = spam_messages.id
+                         OR (spam_training.thread_id = threads.id
+                             AND spam_training.sender = LOWER(TRIM(COALESCE(spam_messages.from_address, '')))))
+                )
+            ) AS likely_spam,
+            EXISTS (
+              SELECT 1
+              FROM messages moved_messages
+              JOIN spam_verdicts moved_verdicts ON moved_verdicts.message_id = moved_messages.id
+              WHERE moved_messages.thread_id = threads.id AND moved_verdicts.moved_at IS NOT NULL
+            ) AS spam_moved,
+            EXISTS (
+              SELECT 1
               FROM messages sent
               JOIN folders sent_folders ON sent_folders.id = COALESCE(sent.pending_folder_id, sent.folder_id)
               WHERE sent.thread_id = threads.id
                 AND (sent.is_sent = 1 OR LOWER(sent_folders.folder_type) = 'sent' OR LOWER(sent_folders.name) LIKE '%sent%')
-            ) AS sender_known,
+            ) OR EXISTS (
+  SELECT 1 FROM known_senders
+  WHERE known_senders.email = LOWER(TRIM(latest_message.from_address))
+) AS sender_known,
             -- Drafts sort last: a reply you started must not turn the thread's
             -- correspondent into your own address. The id tiebreak keeps this
             -- pick identical to the subject/snippet pick when dates collide.
@@ -6247,6 +6625,8 @@ fn thread_record_from_row(row: ThreadRow) -> ThreadRecord {
         has_invite: row.has_invite > 0,
         invite_status: row.invite_status,
         invite_cancelled: row.invite_cancelled > 0,
+        likely_spam: row.likely_spam > 0,
+        spam_moved: row.spam_moved > 0,
     }
 }
 
@@ -6414,8 +6794,12 @@ fn smart_inbox_summary_query(account_id: Option<&str>) -> QueryBuilder<'static, 
 
 /// Every projection joins the latest message once. Reuse it for classification
 /// as well, so returning a bucket does not add per-thread message lookups.
+///
+/// Only a guessed category is second-guessed here. A provider's explicit
+/// category and the user's own filing are decisions, not guesses.
 const MACHINE_NOTIFICATION_SQL: &str = "(
   (threads.category IS NULL OR threads.category = 'personal')
+  AND threads.category_source NOT IN ('provider', 'manual_sender', 'manual_thread')
   AND (
       LOWER(TRIM(latest_message.from_address)) GLOB 'no-reply*'
       OR LOWER(TRIM(latest_message.from_address)) GLOB 'noreply*'
@@ -6468,6 +6852,16 @@ const CODE_NOTIFICATION_SQL: &str = "(
   )
 )";
 
+/// The latest sender is someone the user wrote to or keeps in an address book
+/// (`db::known_senders`). That outranks the address and subject guesses: a
+/// person writing from `info@` is still a person. The thread queries spell the
+/// same predicate out in `sender_known`, because they are string constants;
+/// `thread_queries_share_the_known_sender_rule` holds them to it.
+const KNOWN_SENDER_SQL: &str = "EXISTS (
+  SELECT 1 FROM known_senders
+  WHERE known_senders.email = LOWER(TRIM(latest_message.from_address))
+)";
+
 /// An answer to an invitation (`METHOD:REPLY`, …) is not one: it neither
 /// files a thread under Invitations nor gives it an RSVP state. The thread
 /// queries spell the predicate out because they are string constants;
@@ -6484,6 +6878,9 @@ fn smart_bucket_case_sql() -> String {
          WHERE bucket_invite_messages.thread_id = threads.id
            AND {invitation}
        ) THEN 'invitations'
+       WHEN threads.category_source NOT IN ('provider', 'manual_sender', 'manual_thread')
+         AND (threads.category IS NULL OR threads.category IN ('personal', 'updates', 'social'))
+         AND {KNOWN_SENDER_SQL} THEN 'personal'
        WHEN threads.category IN ('updates', 'social') OR {MACHINE_NOTIFICATION_SQL} OR {CODE_NOTIFICATION_SQL} THEN 'notifications'
        WHEN threads.category = 'promotions' THEN 'newsletter'
        ELSE 'personal'
@@ -6728,11 +7125,36 @@ fn thread_list_query(
             ) AS invite_cancelled,
             EXISTS (
               SELECT 1
+              FROM messages spam_messages
+              JOIN spam_verdicts ON spam_verdicts.message_id = spam_messages.id
+              WHERE spam_messages.thread_id = threads.id
+                AND spam_verdicts.verdict = 'spam'
+                -- Not spam trains one example per sender and thread: a ham
+                -- example from the same sender in the thread clears them all.
+                AND NOT EXISTS (
+                  SELECT 1 FROM spam_training
+                  WHERE spam_training.label = 'ham'
+                    AND (spam_training.message_id = spam_messages.id
+                         OR (spam_training.thread_id = threads.id
+                             AND spam_training.sender = LOWER(TRIM(COALESCE(spam_messages.from_address, '')))))
+                )
+            ) AS likely_spam,
+            EXISTS (
+              SELECT 1
+              FROM messages moved_messages
+              JOIN spam_verdicts moved_verdicts ON moved_verdicts.message_id = moved_messages.id
+              WHERE moved_messages.thread_id = threads.id AND moved_verdicts.moved_at IS NOT NULL
+            ) AS spam_moved,
+            EXISTS (
+              SELECT 1
               FROM messages sent
               JOIN folders sent_folders ON sent_folders.id = COALESCE(sent.pending_folder_id, sent.folder_id)
               WHERE sent.thread_id = threads.id
                 AND (sent.is_sent = 1 OR LOWER(sent_folders.folder_type) = 'sent' OR LOWER(sent_folders.name) LIKE '%sent%')
-            ) AS sender_known,
+            ) OR EXISTS (
+  SELECT 1 FROM known_senders
+  WHERE known_senders.email = LOWER(TRIM(latest_message.from_address))
+) AS sender_known,
             -- Drafts sort last: a reply you started must not turn the thread's
             -- correspondent into your own address. The id tiebreak keeps this
             -- pick identical to the subject/snippet pick when dates collide.
@@ -6860,6 +7282,8 @@ async fn list_threads_inner(
             has_invite: row.has_invite > 0,
             invite_status: row.invite_status,
             invite_cancelled: row.invite_cancelled > 0,
+            likely_spam: row.likely_spam > 0,
+            spam_moved: row.spam_moved > 0,
         })
         .collect();
 
@@ -6952,7 +7376,7 @@ fn push_contact_filter(
     );
 }
 
-fn mailbox_section_predicate(section: &str) -> Option<&'static str> {
+pub(crate) fn mailbox_section_predicate(section: &str) -> Option<&'static str> {
     match section {
         "archive" => Some(
             "(LOWER(mailbox_folders.folder_type) = 'archive'

@@ -17,15 +17,23 @@
 #![allow(clippy::type_complexity, clippy::too_many_arguments)]
 
 pub mod accounts;
+pub mod autocrypt;
 pub mod backup;
 pub mod calendar;
+pub mod chat;
 pub mod db;
 pub mod drafts;
 pub mod email;
 pub mod events;
 pub mod mail_actions;
+pub mod mail_merge;
 pub mod providers;
+pub mod rules;
 pub mod runtime_capabilities;
+pub mod server_rules;
+pub mod spam;
 pub mod sync;
+pub mod tasks;
+pub mod translation;
 pub mod utils;
 pub mod workflow;

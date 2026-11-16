@@ -29,29 +29,10 @@ fn app_origin(app: &tauri::AppHandle) -> Url {
     Url::parse(origin).expect("app origin")
 }
 
+/// Anything outside the app is refused, not handed to the browser: external
+/// links go through `open_external_url`, behind the link confirmation.
 fn route_navigation(url: &Url, origin: &Url) -> bool {
-    navigate(url, origin, open_external)
-}
-
-fn open_external(url: &Url) {
-    // This command validates schemes before handing the URL to the OS browser.
-    let _ = crate::commands::external_links::open_external_url(url.to_string());
-}
-
-fn navigate(url: &Url, origin: &Url, open: impl FnOnce(&Url)) -> bool {
-    if allowed_navigation(url, origin) {
-        return true;
-    }
-    open(url);
-    false
-}
-
-#[cfg(desktop)]
-fn popup(url: &Url, origin: &Url, open: impl FnOnce(&Url)) {
-    // App popouts are created by commands with their own capabilities.
-    if !allowed_navigation(url, origin) {
-        open(url);
-    }
+    allowed_navigation(url, origin)
 }
 
 pub fn init() -> tauri::plugin::TauriPlugin<tauri::Wry> {
@@ -65,15 +46,19 @@ pub fn guard<'a, M: Manager<tauri::Wry>>(
     app: &tauri::AppHandle,
 ) -> WebviewWindowBuilder<'a, tauri::Wry, M> {
     let origin = app_origin(app);
-    let popup_origin = origin.clone();
-    let builder = builder.on_navigation(move |url| route_navigation(url, &origin));
+    // Tauri's drag-drop handler answers every drag itself and never passes it
+    // on to the webview: on macOS wry overrides `draggingEntered:`,
+    // `draggingUpdated:` and `performDragOperation:` of the WKWebView and
+    // skips `super` whenever the handler returns true, which Tauri's always
+    // does. The page then never sees `dragover` or `drop`, for files from the
+    // Finder as much as for a mail dragged onto the composer. Nothing here
+    // listens to Tauri's drag-drop events; the pages use HTML5 drag and drop.
+    let builder = builder
+        .disable_drag_drop_handler()
+        .on_navigation(move |url| route_navigation(url, &origin));
+    // App popouts are created by commands with their own capabilities.
     #[cfg(desktop)]
-    let builder = builder.on_new_window(move |url, _| {
-        popup(&url, &popup_origin, open_external);
-        tauri::webview::NewWindowResponse::Deny
-    });
-    #[cfg(mobile)]
-    let _ = popup_origin;
+    let builder = builder.on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny);
     builder
 }
 
@@ -117,22 +102,37 @@ mod tests {
         }
     }
     #[test]
-    fn external_navigation_and_popups_are_handed_to_the_browser() {
+    fn external_navigation_is_refused_without_opening_anything() {
         let origin = Url::parse("tauri://localhost").unwrap();
-        let external = Url::parse("https://example.com/mail").unwrap();
-        let mut handed_off = Vec::new();
-        assert!(!navigate(&external, &origin, |url| handed_off.push(url.clone())));
-        assert_eq!(handed_off, vec![external.clone()]);
-        assert!(navigate(&origin, &origin, |_| panic!(
-            "app navigation opened a browser"
-        )));
-        #[cfg(desktop)]
-        {
-            popup(&external, &origin, |url| handed_off.push(url.clone()));
-            popup(&origin, &origin, |_| panic!("app popup opened a browser"));
-            assert_eq!(handed_off, vec![external.clone(), external]);
+        for external in [
+            "https://example.com/mail",
+            "http://example.com/",
+            "mailto:someone@example.com",
+        ] {
+            assert!(!route_navigation(&Url::parse(external).unwrap(), &origin));
         }
+        assert!(route_navigation(
+            &origin.join("/index.html").unwrap(),
+            &origin
+        ));
+        let source = include_str!("navigation.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap();
+        assert!(
+            !production.contains(concat!("open_external", "_url(")),
+            "navigation must not hand URLs to the browser"
+        );
     }
+    #[test]
+    fn the_guard_hands_drags_to_the_page() {
+        let source = include_str!("navigation.rs");
+        let guard = source
+            .split("pub fn guard<")
+            .nth(1)
+            .and_then(|rest| rest.split("#[cfg(test)]").next())
+            .unwrap();
+        assert!(guard.contains(".disable_drag_drop_handler()"));
+    }
+
     #[test]
     fn every_window_builder_uses_the_shared_guard() {
         for source in [

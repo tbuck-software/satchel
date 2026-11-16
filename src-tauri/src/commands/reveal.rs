@@ -1,15 +1,30 @@
-//! Reveal a freshly saved file in the system file manager. The frontend only
-//! ever passes back paths the user just picked in a native save dialog, but
-//! the path is still checked against the filesystem before anything launches.
+//! Reveal a freshly saved file in the system file manager. Only a path the
+//! user picked in a native dialog is revealed, and it is still checked against
+//! the filesystem before anything launches.
 
 use std::path::Path;
+
+use tauri_plugin_fs::FsExt;
 
 use crate::commands::error::CommandResult;
 
 #[tauri::command]
-pub fn show_in_folder(path: String) -> CommandResult<()> {
-    let resolved = std::fs::canonicalize(&path).map_err(|_| "path no longer exists")?;
+pub fn show_in_folder(app: tauri::AppHandle, path: String) -> CommandResult<()> {
+    // The dialog plugin adds every picked path to the fs scope; nothing else does.
+    reveal_in_folder(&path, |candidate| {
+        app.try_fs_scope()
+            .is_some_and(|scope| scope.is_allowed(candidate))
+    })
+}
+
+fn reveal_in_folder(path: &str, picked: impl Fn(&Path) -> bool) -> CommandResult<()> {
+    let resolved = std::fs::canonicalize(path).map_err(|_| "path no longer exists")?;
     let target = resolved.as_path();
+    if !picked(Path::new(path)) {
+        return Err(crate::commands::error::CommandError::new(
+            "backend.errors.revealTargetBlocked",
+        ));
+    }
     validate_reveal_target(target)?;
     if !target.exists() {
         return Err("path no longer exists".into());
@@ -141,7 +156,16 @@ mod tests {
 
     #[test]
     fn rejects_missing_paths() {
-        let result = super::show_in_folder("/definitely/not/a/real/path/xyz".to_string());
+        let result = super::reveal_in_folder("/definitely/not/a/real/path/xyz", |_| true);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn rejects_a_path_no_dialog_picked_before_launching_anything() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("notes.txt");
+        std::fs::write(&path, b"text").unwrap();
+        let error = super::reveal_in_folder(&path.to_string_lossy(), |_| false).unwrap_err();
+        assert_eq!(error.key, "backend.errors.revealTargetBlocked");
     }
 }

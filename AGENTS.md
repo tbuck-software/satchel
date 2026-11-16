@@ -6,13 +6,14 @@ Rust + Tauri 2 im Backend, SQLite mit FTS5 als Speicher.
 ## Vor jedem Commit
 
 ```bash
-make check     # vitest + cargo test + playwright smoke
+make check     # vitest + cargo test + playwright smoke + test:i18n
 ```
 
 CI (`.github/workflows/ci.yml`) erzwingt zusätzlich:
 
 ```bash
 npx vue-tsc -b
+pnpm run test:i18n     # Raw-Key-Crawl über den Mock-Produktionsbuild (ADR 0017)
 cargo fmt --all --check
 cargo clippy -p satchel -p satchel-core --all-targets -- -D warnings
 ```
@@ -58,6 +59,19 @@ Lokale Checks und CI verwenden dieselben Profile, ohne zusätzliche Cargo-Config
   **dynamischen** Key baut (`t(\`x.${id}\`)`), fällt aus der Analyse und
   bekommt zur Laufzeit den Key zu sehen — statische Literale verwenden oder in
   `SUBSETS` in `scripts/i18n-merge.mjs` eintragen.
+- Das Hauptfenster lädt vor dem ersten Frame nur `startup.<locale>.json`
+  (generiert); alle anderen Schlüssel kommen als Chunk mit dem lazy Code, der
+  sie braucht (ADR 0017, `scripts/i18n-split.mjs`). Die Zuordnung folgt aus
+  dem Modul, das den Schlüssel **als Literal** hält — auch in Tabellen oder
+  als fester Kopf (`` t(`thread.state.${s}`) ``). Ein Schlüssel ohne festen
+  Kopf (`` t(`${x}.label`) ``, `t(p + '.label')`) lässt `pnpm i18n:check`
+  scheitern. Wer Code in
+  den Startgraphen zieht oder einen Schlüssel aus Daten rendert, die kein
+  Modul als Literal hält, läuft `pnpm i18n:build` bzw. trägt den Präfix in
+  `STARTUP.prefixes` ein. **Nach jedem Rebase `pnpm i18n:build`**: zwei für
+  sich grüne PRs können `startup.*.json` gemeinsam veralten lassen. Eine lazy
+  Komponente, die bei jedem Start montiert wird, gehört in `FIRST_PAINT`
+  (`pnpm run test:i18n` meldet sie).
 
 ## Frontend
 
@@ -102,6 +116,26 @@ Container-Queries dürfen nur das Innere der Zeile ändern, nie die Wrapper-Höh
 Kein `deep: true` auf `props.items` — der Store erzeugt bei jeder Änderung ein
 neues Array.
 
+### Drag & Drop
+
+Alle Fenster laufen ohne Tauris Drag-Drop-Handler
+(`.disable_drag_drop_handler()` in `utils::navigation::guard`). Mit Handler
+beantwortet wry auf macOS jeden Drag selbst und reicht ihn nie an WKWebView
+weiter: Die Seite sieht kein `dragover`/`drop`, weder für Dateien aus dem
+Finder noch für Mails auf dem Composer. Im Dev-Server und in Playwright bleibt
+dabei alles grün. Was Satchel selbst zieht (Threads, einzelne Nachrichten,
+Empfänger), läuft über `src/utils/appDrag.ts`.
+
+### Labs (Experimente)
+
+Ein Experiment hängt an einem Flag in `src/labs/flags.ts` **und**
+`db::labs::LABS_FLAGS` (ADR 0020). Der Start kennt davon nur
+`src/labs/state.ts` und den Import von `src/labs/runtime.ts`: Store, Route,
+Seitenleisten-Zeile und Tastenfolge bringt die Aktivierung des Flags mit
+(`src/labs/activation.ts`). Wer `@/stores/labs` oder Code des Experiments in
+den Startgraphen zieht, bezahlt ihn für alle, eingeschaltet oder nicht —
+`pnpm bundle:check` meldet es.
+
 ### Kommandos und ACL
 
 Jedes `#[tauri::command]` gehört an **zwei** Stellen: in `generate_handler!`
@@ -116,6 +150,12 @@ bekommen das generierte Set `allow-app-commands`. Die schmalen Fenster
 (`message-file-*`, `tray-popover`) zählen ihre Kommandos einzeln auf — das ist
 dort die Sicherheitsgrenze, nicht bloß eine Beschreibung.
 
+Ein Kommando, das einen Pfad vom Frontend schreibt, verlangt eine Freigabe aus
+`write_grants`; eines, das ihn liest (Import, Restore, Prune), eine aus
+`read_grants`. Freigaben entstehen nur in Dialogen, die das Backend selbst
+öffnet (`choose_save_path`, `choose_directory`, `choose_open_file`), oder wenn
+das Betriebssystem den Pfad übergibt („Öffnen mit“).
+
 ### Nachrichten-Viewer (`.eml` / `.msg`)
 
 Doppelklick auf eine Mail-Datei öffnet ein eigenes Fenster, nicht den Client.
@@ -127,8 +167,12 @@ Drei Teile hängen zusammen und brechen einzeln lautlos:
 - Die Fenster heißen `message-file-<hash>`. Die Capability
   `capabilities/message-viewer.json` greift über genau dieses Präfix; ein
   anderer Name lässt das Fenster ohne Rechte laufen (kein Speichern-Dialog).
-  Sie listet die sieben Kommandos auf, die der Viewer braucht — alles andere
-  ist aus diesem Fenster nicht erreichbar.
+  Sie listet die sieben App-Kommandos auf, die der Viewer braucht — alles
+  andere ist aus diesem Fenster nicht erreichbar. `import_mbox` nimmt dort nur
+  die Datei an, für die das Fenster geöffnet wurde (`ViewerFiles`, beim Bau
+  des Fensters gesetzt). Viewer und Tray-Popover haben **kein**
+  `core:event:allow-listen`: Tauri liefert ein Event an jeden Listener mit
+  Ziel „Any“, egal was `emit_to` nennt — wer hören darf, hört Mail-Events mit.
 - Der Dateipfad reist base64url-kodiert als `?p=` — Mail-Dateien heißen mit
   Leerzeichen, Umlauten und `#`.
 
@@ -171,6 +215,42 @@ im App-Crate lautet der Pfad `"../crates/satchel-core/src/db/migrations"`.
   arbeitet und seinen Cursor mit jedem Block speichert. Die sechs bereits
   ausgelieferten Daten-Migrationen bleiben, wie sie sind.
 
+### Erledigt und Wiedervorlage auf dem Server
+
+Done und Snooze reisen als IMAP-Keyword bzw. Gmail-Label mit (ADR 0009,
+`workflow::remote_marker`). Was einzeln lautlos bricht:
+
+- IMAP hat ein **festes Vokabular aus drei Keywords** (`$Satchel-Done`,
+  `$Satchel-Snoozed`, `$Satchel-Snooze2`). Nie einen Zeitpunkt in einen
+  Keyword-Namen schreiben: Cyrus vergibt höchstens 128 User-Flags pro
+  Postfach und gibt sie nie frei, Dovecot-Maildir kodiert nur 26 im
+  Dateinamen. Die Weckzeit reist nur über Gmail-Labels (löschbar).
+- Die `workflow_marker`-Mutation wird **vor** dem Archiv-Move eingereiht:
+  MOVE nimmt Keywords mit, die Quell-UID existiert danach nicht mehr.
+- Marker sind best effort: `NO`/`BAD` auf STORE ist ein Ergebnis, kein
+  Fehler, sonst blockiert die Zeile die Queue des Kontos. async-imaps
+  `uid_store`-Stream verwirft den Status der getaggten Antwort — für STORE
+  `run_command_and_check_ok` nehmen. Nur ein **eindeutiges** `NO`/`BAD` auf
+  den INBOX-STORE macht das Konto `local_only` (`store_refused`), und auch
+  das nur für einige Stunden und bis zum Neustart; `[UNAVAILABLE]`/`[INUSE]`,
+  ein abgelehntes SELECT oder eine neue UIDVALIDITY überspringen nur die
+  Zeile. Über `\*` entscheidet allein der INBOX-Snapshot.
+- Gmail-Labels `Satchel/Done`, `Satchel/Snoozed`, `Satchel/Wake/<Zeit>` sind
+  Markierungen, keine Ordner (nur exakt diese Namen; `Satchel/Invoices` gehört
+  dem Nutzer). Der Provider nimmt sie aus `mailbox_ids` heraus; landen sie
+  dort, legt die Sync für jede Label-ID einen Ordner an.
+- Pull wendet nur **Flanken** an: `threads.remote_workflow_marker` hält, was
+  der Server zuletzt angenommen oder gezeigt hat (`NULL` = kein Marker, ein
+  Postfach ohne Marker wird nie beschrieben). Eine noch nicht gesendete lokale
+  Änderung gewinnt. Konten mit `local_only` (`account_workflow_sync`) werden
+  weder beschrieben noch gelesen. Bis zum ersten vollständigen
+  INBOX-Snapshot eines Geräts **nach abgeschlossenem Backfill**
+  (`baseline_at`) werden fremde IMAP-Snoozes nur notiert, nicht übernommen.
+- Markierungen werden pro Thread eingereiht, Lookups macht SQLite über die
+  Payload (`instr` + `json_each`): Kein Pfad darf je Thread alle wartenden
+  Zeilen parsen. Viele Threads in einer Transaktion gehen über
+  `enqueue_workflow_markers_in_transaction`.
+
 ### Mobile (Android/iOS)
 
 Ein Bundle, drei Plattformen. Was der Shell kann, wird **erfragt**, nicht geraten:
@@ -179,8 +259,8 @@ Ein Bundle, drei Plattformen. Was der Shell kann, wird **erfragt**, nicht gerate
 Plattformweise getrennt sind: TLS-Vertrauensanker (Desktop `webpki-roots`,
 Mobile die OS-Trust-Stores über `rustls-platform-verifier`), der Keyring
 (Desktop `keyring`, Mobile `keyring-core` plus Android-Keystore bzw.
-iOS-Keychain) und die Plugins (Tray, Autostart, Single-Instance und die lokale
-HTTP-API bleiben `#[cfg(desktop)]`).
+iOS-Keychain) und die Plugins (Tray, Autostart und Single-Instance bleiben
+`#[cfg(desktop)]`).
 
 `utils::crypto::load_or_create_master_key` fällt auf Mobile **nicht** auf eine
 Schlüsseldatei zurück. Auf dem Desktop ist ein unerreichbarer Schlüsselbund

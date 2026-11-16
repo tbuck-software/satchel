@@ -24,12 +24,20 @@ const props = withDefaults(defineProps<{
   zoom?: number;
   /** Mobile reading canvas: no nested card background or desktop document gutter. */
   flush?: boolean;
+  /**
+   * The desktop document without a visible sheet: the adapted view paints it
+   * in the reader's own surface and drops its border. The 26px gutter that
+   * keeps simple mail off the edge of a white sheet then has no edge to keep
+   * off, and only pushed the text past the line the sender's name stands on.
+   */
+  frameless?: boolean;
   /** Let a parent scroller own touch drags over embedded quoted history. */
   passThroughTouchScroll?: boolean;
 }>(), {
   allowRemoteImages: false,
   zoom: 100,
   flush: false,
+  frameless: false,
   passThroughTouchScroll: false,
 });
 
@@ -104,7 +112,12 @@ const shellCss = `
     overflow-y: hidden;
   }
 
+  /* flow-root keeps the content's outer margins inside the wrapper. Without
+     it the first paragraph's margin collapsed through the wrapper and the
+     body, past the height resizeFrame measures, and the frame cut off the
+     mail's last line by as much. */
   .satchel-email-body {
+    display: flow-root;
     box-sizing: border-box;
     width: 100%;
     max-width: 100%;
@@ -237,6 +250,19 @@ function buildSourceDocument(): string {
         padding: 8px 16px 16px !important;
       }
     </style>` : ''}
+    ${props.frameless && !props.flush ? `<style>
+      /* The outer margins go with the gutter, so the text starts as close
+         under the header as a plain-text body does. */
+      .satchel-email-body[data-satchel-simple="on"] {
+        padding: 0 !important;
+      }
+      .satchel-email-body[data-satchel-simple="on"] > :first-child {
+        margin-top: 0 !important;
+      }
+      .satchel-email-body[data-satchel-simple="on"] > :last-child {
+        margin-bottom: 0 !important;
+      }
+    </style>` : ''}
     <style>
       /* Scale the root font size rather than using a CSS transform: a
          transform would leave the layout box at the old size and clip the
@@ -252,13 +278,19 @@ function buildSourceDocument(): string {
 
 /**
  * Rebuilt only for what needs a new document: the content, the CSP, and the
- * rules that exist only with a palette or on the flush canvas. A watcher
+ * rules that exist only with a palette, on the flush canvas or without a frame. A watcher
  * rather than a computed, so reading zoom and colours does not subscribe the
  * document to them.
  */
 const sourceDocument = ref('');
 watch(
-  [() => props.html, () => props.allowRemoteImages, () => props.flush, () => Boolean(props.canvasColor)],
+  [
+    () => props.html,
+    () => props.allowRemoteImages,
+    () => props.flush,
+    () => props.frameless,
+    () => Boolean(props.canvasColor),
+  ],
   () => {
     sourceDocument.value = buildSourceDocument();
   },
@@ -455,7 +487,9 @@ function onCopy(event: ClipboardEvent) {
   const text = frameSelectionText();
   if (!text || !event.clipboardData) return;
   const range = frameRef.value?.contentDocument?.getSelection()?.getRangeAt(0);
-  const holder = document.createElement('div');
+  // Serialize in an inert document: nodes adopted into this one would start
+  // loads under the app's CSP instead of the mail's.
+  const holder = document.implementation.createHTMLDocument('').createElement('div');
   if (range) holder.appendChild(range.cloneContents());
   event.clipboardData.setData('text/plain', text);
   if (holder.innerHTML) event.clipboardData.setData('text/html', holder.innerHTML);

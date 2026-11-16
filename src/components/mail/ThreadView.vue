@@ -15,6 +15,9 @@ import { useComposerStore } from '@/stores/composer';
 import { useDraftActions } from '@/composables/useDraftActions';
 import { useThreadReply } from '@/composables/useThreadReply';
 import { useThreadActions } from '@/composables/useThreadActions';
+import { useSenderSweep } from '@/composables/useSenderSweep';
+import { messageCanTranslate, toggleMessageTranslation } from '@/composables/useMessageTranslation';
+import { useTaskEditor } from '@/composables/useTaskEditor';
 import { useMessageLinks } from '@/composables/useMessageLinks';
 import { useAttachmentActions } from '@/composables/useAttachmentActions';
 import { perfStart } from '@/utils/perf';
@@ -22,6 +25,9 @@ import { scheduleIdleWork } from '@/utils/idleWork';
 import { saveTextExport } from '@/utils/saveTextExport';
 import { showInFolderAction } from '@/utils/showInFolderAction';
 import ErrorState from '@/components/ui/ErrorState.vue';
+import AppBanner from '@/components/ui/AppBanner.vue';
+import { useShortcutHints } from '@/composables/useShortcutHints';
+import { offersNotSpam } from '@/utils/threadList';
 import ThreadMessageList from './ThreadMessageList.vue';
 import ThreadSelectionSummary from './ThreadSelectionSummary.vue';
 import ThreadPaneSkeleton from './ThreadPaneSkeleton.vue';
@@ -741,6 +747,18 @@ async function markSpam() {
   await threadActions.markSpam(actionIds.value);
 }
 
+const { hint: shortcutHint } = useShortcutHints();
+const canMarkNotSpam = computed(() =>
+  actionIds.value.some((id) => {
+    const target = threadsStore.find(id);
+    return target ? offersNotSpam(target, threadsStore.mailboxFilter) : false;
+  }));
+
+async function markNotSpam() {
+  if (!thread.value) return;
+  await threadActions.markNotSpam(actionIds.value);
+}
+
 async function togglePin() {
   if (!thread.value) return;
   if (selectionCount.value) await threadActions.setPinned(actionIds.value, !actionPinned.value);
@@ -788,6 +806,29 @@ async function blockSender(scope: 'address' | 'domain' = 'address') {
   }
 }
 
+const senderSweep = useSenderSweep();
+const taskEditor = useTaskEditor();
+
+function addTask() {
+  if (thread.value) taskEditor.openForThread(thread.value.id, thread.value.subject);
+}
+
+/**
+ * A sweep files whole threads, so it is about whoever started this one: the
+ * first message that is neither a draft nor the user's own.
+ */
+function sweepSender() {
+  if (!thread.value) return;
+  const original = messages.value.find((message) => !message.isDraft
+    && message.from.email?.trim()
+    && !isOwnEmail(accountsStore.accounts, message.from.email));
+  if (!original) {
+    void senderSweep.openForThread(thread.value.id);
+    return;
+  }
+  senderSweep.open({ accountId: thread.value.accountId, email: original.from.email.trim(), name: original.from.name });
+}
+
 async function moveThread(targetFolderId: string) {
   if (!thread.value) return;
   const target = moveTargets.value.find((item) => item.id === targetFolderId);
@@ -808,6 +849,14 @@ onBeforeUnmount(registerThreadReaderCommands({
   toggleMuted,
   markSpam,
   blockSender,
+  sweepSender,
+  toggleTranslation: () => toggleMessageTranslation(ensureFocusedMessage()),
+  get translationAvailable() {
+    const id = messageTargets.value.some((message) => message.id === focusedMessageId.value)
+      ? focusedMessageId.value
+      : defaultFocusedMessageId();
+    return messageCanTranslate(id);
+  },
   print: printThread,
   exportThread,
 }));
@@ -992,6 +1041,7 @@ function showEntireThread() {
         :is-aside="!selectionCount && thread.workflowState === 'aside'"
         :is-done="actionDone"
         :is-muted="actionIds.every(id => threadsStore.find(id)?.isMuted)"
+        :can-mark-not-spam="canMarkNotSpam"
         :show-back="showBack"
         :position="props.position ?? 0"
         :total="props.total ?? 0"
@@ -1010,7 +1060,10 @@ function showEntireThread() {
         @delete="deleteThread"
         @toggle-muted="toggleMuted"
         @spam="markSpam"
+        @not-spam="markNotSpam"
         @block="blockSender"
+        @sweep="sweepSender"
+        @add-task="addTask"
         @print="printThread"
         :attachment-count="downloadableAttachments.length"
         :reader-zoom="settings.readerZoom"
@@ -1086,6 +1139,21 @@ function showEntireThread() {
               {{ $t('common.done') }}
             </span>
           </div>
+          <!-- The filter's verdict, with its answer next to it: one key or
+               one click and the mark is gone. -->
+          <AppBanner
+            v-if="(thread.likelySpam || thread.spamMoved) && !showSelectionSummary"
+            class="thread-spam-banner"
+            tone="warning"
+            :title="thread.spamMoved ? $t('thread.spam.movedBannerTitle') : $t('thread.spam.bannerTitle')"
+            :detail="thread.spamMoved ? $t('thread.spam.movedBannerDetail') : $t('thread.spam.bannerDetail')"
+          >
+            <template #actions>
+              <AppButton size="sm" variant="secondary" :shortcut="shortcutHint('markNotSpam')" @click="markNotSpam">
+                {{ $t('thread.actions.notSpam') }}
+              </AppButton>
+            </template>
+          </AppBanner>
           <TopicMembershipState v-if="threadId" item-type="thread" :item-ids="[threadId]" />
           <div v-if="threadTopics.length > 0" :class="[ui.isMobile ? 'mt-1.5' : 'mt-2', 'flex flex-wrap items-center gap-1.5']">
             <TopicChip
@@ -1137,6 +1205,7 @@ function showEntireThread() {
           :draft-recipient="draftRecipientName"
           :draft-identity="threadAccount?.displayName ?? ''"
           :draft-identity-color="threadAccount?.color ?? null"
+          :draft-identity-avatar="threadAccount?.avatar ?? null"
           :collapsed-message-ids="collapsedMessageIds"
           :body-mounted-ids="bodyMountedIds"
           :focused-message-id="focusedMessageId"
@@ -1160,6 +1229,7 @@ function showEntireThread() {
             :recipient="replyRecipientName"
             :identity="threadAccount?.displayName ?? ''"
             :identity-color="threadAccount?.color ?? null"
+            :identity-avatar="threadAccount?.avatar ?? null"
             @reply="replyThread"
           />
         </div>
@@ -1220,6 +1290,12 @@ function showEntireThread() {
 </template>
 
 <style scoped>
+.thread-spam-banner {
+  margin-top: var(--space-sm);
+  border: var(--border-muted);
+  border-radius: var(--radius-md);
+}
+
 .thread-reading-content {
   padding: var(--space-xl) calc(var(--space-5) * 2) var(--space-2xl);
 }
@@ -1236,7 +1312,7 @@ function showEntireThread() {
 }
 
 /*
- * 48rem leaves the body (the column less the 52px avatar indent) at about
+ * 48rem leaves the body (the column less the 54px avatar indent) at about
  * 716px, so the 640–700px tables a lot of HTML mail is built on still fit
  * without sideways scrolling. Plain text keeps its own 60ch measure inside it.
  */

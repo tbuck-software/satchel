@@ -68,6 +68,21 @@
           "never": "Not synced yet",
           "offline": "Offline — no connection",
           "syncing": "Syncing…"
+        },
+        "progress": {
+          "title": "Mail sync",
+          "history": "Loading older mail",
+          "details": "Show sync details",
+          "counts": "{done} of {total} messages",
+          "folder": "Reading {folder}",
+          "folderCount": "{folder} · folder {current} of {total}",
+          "preparing": "Connecting to your mailbox…",
+          "waiting": "Working in the background",
+          "paused": "Paused while offline",
+          "needsAttention": "This account needs attention. Check its sync error.",
+          "updated": "Last activity {time}",
+          "explanation": "Older mail loads in the background — keep working meanwhile. Totals grow while more folders are found.",
+          "complete": "Everything is up to date."
         }
       },
       "update": {
@@ -86,6 +101,20 @@
         "checking": "Checking for updates…",
         "upToDate": "You are up to date.",
         "sourceBuild": "This build is updated from source."
+      },
+      "status": {
+        "signIn": "Sign-in needed",
+        "importing": "Older mail {percent}",
+        "syncFailed": "Sync failed",
+        "error": "Something failed",
+        "certificate": "Check certificate",
+        "review": "{count} to review",
+        "offline": "Offline",
+        "syncing": "Syncing",
+        "more": "+{count}",
+        "title": "Sync and accounts",
+        "details": "Show details",
+        "syncNow": "Sync now"
       }
     },
     "commands": {
@@ -119,7 +148,10 @@
         "mute": "mute silence notifications",
         "spam": "spam junk",
         "undo": "undo revert",
-        "openSettingsSection": "settings preferences options"
+        "openSettingsSection": "settings preferences options",
+        "notSpam": "not spam ham wanted inbox",
+        "cleanup": "clean up sweep senders newsletters unsubscribe",
+        "newTask": "task todo to-do add create"
       },
       "markDone": "Mark as done",
       "markDoneMany": "Mark {count} emails as done",
@@ -153,14 +185,19 @@
       "exportText": "Export conversation as text",
       "moveToFolder": "Move to {folder}",
       "undo": "Undo: {label}",
-      "openSettingsSection": "Settings: {section}"
+      "openSettingsSection": "Settings: {section}",
+      "sweepSender": "Clean up mail from this sender…",
+      "openCleanup": "Open cleanup assistant",
+      "addTask": "Add as task",
+      "newTask": "New task"
     },
     "nav": {
       "agenda": {
         "allDayCount": "{count} entries",
         "more": "+{count} more",
         "now": "Now",
-        "title": "Today"
+        "title": "Today",
+        "tasksDue": "{count} task due | {count} tasks due"
       },
       "calendar": "Calendar",
       "composeMessage": "Write a new message",
@@ -259,7 +296,8 @@
       "mailboxes": {
         "title": "Mailboxes",
         "current": "{mailbox}, switch mailbox"
-      }
+      },
+      "tasks": "Tasks"
     },
     "shortcuts": {
       "actions": {
@@ -390,6 +428,30 @@
         "fileTo": {
           "label": "File in a folder or topic",
           "keywords": "file move folder topic label"
+        },
+        "markNotSpam": {
+          "keywords": "not spam ham wanted",
+          "label": "Not spam"
+        },
+        "sweepSender": {
+          "keywords": "sweep clean up sender archive delete older",
+          "label": "Clean up mail from sender"
+        },
+        "cleanupKeepLatest": {
+          "keywords": "cleanup keep latest archive rest",
+          "label": "Keep the latest, archive the rest"
+        },
+        "cleanupUnsubscribe": {
+          "keywords": "cleanup unsubscribe newsletter",
+          "label": "Unsubscribe from the sender"
+        },
+        "cleanupRule": {
+          "keywords": "cleanup rule from now on",
+          "label": "Set a rule for the sender"
+        },
+        "createTask": {
+          "keywords": "task todo",
+          "label": "Add mail as task"
         }
       },
       "close": "Close keyboard shortcuts",
@@ -397,7 +459,8 @@
         "global": "Always",
         "mail": "Email focused",
         "mailbox": "Mailbox focused",
-        "navigation": "Navigation"
+        "navigation": "Navigation",
+        "cleanup": "Cleanup"
       },
       "editBindings": "Edit shortcuts",
       "footerHint": "shows actions for the focused email right in the command palette.",
@@ -510,6 +573,21 @@
           "never": "Noch nicht synchronisiert",
           "offline": "Offline — keine Verbindung",
           "syncing": "Wird synchronisiert …"
+        },
+        "progress": {
+          "title": "E-Mail-Abgleich",
+          "history": "Ältere E-Mails laden",
+          "details": "Abgleich anzeigen",
+          "counts": "{done} von {total} Nachrichten",
+          "folder": "{folder} wird gelesen",
+          "folderCount": "{folder} · Ordner {current} von {total}",
+          "preparing": "Postfach verbinden …",
+          "waiting": "Läuft im Hintergrund",
+          "paused": "Offline pausiert",
+          "needsAttention": "Dieses Konto benötigt deine Aufmerksamkeit. Prüfe den Sync-Fehler.",
+          "updated": "Letzte Aktivität {time}",
+          "explanation": "Ältere E-Mails laden im Hintergrund — du kannst weiterarbeiten. Die Summe wächst, solange weitere Ordner gefunden werden.",
+          "complete": "Alles ist auf dem neuesten Stand."
         }
       },
       "update": {
@@ -528,6 +606,20 @@
         "checking": "Updates werden gesucht…",
         "upToDate": "Du nutzt die aktuelle Version.",
         "sourceBuild": "Dieser Build wird aus dem Quellcode aktualisiert."
+      },
+      "status": {
+        "signIn": "Anmeldung nötig",
+        "importing": "Ältere E-Mails {percent}",
+        "syncFailed": "Abgleich gestört",
+        "error": "Fehler aufgetreten",
+        "certificate": "Zertifikat prüfen",
+        "review": "{count} zu prüfen",
+        "offline": "Offline",
+        "syncing": "Abgleich läuft",
+        "more": "+{count}",
+        "title": "Abgleich und Konten",
+        "details": "Details anzeigen",
+        "syncNow": "Jetzt abgleichen"
       }
     },
     "commands": {
@@ -561,7 +653,10 @@
         "mute": "stumm stummschalten mute",
         "spam": "spam junk werbung",
         "undo": "rückgängig undo",
-        "openSettingsSection": "settings einstellungen optionen"
+        "openSettingsSection": "settings einstellungen optionen",
+        "notSpam": "kein spam erwünscht posteingang",
+        "cleanup": "aufräumen absender newsletter abmelden sweep",
+        "newTask": "aufgabe todo anlegen neu"
       },
       "markDone": "Als erledigt markieren",
       "markDoneMany": "{count} E-Mails erledigen",
@@ -595,14 +690,19 @@
       "exportText": "Unterhaltung als Text exportieren",
       "moveToFolder": "Nach {folder} verschieben",
       "undo": "Rückgängig: {label}",
-      "openSettingsSection": "Einstellungen: {section}"
+      "openSettingsSection": "Einstellungen: {section}",
+      "sweepSender": "E-Mails dieses Absenders aufräumen …",
+      "openCleanup": "Aufräum-Assistent öffnen",
+      "addTask": "Als Aufgabe anlegen",
+      "newTask": "Neue Aufgabe"
     },
     "nav": {
       "agenda": {
         "allDayCount": "{count} Einträge",
         "more": "+{count} weitere",
         "now": "Jetzt",
-        "title": "Heute"
+        "title": "Heute",
+        "tasksDue": "{count} Aufgabe fällig | {count} Aufgaben fällig"
       },
       "calendar": "Kalender",
       "composeMessage": "Neue Nachricht schreiben",
@@ -701,7 +801,8 @@
       "mailboxes": {
         "title": "Postfächer",
         "current": "{mailbox}, Postfach wechseln"
-      }
+      },
+      "tasks": "Aufgaben"
     },
     "shortcuts": {
       "actions": {
@@ -832,6 +933,30 @@
         "fileTo": {
           "label": "In Ordner oder Thema ablegen",
           "keywords": "ablegen verschieben ordner thema label file move"
+        },
+        "markNotSpam": {
+          "keywords": "kein spam erwünscht",
+          "label": "Kein Spam"
+        },
+        "sweepSender": {
+          "keywords": "aufräumen absender archivieren löschen älter sweep",
+          "label": "E-Mails vom Absender aufräumen"
+        },
+        "cleanupKeepLatest": {
+          "keywords": "aufräumen neueste behalten rest archivieren",
+          "label": "Neueste behalten, Rest archivieren"
+        },
+        "cleanupUnsubscribe": {
+          "keywords": "aufräumen abmelden newsletter",
+          "label": "Beim Absender abmelden"
+        },
+        "cleanupRule": {
+          "keywords": "aufräumen regel ab jetzt",
+          "label": "Regel für den Absender festlegen"
+        },
+        "createTask": {
+          "keywords": "aufgabe todo",
+          "label": "E-Mail als Aufgabe anlegen"
         }
       },
       "close": "Tastenkürzel schließen",
@@ -839,7 +964,8 @@
         "global": "Immer",
         "mail": "E-Mail fokussiert",
         "mailbox": "Mailbox fokussiert",
-        "navigation": "Navigation"
+        "navigation": "Navigation",
+        "cleanup": "Aufräumen"
       },
       "editBindings": "Kürzel bearbeiten",
       "footerHint": "zeigt Aktionen für die fokussierte E-Mail direkt in der Befehlspalette.",

@@ -98,6 +98,7 @@ pub struct BodyProvenance {
 )]
 pub struct DecryptedAttachmentBinding {
     pub id: String,
+    #[serde(serialize_with = "satchel_core::utils::filename::serialize_filename")]
     pub filename: String,
     pub content_type: String,
     pub size: i64,
@@ -2289,7 +2290,9 @@ fn parse_address_json(raw: Option<String>) -> Vec<String> {
 /// HTTP API and the CLI reach `send_message` directly.
 const MAX_TOTAL_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
 
-fn ensure_attachments_within_limit(attachments: &[OutgoingAttachmentInput]) -> Result<(), String> {
+pub(crate) fn ensure_attachments_within_limit(
+    attachments: &[OutgoingAttachmentInput],
+) -> Result<(), String> {
     // base64 expands by 4/3; compare decoded sizes against the budget.
     let total: usize = attachments
         .iter()
@@ -2324,24 +2327,32 @@ fn is_owned_sender(candidate: &str, primary: &str, aliases: &[String]) -> bool {
         .any(|owned| owned.trim().eq_ignore_ascii_case(candidate))
 }
 
-async fn ensure_sender_is_owned(
+/// The address this send goes out under, as the composer shows it: the chosen
+/// alias, or the account's own address when none was chosen. Every later step
+/// (draft snapshot, queue payload, SMTP envelope, sent copy) reads this value,
+/// so none of them has to guess and none can store a message without sender.
+pub(crate) async fn resolve_sender(
     pool: &SqlitePool,
     account_id: &str,
     from_address: Option<&str>,
-) -> CommandResult<()> {
-    let Some(candidate) = from_address
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return Ok(());
-    };
+) -> CommandResult<String> {
     let primary =
         sqlx::query_scalar::<_, String>("SELECT email FROM accounts WHERE id = ? LIMIT 1")
             .bind(account_id)
             .fetch_optional(pool)
             .await
             .map_err(CommandError::unexpected)?
-            .unwrap_or_default();
+            .ok_or_else(|| CommandError::new("backend.errors.accountNotFound"))?;
+    let Some(candidate) = from_address
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        let primary = primary.trim();
+        if primary.is_empty() {
+            return Err(CommandError::new("backend.errors.senderAddressMissing"));
+        }
+        return Ok(primary.to_string());
+    };
     let aliases = AliasRepository::new(pool)
         .list(Some(account_id))
         .await
@@ -2351,10 +2362,19 @@ async fn ensure_sender_is_owned(
         .collect::<Vec<_>>();
 
     if is_owned_sender(candidate, &primary, &aliases) {
-        return Ok(());
+        return Ok(candidate.to_string());
     }
     Err(CommandError::new("backend.errors.senderAddressNotOwned")
         .with_param("address", candidate.to_string()))
+}
+
+/// How a send is queued.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SendMode {
+    /// The composer: the account's signature and the Undo Send window apply.
+    Composer,
+    /// A chat line: sent at once, as typed, without a signature.
+    Immediate,
 }
 
 #[tauri::command]
@@ -2365,7 +2385,28 @@ pub async fn send_message(
     account_id: String,
     input: OutgoingMessageInput,
 ) -> CommandResult<SendMessageResult> {
+    send_message_inner(
+        app,
+        state.inner(),
+        pool.inner(),
+        account_id,
+        input,
+        SendMode::Composer,
+    )
+    .await
+}
+
+pub(crate) async fn send_message_inner(
+    app: tauri::AppHandle,
+    state: &AppState,
+    pool: &SqlitePool,
+    account_id: String,
+    input: OutgoingMessageInput,
+    mode: SendMode,
+) -> CommandResult<SendMessageResult> {
     let mut input = input;
+    // Only Satchel's own sends (a rule's forward) are automatic.
+    input.auto_submitted = None;
     // Any of To, Cc and Bcc is enough: all three go into the envelope.
     let has_recipient = !normalize_recipients(&input.to)?.is_empty()
         || !normalize_recipients(&input.cc)?.is_empty()
@@ -2374,15 +2415,21 @@ pub async fn send_message(
         return Err(CommandError::from("missing recipient address"));
     }
     ensure_attachments_within_limit(&input.attachments)?;
-    ensure_sender_is_owned(pool.inner(), &account_id, input.from_address.as_deref()).await?;
-    apply_selected_signature(pool.inner(), &account_id, &mut input).await?;
+    input.from_address =
+        Some(resolve_sender(pool, &account_id, input.from_address.as_deref()).await?);
+    if mode == SendMode::Composer {
+        apply_selected_signature(pool, &account_id, &mut input).await?;
+    }
 
     let mut scheduled_for = parse_scheduled_for(input.scheduled_for.as_deref())?;
 
     // Honor the configurable "Undo Send" delay: when the user hasn't picked an
     // explicit Send-Later time, defer the send by N seconds so they can hit Undo
     // before the network call fires.
-    let undo_seconds = read_undo_send_seconds(pool.inner()).await;
+    let undo_seconds = match mode {
+        SendMode::Composer => read_undo_send_seconds(pool).await,
+        SendMode::Immediate => 0,
+    };
     let mut undo_delay_active = false;
     if scheduled_for.is_none() && undo_seconds > 0 {
         scheduled_for = Some(Utc::now() + chrono::Duration::seconds(undo_seconds));
@@ -2395,7 +2442,7 @@ pub async fn send_message(
     let action = build_send_action(account_id.clone(), input.clone(), scheduled_for)?;
     let queued_id = action.id.clone();
 
-    satchel_core::drafts::enqueue_send_with_draft(pool.inner(), &state.queue, &action)
+    satchel_core::drafts::enqueue_send_with_draft(pool, &state.queue, &action)
         .await
         .map_err(CommandError::from)?;
 
@@ -2432,9 +2479,9 @@ pub async fn send_message(
     }
 
     // Try immediately. Worker will retry if this raises a retryable error.
-    match execute_send_action(pool.inner(), &app, &state, &action).await {
+    match execute_send_action(pool, &app, state, &action).await {
         Ok(mut result) => {
-            state.queue.mark_completed(pool.inner(), &queued_id).await?;
+            state.queue.mark_completed(pool, &queued_id).await?;
             state.events.publish(AppEvent::SyncCompleted);
             let _ = tauri::Emitter::emit(
                 &app,
@@ -2451,7 +2498,7 @@ pub async fn send_message(
         Err(err) => {
             use satchel_core::sync::worker::{settle_action, Outcome};
             let failure = err.clone();
-            let outcome = settle_action(pool.inner(), &state.queue, &action, Err(err)).await?;
+            let outcome = settle_action(pool, &state.queue, &action, Err(err)).await?;
             let status = match outcome {
                 Outcome::DeliveryUnknown { error } => {
                     let _ = tauri::Emitter::emit(
@@ -2610,6 +2657,20 @@ pub async fn persist_sent_message_record(
             CommandError::new("backend.errors.sentMessagePersistenceFailed")
         })?;
 
+    // Answering a thread says its mail was wanted: a weak ham example for the
+    // spam filter, never overriding a label the user gave.
+    if let Err(error) = satchel_core::spam::train_threads(
+        pool,
+        std::slice::from_ref(&persisted.thread_id),
+        satchel_core::spam::Label::Ham,
+        satchel_core::spam::Signal::Weak,
+        None,
+    )
+    .await
+    {
+        tracing::warn!(%error, "spam filter training failed after a reply");
+    }
+
     FollowUpRepository::new(pool)
         .create_for_sent_message(
             account_id,
@@ -2654,7 +2715,7 @@ pub async fn persist_sent_message_record(
     })
 }
 
-async fn apply_selected_signature(
+pub(crate) async fn apply_selected_signature(
     pool: &SqlitePool,
     account_id: &str,
     input: &mut OutgoingMessageInput,
@@ -3274,6 +3335,53 @@ mod tests {
         assert!(!is_owned_sender("   ", "max@firma.de", &aliases));
         // A deleted alias stops being owned the moment it leaves the list.
         assert!(!is_owned_sender("sales@firma.de", "max@firma.de", &[]));
+    }
+
+    /// A reply from the account's own address arrives without `from_address`;
+    /// the send must carry the address the composer showed, not nothing.
+    #[tokio::test]
+    async fn a_send_without_a_chosen_identity_goes_out_under_the_account_address() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("../crates/satchel-core/src/db/migrations")
+            .run(&pool)
+            .await
+            .unwrap();
+        for sql in [
+            "INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at) VALUES ('a', 'Account', 'me@example.test', 'imap', '{}', '', '', '')",
+            "INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at) VALUES ('blank', 'Blank', '  ', 'imap', '{}', '', '', '')",
+            "INSERT INTO account_aliases (id, account_id, email, created_at, updated_at) VALUES ('al', 'a', 'sales@example.test', '', '')",
+        ] {
+            sqlx::query(sql).execute(&pool).await.unwrap();
+        }
+
+        for missing in [None, Some(""), Some("   ")] {
+            assert_eq!(
+                super::resolve_sender(&pool, "a", missing).await.unwrap(),
+                "me@example.test"
+            );
+        }
+        assert_eq!(
+            super::resolve_sender(&pool, "a", Some(" sales@example.test "))
+                .await
+                .unwrap(),
+            "sales@example.test"
+        );
+        let refused = super::resolve_sender(&pool, "a", Some("boss@elsewhere.test"))
+            .await
+            .unwrap_err();
+        assert_eq!(refused.key, "backend.errors.senderAddressNotOwned");
+        let missing = super::resolve_sender(&pool, "blank", None)
+            .await
+            .unwrap_err();
+        assert_eq!(missing.key, "backend.errors.senderAddressMissing");
+        let gone = super::resolve_sender(&pool, "deleted", None)
+            .await
+            .unwrap_err();
+        assert_eq!(gone.key, "backend.errors.accountNotFound");
     }
 
     #[test]
@@ -4755,7 +4863,7 @@ struct RemoteMessageSourceTarget {
 
 /// Reads on `read_pool`. Only a refresh that must persist rotated OAuth
 /// credentials takes one of the writer's connections.
-pub(super) async fn fetch_remote_message_source(
+pub(crate) async fn fetch_remote_message_source(
     read_pool: &SqlitePool,
     write_pool: &SqlitePool,
     message_id: &str,

@@ -1,0 +1,190 @@
+{
+  "en": {
+    "cleanup": {
+      "title": "Clean up",
+      "subtitle": "Top senders in the Inbox, last {days} days",
+      "subtitleAccount": "Top senders in {account}, last {days} days",
+      "allAccounts": "All accounts",
+      "loadFailed": "Could not load the senders.",
+      "empty": {
+        "title": "Nothing to clean up",
+        "description": "No sender has mail from the last {days} days in the Inbox."
+      },
+      "messages": "{count} message | {count} messages",
+      "unreadShare": "{percent}% unread",
+      "newest": "newest {date}",
+      "canUnsubscribe": "Unsubscribe available",
+      "unsubscribed": "Unsubscribed",
+      "openForAccount": "Clean up mailbox…",
+      "actions": {
+        "archiveAll": "Archive all",
+        "trashAll": "Move all to Trash",
+        "keepLatest": "Keep latest",
+        "rule": "From now on…"
+      },
+      "keys": {
+        "title": "Keyboard",
+        "move": "Move"
+      },
+      "threads": "{count} conversation | {count} conversations",
+      "trashConfirm": {
+        "title": "Move one conversation from {sender} to Trash? | Move {count} conversations from {sender} to Trash?",
+        "body": "Conversations with other participants, your replies or a pin stay. Undo is offered for a few seconds."
+      }
+    },
+    "sweep": {
+      "menuItem": "Clean up mail from sender…",
+      "title": "Clean up mail from {sender}",
+      "inboxCount": "No conversations in the Inbox | One conversation in the Inbox | {count} conversations in the Inbox",
+      "now": {
+        "heading": "Now",
+        "archiveAll": "Archive all",
+        "trashAll": "Move all to Trash",
+        "keepLatestArchive": "Keep the latest, archive the rest",
+        "keepLatestTrash": "Keep the latest, move the rest to Trash"
+      },
+      "rule": {
+        "heading": "From now on",
+        "hint": "Runs on this sender's mail in the Inbox once right away, then every 15 minutes.",
+        "actionLabel": "What happens to the mail",
+        "archive": "Archive",
+        "trash": "Move to Trash",
+        "move": "Move to folder",
+        "olderThan": "Once it is older than",
+        "days": "{count} day | {count} days",
+        "customDays": "Custom…",
+        "customTitle": "Older than how many days?",
+        "customLabel": "Days (1–3650)",
+        "customInvalid": "Enter a number of days between 1 and 3650.",
+        "folder": "Folder",
+        "keepLatest": "Always keep the latest",
+        "matchesNow": "Nothing qualifies yet. | One conversation qualifies now. | {count} conversations qualify now.",
+        "save": "Save rule",
+        "update": "Update rule",
+        "remove": "Remove rule",
+        "saved": "Rule saved for {sender}.",
+        "saveFailed": "Could not save the rule: {error}",
+        "removed": "Rule for {sender} removed.",
+        "removeFailed": "Could not remove the rule: {error}",
+        "needsFolder": "Its folder is gone. Pick another one; until then the rule does nothing.",
+        "trashConfirmTitle": "Save the rule? Nothing goes to Trash yet. | Save the rule and move one conversation to Trash now? | Save the rule and move {count} conversations to Trash now?",
+        "trashConfirmBody": "From then on, mail from {sender} goes to Trash every 15 minutes once it is a day old. A rule's moves have no Undo. | From then on, mail from {sender} goes to Trash every 15 minutes once it is {count} days old. A rule's moves have no Undo."
+      },
+      "result": {
+        "nothing": "Nothing from {sender} to clean up in the Inbox.",
+        "failed": "Could not clean up this sender's mail.",
+        "trashed": "One conversation moved to Trash | {count} conversations moved to Trash",
+        "archivedOf": "{count} of {total} conversations done",
+        "trashedOf": "{count} of {total} conversations moved to Trash"
+      },
+      "summary": {
+        "archive": "Archive everything",
+        "archiveAfter": "Archive after {count} day | Archive after {count} days",
+        "trashAfter": "Move to Trash after {count} day | Move to Trash after {count} days",
+        "move": "Move to {folder}",
+        "keepingLatest": "{rule}, keeping the latest",
+        "moveNeedsFolder": "Move to a folder: needs a folder"
+      },
+      "from": "From {email}",
+      "noSender": "Only you write in this conversation; there is no sender to clean up.",
+      "skipped": {
+        "shared": "One conversation with other participants, your replies or a draft is left alone. | {count} conversations with other participants, your replies or drafts are left alone.",
+        "starred": "One pinned conversation stays. | {count} pinned conversations stay."
+      }
+    }
+  },
+  "de": {
+    "cleanup": {
+      "title": "Aufräumen",
+      "subtitle": "Häufigste Absender im Posteingang, letzte {days} Tage",
+      "subtitleAccount": "Häufigste Absender in {account}, letzte {days} Tage",
+      "allAccounts": "Alle Konten",
+      "loadFailed": "Die Absender konnten nicht geladen werden.",
+      "empty": {
+        "title": "Nichts aufzuräumen",
+        "description": "Kein Absender hat Mails aus den letzten {days} Tagen im Posteingang."
+      },
+      "messages": "{count} Nachricht | {count} Nachrichten",
+      "unreadShare": "{percent} % ungelesen",
+      "newest": "neueste {date}",
+      "canUnsubscribe": "Abmelden möglich",
+      "unsubscribed": "Abgemeldet",
+      "openForAccount": "Postfach aufräumen …",
+      "actions": {
+        "archiveAll": "Alle archivieren",
+        "trashAll": "Alle in den Papierkorb",
+        "keepLatest": "Neueste behalten",
+        "rule": "Ab jetzt …"
+      },
+      "keys": {
+        "title": "Tastatur",
+        "move": "Bewegen"
+      },
+      "threads": "{count} Unterhaltung | {count} Unterhaltungen",
+      "trashConfirm": {
+        "title": "Eine Unterhaltung von {sender} in den Papierkorb verschieben? | {count} Unterhaltungen von {sender} in den Papierkorb verschieben?",
+        "body": "Unterhaltungen mit anderen Beteiligten, deinen Antworten oder einer Anheftung bleiben. Für ein paar Sekunden lässt es sich rückgängig machen."
+      }
+    },
+    "sweep": {
+      "menuItem": "E-Mails vom Absender aufräumen …",
+      "title": "E-Mails von {sender} aufräumen",
+      "inboxCount": "Keine Unterhaltung im Posteingang | Eine Unterhaltung im Posteingang | {count} Unterhaltungen im Posteingang",
+      "now": {
+        "heading": "Jetzt",
+        "archiveAll": "Alle archivieren",
+        "trashAll": "Alle in den Papierkorb",
+        "keepLatestArchive": "Neueste behalten, Rest archivieren",
+        "keepLatestTrash": "Neueste behalten, Rest in den Papierkorb"
+      },
+      "rule": {
+        "heading": "Ab jetzt",
+        "hint": "Läuft über die Mails dieses Absenders im Posteingang einmal sofort, danach alle 15 Minuten.",
+        "actionLabel": "Was mit den Mails passiert",
+        "archive": "Archivieren",
+        "trash": "In den Papierkorb",
+        "move": "In Ordner verschieben",
+        "olderThan": "Sobald sie älter sind als",
+        "days": "{count} Tag | {count} Tage",
+        "customDays": "Eigene …",
+        "customTitle": "Älter als wie viele Tage?",
+        "customLabel": "Tage (1–3650)",
+        "customInvalid": "Gib eine Zahl von Tagen zwischen 1 und 3650 ein.",
+        "folder": "Ordner",
+        "keepLatest": "Neueste immer behalten",
+        "matchesNow": "Noch passt nichts. | Eine Unterhaltung passt schon jetzt. | {count} Unterhaltungen passen schon jetzt.",
+        "save": "Regel speichern",
+        "update": "Regel ändern",
+        "remove": "Regel entfernen",
+        "saved": "Regel für {sender} gespeichert.",
+        "saveFailed": "Die Regel konnte nicht gespeichert werden: {error}",
+        "removed": "Regel für {sender} entfernt.",
+        "removeFailed": "Die Regel konnte nicht entfernt werden: {error}",
+        "needsFolder": "Der Ordner existiert nicht mehr. Wähle einen anderen; bis dahin tut die Regel nichts.",
+        "trashConfirmTitle": "Regel speichern? Noch geht nichts in den Papierkorb. | Regel speichern und eine Unterhaltung jetzt in den Papierkorb verschieben? | Regel speichern und {count} Unterhaltungen jetzt in den Papierkorb verschieben?",
+        "trashConfirmBody": "Ab dann wandern Mails von {sender} alle 15 Minuten in den Papierkorb, sobald sie einen Tag alt sind. Was eine Regel verschiebt, lässt sich nicht rückgängig machen. | Ab dann wandern Mails von {sender} alle 15 Minuten in den Papierkorb, sobald sie {count} Tage alt sind. Was eine Regel verschiebt, lässt sich nicht rückgängig machen."
+      },
+      "result": {
+        "nothing": "Im Posteingang gibt es nichts von {sender} aufzuräumen.",
+        "failed": "Die Mails dieses Absenders konnten nicht aufgeräumt werden.",
+        "trashed": "Eine Unterhaltung in den Papierkorb verschoben | {count} Unterhaltungen in den Papierkorb verschoben",
+        "archivedOf": "{count} von {total} Unterhaltungen erledigt",
+        "trashedOf": "{count} von {total} Unterhaltungen in den Papierkorb verschoben"
+      },
+      "summary": {
+        "archive": "Alles archivieren",
+        "archiveAfter": "Nach {count} Tag archivieren | Nach {count} Tagen archivieren",
+        "trashAfter": "Nach {count} Tag in den Papierkorb | Nach {count} Tagen in den Papierkorb",
+        "move": "Nach {folder} verschieben",
+        "keepingLatest": "{rule}, Neueste bleibt",
+        "moveNeedsFolder": "In einen Ordner verschieben: Ordner fehlt"
+      },
+      "from": "Von {email}",
+      "noSender": "In dieser Unterhaltung schreibst nur du; es gibt keinen Absender zum Aufräumen.",
+      "skipped": {
+        "shared": "Eine Unterhaltung mit anderen Beteiligten, deinen Antworten oder einem Entwurf bleibt unberührt. | {count} Unterhaltungen mit anderen Beteiligten, deinen Antworten oder Entwürfen bleiben unberührt.",
+        "starred": "Eine angeheftete Unterhaltung bleibt. | {count} angeheftete Unterhaltungen bleiben."
+      }
+    }
+  }
+}

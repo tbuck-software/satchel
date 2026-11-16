@@ -7,6 +7,12 @@ use sqlx::{FromRow, Sqlite, SqlitePool, Transaction};
 pub const ACTION_SEND_MESSAGE: &str = "send_message";
 /// Draft uploads share the durable queue and the manual retry for sync actions.
 pub const ACTION_SYNC_DRAFT: &str = "sync_draft";
+/// A rule's forward of one message: fetch the original, check it may be
+/// forwarded, queue the send. Scheduled like a send, ahead of the account's
+/// other mutations: it reads the message where it is, before a rule's move
+/// queued after it changes its folder-scoped UID; and while it waits for a
+/// retry it does not hold up the account's other actions.
+pub const ACTION_RULE_FORWARD: &str = "rule_forward";
 
 /// The states an outgoing message may be discarded from. Anything else means
 /// the worker already owns the row: `sending` is mid-submission, and a row that
@@ -137,6 +143,30 @@ impl QueueRow {
     }
 }
 
+/// Rows per INSERT of a batch enqueue; bounds the size of one bound JSON text.
+const BATCH_INSERT_ROWS: usize = 500;
+
+/// No queue row has any of these ids, and no id repeats.
+async fn all_new(
+    tx: &mut Transaction<'_, Sqlite>,
+    actions: &[QueuedAction],
+) -> Result<bool, String> {
+    let mut ids: Vec<&str> = actions.iter().map(|a| a.id.as_str()).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    if ids.len() != actions.len() {
+        return Ok(false);
+    }
+    let existing: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM sync_queue WHERE id IN (SELECT value FROM json_each(?)))",
+    )
+    .bind(serde_json::to_string(&ids).map_err(|e| e.to_string())?)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(!existing)
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct SyncQueue {
     /// Wakes the outbox worker as soon as an action is enqueued/requeued, so a
@@ -157,7 +187,7 @@ impl SyncQueue {
             "WITH heads AS (
                 SELECT *, ROW_NUMBER() OVER (
                     PARTITION BY account_id ORDER BY
-                    CASE action_type WHEN 'send_message' THEN 0 ELSE 1 END,
+                    CASE action_type WHEN 'send_message' THEN 0 WHEN 'rule_forward' THEN 0 ELSE 1 END,
                     rowid
                 ) AS position
                 FROM sync_queue
@@ -165,7 +195,7 @@ impl SyncQueue {
                   AND (id NOT LIKE 'notification:%' OR COALESCE(updated_at_ms, 0) <= ?)
                   AND NOT EXISTS (SELECT 1 FROM accounts WHERE accounts.id = sync_queue.account_id AND is_active = 0)
                   AND NOT EXISTS (SELECT 1 FROM sync_queue_dependencies d JOIN sync_queue predecessor ON predecessor.id = d.depends_on WHERE d.action_id = sync_queue.id)
-                  AND (action_type <> 'send_message' OR
+                  AND (action_type NOT IN ('send_message', 'rule_forward') OR
                        (next_retry_at IS NULL OR next_retry_at <= ?)
                        AND (scheduled_for IS NULL OR scheduled_for <= ?))
              ) SELECT id, account_id, action_type, payload, status, retry_count,
@@ -174,7 +204,7 @@ impl SyncQueue {
                FROM heads WHERE position = 1
                  AND (next_retry_at IS NULL OR next_retry_at <= ?)
                  AND (scheduled_for IS NULL OR scheduled_for <= ?)
-               ORDER BY CASE action_type WHEN 'send_message' THEN 0 ELSE 1 END, created_at",
+               ORDER BY CASE action_type WHEN 'send_message' THEN 0 WHEN 'rule_forward' THEN 0 ELSE 1 END, created_at",
         )
         .bind(notification_lease_cutoff_ms())
         .bind(&now)
@@ -306,6 +336,67 @@ impl SyncQueue {
         Ok(())
     }
 
+    /// Insert actions in order as part of a caller-owned transaction, with the
+    /// same result as [`Self::enqueue_in_transaction`] for each in turn.
+    ///
+    /// New ids — the common case of a bulk move — take a constant number of
+    /// statements for the whole batch. A batch that names an existing row, or
+    /// one id twice, goes through the single path, which knows how to merge
+    /// into a row.
+    pub async fn enqueue_batch_in_transaction(
+        &self,
+        tx: &mut Transaction<'_, Sqlite>,
+        actions: &[QueuedAction],
+    ) -> Result<(), String> {
+        if actions.len() < 2 || !all_new(tx, actions).await? {
+            for action in actions {
+                self.enqueue_in_transaction(tx, action).await?;
+            }
+            return Ok(());
+        }
+        let planned = super::flag_intents::plan_batch(tx, actions).await?;
+        let now_ms = Utc::now().timestamp_millis();
+        let rows: Vec<serde_json::Value> = actions
+            .iter()
+            .zip(planned)
+            .filter_map(|(action, planned)| match planned {
+                super::flag_intents::Planned::Insert(payload) => Some(serde_json::json!([
+                    action.id,
+                    action.account_id,
+                    action.action_type,
+                    payload,
+                    action.status,
+                    action.retry_count,
+                    action.last_error,
+                    action.created_at,
+                    action.updated_at,
+                    action.next_retry_at,
+                    action.scheduled_for,
+                    now_ms,
+                    action.submission_started_at,
+                    (action.status == "sending").then(sending_session),
+                ])),
+                super::flag_intents::Planned::Superseded => None,
+            })
+            .collect();
+        for chunk in rows.chunks(BATCH_INSERT_ROWS) {
+            sqlx::query(
+                "INSERT INTO sync_queue (id, account_id, action_type, payload, status, retry_count, last_error, created_at, updated_at, next_retry_at, scheduled_for, updated_at_ms, submission_started_at, sending_session)
+                 SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]'),
+                        json_extract(value, '$[3]'), json_extract(value, '$[4]'), json_extract(value, '$[5]'),
+                        json_extract(value, '$[6]'), json_extract(value, '$[7]'), json_extract(value, '$[8]'),
+                        json_extract(value, '$[9]'), json_extract(value, '$[10]'), json_extract(value, '$[11]'),
+                        json_extract(value, '$[12]'), json_extract(value, '$[13]')
+                 FROM json_each(?) ORDER BY key",
+            )
+            .bind(serde_json::Value::from(chunk.to_vec()).to_string())
+            .execute(&mut **tx)
+            .await
+            .map_err(|err| err.to_string())?;
+        }
+        Ok(())
+    }
+
     /// Wake the worker after a transaction containing one or more queue rows
     /// has committed.
     pub fn wake_worker(&self) {
@@ -337,7 +428,7 @@ impl SyncQueue {
                AND (next_retry_at IS NULL OR next_retry_at <= ?)
                AND (scheduled_for IS NULL OR scheduled_for <= ?)
              ORDER BY
-               CASE action_type WHEN 'send_message' THEN 0 ELSE 1 END,
+               CASE action_type WHEN 'send_message' THEN 0 WHEN 'rule_forward' THEN 0 ELSE 1 END,
                COALESCE(next_retry_at, scheduled_for, created_at) ASC
              LIMIT 1",
         )
@@ -629,10 +720,17 @@ impl SyncQueue {
     /// Recover old retry-budget failures at startup. Explicit rejections and
     /// ambiguous deliveries stay terminal. The status/error guard prevents a
     /// concurrent manual retry or edit from being overwritten.
+    ///
+    /// Mail merge copies are left out: their job comes back paused after a
+    /// restart, and its Retry failed is how they go again.
     pub async fn requeue_failed_transient(&self, pool: &SqlitePool) -> Result<u64, String> {
         let rows: Vec<(String, String)> = sqlx::query_as(
-            "SELECT id, last_error FROM sync_queue WHERE status = 'failed' AND last_error IS NOT NULL"
-        ).fetch_all(pool).await.map_err(|err| err.to_string())?;
+            "SELECT id, last_error FROM sync_queue WHERE status = 'failed' AND last_error IS NOT NULL
+               AND substr(id, 1, length(?)) <> ?"
+        )
+        .bind(crate::mail_merge::job::QUEUE_ID_PREFIX)
+        .bind(crate::mail_merge::job::QUEUE_ID_PREFIX)
+        .fetch_all(pool).await.map_err(|err| err.to_string())?;
         let mut changed = 0;
         for (id, error) in rows {
             if !super::errors::SyncError::recoverable_stored_failure(&error) {
@@ -915,6 +1013,34 @@ impl SyncQueue {
         Ok(())
     }
 
+    /// Retry now the sends waiting for a retry because of `error_key` (a key
+    /// that was locked and has just been unlocked). Returns how many.
+    pub async fn wake_mail_held_by(
+        &self,
+        pool: &SqlitePool,
+        error_key: &str,
+    ) -> Result<u64, String> {
+        let now = Utc::now();
+        let woken = sqlx::query(
+            "UPDATE sync_queue
+             SET next_retry_at = NULL, updated_at = ?, updated_at_ms = ?
+             WHERE action_type = ? AND status = 'pending'
+               AND instr(COALESCE(last_error, ''), ?) > 0",
+        )
+        .bind(now.to_rfc3339())
+        .bind(now.timestamp_millis())
+        .bind(ACTION_SEND_MESSAGE)
+        .bind(error_key)
+        .execute(pool)
+        .await
+        .map_err(|err| err.to_string())?
+        .rows_affected();
+        if woken > 0 {
+            self.notify.notify_one();
+        }
+        Ok(woken)
+    }
+
     /// Failed non-send work the user can inspect: every remote mutation and
     /// draft upload. Moves are no longer the only kind that can fail for good.
     pub async fn list_failed_sync_actions(
@@ -1133,6 +1259,54 @@ mod tests {
             .await
             .expect("migrations");
         pool
+    }
+
+    #[tokio::test]
+    async fn unlocking_wakes_only_the_sends_held_for_the_key() {
+        let pool = fresh_pool().await;
+        let queue = SyncQueue::new();
+        let mut held =
+            QueuedAction::new("acc-1".into(), ACTION_SEND_MESSAGE, serde_json::json!({}));
+        held.status = "pending".into();
+        let mut other =
+            QueuedAction::new("acc-1".into(), ACTION_SEND_MESSAGE, serde_json::json!({}));
+        other.status = "pending".into();
+        queue.enqueue(&pool, held.clone()).await.unwrap();
+        queue.enqueue(&pool, other.clone()).await.unwrap();
+        let later = (Utc::now() + chrono::Duration::hours(1)).to_rfc3339();
+        for (id, error) in [
+            (&held.id, "backend.errors.pgpSigningKeyUnavailable"),
+            (&other.id, "smtp timeout"),
+        ] {
+            sqlx::query("UPDATE sync_queue SET last_error = ?, next_retry_at = ? WHERE id = ?")
+                .bind(error)
+                .bind(&later)
+                .bind(id)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            queue
+                .wake_mail_held_by(&pool, "backend.errors.pgpSigningKeyUnavailable")
+                .await
+                .unwrap(),
+            1
+        );
+        let next = |id: String| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, Option<String>>(
+                    "SELECT next_retry_at FROM sync_queue WHERE id = ?",
+                )
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+            }
+        };
+        assert_eq!(next(held.id.clone()).await, None);
+        assert_eq!(next(other.id.clone()).await, Some(later));
     }
 
     #[tokio::test]
@@ -1965,6 +2139,8 @@ mod tests {
                 r#"{"key":"backend.errors.queueActionFailed","params":{"message":"DNS lookup failed"}}"#,
             ),
             ("offline-move", "failed", "connection reset"),
+            // A mail merge copy waits for its job's Retry failed instead.
+            ("mail-merge-row-1", "failed", "connection reset"),
             ("rejected", "failed", "invalid recipient"),
             ("revoked", "failed", "invalid_grant"),
             ("unknown", "delivery_unknown", "connection reset"),

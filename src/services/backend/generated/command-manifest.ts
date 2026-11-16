@@ -170,6 +170,17 @@ export default {
             "kind": "object",
             "fields": {}
         },
+        "check_translation_engine": {
+            "kind": "object",
+            "fields": {
+                "engine": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "choose_directory": {
             "kind": "object",
             "fields": {
@@ -180,6 +191,26 @@ export default {
                         "item": {
                             "kind": "value"
                         }
+                    }
+                }
+            }
+        },
+        "choose_open_file": {
+            "kind": "object",
+            "fields": {
+                "extensions": {
+                    "required": true,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "filterName": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
                     }
                 }
             }
@@ -232,6 +263,10 @@ export default {
                 }
             }
         },
+        "clear_outbound_requests": {
+            "kind": "object",
+            "fields": {}
+        },
         "complete_oauth_flow": {
             "kind": "object",
             "fields": {
@@ -259,6 +294,23 @@ export default {
         "consume_pending_mobile_notification": {
             "kind": "object",
             "fields": {}
+        },
+        "control_mail_merge_job": {
+            "kind": "object",
+            "fields": {
+                "action": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
         },
         "create_backup": {
             "kind": "object",
@@ -313,6 +365,18 @@ export default {
                 }
             }
         },
+        "create_mail_merge_job": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::mail_merge::CreateMailMergeJobInput"
+                    }
+                }
+            }
+        },
         "create_provider_label": {
             "kind": "object",
             "fields": {
@@ -333,6 +397,29 @@ export default {
                     "shape": {
                         "kind": "ref",
                         "name": "app::commands::sources::CreateSourceInput"
+                    }
+                }
+            }
+        },
+        "create_task": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::tasks::CreateTaskInput"
+                    }
+                }
+            }
+        },
+        "create_task_list": {
+            "kind": "object",
+            "fields": {
+                "name": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
                     }
                 }
             }
@@ -489,6 +576,39 @@ export default {
                 }
             }
         },
+        "delete_sweep_rule": {
+            "kind": "object",
+            "fields": {
+                "ruleId": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "delete_task": {
+            "kind": "object",
+            "fields": {
+                "id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "delete_task_list": {
+            "kind": "object",
+            "fields": {
+                "id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "delete_template": {
             "kind": "object",
             "fields": {
@@ -555,6 +675,17 @@ export default {
                 }
             }
         },
+        "detect_server_rules": {
+            "kind": "object",
+            "fields": {
+                "accountId": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "diagnostics_overview": {
             "kind": "object",
             "fields": {}
@@ -562,6 +693,26 @@ export default {
         "diagnostics_report": {
             "kind": "object",
             "fields": {}
+        },
+        "disable_server_rules": {
+            "kind": "object",
+            "fields": {
+                "accountId": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "force": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
         },
         "discard_failed_sync_action": {
             "kind": "object",
@@ -640,6 +791,18 @@ export default {
                     "required": true,
                     "shape": {
                         "kind": "value"
+                    }
+                }
+            }
+        },
+        "enable_server_rules": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::server_rules::EnableServerRulesInput"
                     }
                 }
             }
@@ -725,6 +888,18 @@ export default {
                 }
             }
         },
+        "find_free_slots": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::availability::FreeSlotsInput"
+                    }
+                }
+            }
+        },
         "focus_draft_editor": {
             "kind": "object",
             "fields": {
@@ -768,6 +943,28 @@ export default {
             "kind": "object",
             "fields": {}
         },
+        "get_chat_meta": {
+            "kind": "object",
+            "fields": {
+                "threadId": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "get_mail_merge_job": {
+            "kind": "object",
+            "fields": {
+                "id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "get_message_source": {
             "kind": "object",
             "fields": {
@@ -794,7 +991,15 @@ export default {
                 }
             }
         },
+        "get_server_rules_overview": {
+            "kind": "object",
+            "fields": {}
+        },
         "get_source_capabilities": {
+            "kind": "object",
+            "fields": {}
+        },
+        "get_spam_filter_status": {
             "kind": "object",
             "fields": {}
         },
@@ -833,6 +1038,10 @@ export default {
                     }
                 }
             }
+        },
+        "get_translation_settings": {
+            "kind": "object",
+            "fields": {}
         },
         "get_vacation": {
             "kind": "object",
@@ -940,6 +1149,10 @@ export default {
             "kind": "object",
             "fields": {}
         },
+        "list_account_quotas": {
+            "kind": "object",
+            "fields": {}
+        },
         "list_accounts": {
             "kind": "object",
             "fields": {}
@@ -1034,6 +1247,18 @@ export default {
             "kind": "object",
             "fields": {}
         },
+        "list_cleanup_senders": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::sender_sweep::ListCleanupSendersInput"
+                    }
+                }
+            }
+        },
         "list_contacts": {
             "kind": "object",
             "fields": {}
@@ -1074,6 +1299,18 @@ export default {
                 }
             }
         },
+        "list_labs_flags": {
+            "kind": "object",
+            "fields": {}
+        },
+        "list_local_only_workflow_accounts": {
+            "kind": "object",
+            "fields": {}
+        },
+        "list_mail_merge_jobs": {
+            "kind": "object",
+            "fields": {}
+        },
         "list_mailboxes": {
             "kind": "object",
             "fields": {}
@@ -1102,6 +1339,10 @@ export default {
             }
         },
         "list_open_oauth_flows": {
+            "kind": "object",
+            "fields": {}
+        },
+        "list_outbound_requests": {
             "kind": "object",
             "fields": {}
         },
@@ -1146,6 +1387,18 @@ export default {
         "list_rules": {
             "kind": "object",
             "fields": {}
+        },
+        "list_sender_sweep_targets": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::sender_sweep::SenderSweepTargetsInput"
+                    }
+                }
+            }
         },
         "list_signature_assignments": {
             "kind": "object",
@@ -1215,6 +1468,28 @@ export default {
             "kind": "object",
             "fields": {}
         },
+        "list_sweep_rules": {
+            "kind": "object",
+            "fields": {}
+        },
+        "list_task_lists": {
+            "kind": "object",
+            "fields": {}
+        },
+        "list_tasks": {
+            "kind": "object",
+            "fields": {
+                "includeCompleted": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
+        },
         "list_templates": {
             "kind": "object",
             "fields": {
@@ -1271,6 +1546,23 @@ export default {
             "kind": "object",
             "fields": {}
         },
+        "list_translation_languages": {
+            "kind": "object",
+            "fields": {
+                "engine": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "refresh": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "list_webhooks": {
             "kind": "object",
             "fields": {}
@@ -1310,6 +1602,18 @@ export default {
                 }
             }
         },
+        "mark_threads_not_spam": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::thread_actions::SpamThreadsInput"
+                    }
+                }
+            }
+        },
         "mark_threads_spam": {
             "kind": "object",
             "fields": {
@@ -1322,6 +1626,20 @@ export default {
                 }
             }
         },
+        "message_eml_attachments": {
+            "kind": "object",
+            "fields": {
+                "messageIds": {
+                    "required": true,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
+        },
         "message_link_target": {
             "kind": "object",
             "fields": {
@@ -1329,6 +1647,18 @@ export default {
                     "required": true,
                     "shape": {
                         "kind": "value"
+                    }
+                }
+            }
+        },
+        "message_translation_offer": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::translation::MessageTranslationInput"
                     }
                 }
             }
@@ -1480,6 +1810,29 @@ export default {
                 }
             }
         },
+        "outbound_request_text": {
+            "kind": "object",
+            "fields": {
+                "id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "parse_mail_merge_csv": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::mail_merge::ParseMailMergeCsvInput"
+                    }
+                }
+            }
+        },
         "pending_crash_reports": {
             "kind": "object",
             "fields": {}
@@ -1511,6 +1864,18 @@ export default {
                 }
             }
         },
+        "preview_mail_merge": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::mail_merge::PreviewMailMergeInput"
+                    }
+                }
+            }
+        },
         "prune_backups": {
             "kind": "object",
             "fields": {
@@ -1524,6 +1889,18 @@ export default {
                     "required": true,
                     "shape": {
                         "kind": "value"
+                    }
+                }
+            }
+        },
+        "query_free_busy": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::availability::FreeBusyInput"
                     }
                 }
             }
@@ -1603,6 +1980,23 @@ export default {
                 }
             }
         },
+        "rename_task_list": {
+            "kind": "object",
+            "fields": {
+                "id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "name": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "render_template": {
             "kind": "object",
             "fields": {
@@ -1663,6 +2057,28 @@ export default {
                     }
                 },
                 "path": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "restore_task": {
+            "kind": "object",
+            "fields": {
+                "id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "resume_rule_forwarding": {
+            "kind": "object",
+            "fields": {
+                "ruleId": {
                     "required": true,
                     "shape": {
                         "kind": "value"
@@ -1745,6 +2161,18 @@ export default {
                 }
             }
         },
+        "save_translation_settings": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::translation::SaveTranslationSettingsInput"
+                    }
+                }
+            }
+        },
         "search_contacts": {
             "kind": "object",
             "fields": {
@@ -1777,6 +2205,18 @@ export default {
                 }
             }
         },
+        "send_chat_message": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::chats::SendChatMessageInput"
+                    }
+                }
+            }
+        },
         "send_message": {
             "kind": "object",
             "fields": {
@@ -1791,6 +2231,18 @@ export default {
                     "shape": {
                         "kind": "ref",
                         "name": "core::drafts::outgoing::OutgoingMessageInput"
+                    }
+                }
+            }
+        },
+        "sender_sweep_summary": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::sender_sweep::SenderSweepTargetsInput"
                     }
                 }
             }
@@ -1837,6 +2289,32 @@ export default {
                     }
                 },
                 "color": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "set_account_names": {
+            "kind": "object",
+            "fields": {
+                "accountId": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "label": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "senderName": {
                     "required": true,
                     "shape": {
                         "kind": "value"
@@ -1907,6 +2385,18 @@ export default {
                 }
             }
         },
+        "set_labs_flag": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::labs::SetLabsFlagInput"
+                    }
+                }
+            }
+        },
         "set_notification_preferences": {
             "kind": "object",
             "fields": {
@@ -1966,6 +2456,18 @@ export default {
                 }
             }
         },
+        "set_server_rules_endpoint": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::server_rules::ServerRulesEndpointInput"
+                    }
+                }
+            }
+        },
         "set_signature_suggestion_status": {
             "kind": "object",
             "fields": {
@@ -1983,10 +2485,39 @@ export default {
                 }
             }
         },
+        "set_spam_filter_mode": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::thread_actions::SetSpamFilterModeInput"
+                    }
+                }
+            }
+        },
         "set_start_minimized": {
             "kind": "object",
             "fields": {
                 "enabled": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "set_task_completed": {
+            "kind": "object",
+            "fields": {
+                "completed": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "id": {
                     "required": true,
                     "shape": {
                         "kind": "value"
@@ -2070,6 +2601,30 @@ export default {
                     "shape": {
                         "kind": "ref",
                         "name": "app::commands::star::StarThreadsInput"
+                    }
+                }
+            }
+        },
+        "set_translation_api_key": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::translation::SetTranslationApiKeyInput"
+                    }
+                }
+            }
+        },
+        "set_translation_consent": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::translation::SetTranslationConsentInput"
                     }
                 }
             }
@@ -2175,6 +2730,43 @@ export default {
             "kind": "object",
             "fields": {}
         },
+        "sync_outlook_calendar": {
+            "kind": "object",
+            "fields": {
+                "accountId": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
+        },
+        "sync_tasks": {
+            "kind": "object",
+            "fields": {
+                "accountId": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "manual": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
+        },
         "take_pending_notification_thread": {
             "kind": "object",
             "fields": {}
@@ -2220,6 +2812,17 @@ export default {
                 }
             }
         },
+        "thread_sweep_sender": {
+            "kind": "object",
+            "fields": {
+                "threadId": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "toggle_attachment_quick_look": {
             "kind": "object",
             "fields": {
@@ -2240,6 +2843,18 @@ export default {
                     "shape": {
                         "kind": "ref",
                         "name": "core::workflow::transitions::BatchTransitionInput"
+                    }
+                }
+            }
+        },
+        "translate_message": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::translation::MessageTranslationInput"
                     }
                 }
             }
@@ -2287,7 +2902,30 @@ export default {
                 }
             }
         },
+        "undo_not_spam": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::thread_actions::UndoNotSpamInput"
+                    }
+                }
+            }
+        },
         "undo_outbox_send": {
+            "kind": "object",
+            "fields": {
+                "id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "undo_task_advance": {
             "kind": "object",
             "fields": {
                 "id": {
@@ -2370,6 +3008,18 @@ export default {
                     "required": true,
                     "shape": {
                         "kind": "value"
+                    }
+                }
+            }
+        },
+        "update_task": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::tasks::UpdateTaskInput"
                     }
                 }
             }
@@ -2470,6 +3120,18 @@ export default {
                 }
             }
         },
+        "upsert_sweep_rule": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::sender_sweep::UpsertSweepRuleInput"
+                    }
+                }
+            }
+        },
         "upsert_template": {
             "kind": "object",
             "fields": {
@@ -2556,6 +3218,15 @@ export default {
                         "kind": "value"
                     }
                 },
+                "label": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
                 "provider": {
                     "required": true,
                     "shape": {
@@ -2629,6 +3300,194 @@ export default {
                     "required": false,
                     "shape": {
                         "kind": "value"
+                    }
+                }
+            }
+        },
+        "app::commands::availability::EditingEventInput": {
+            "kind": "object",
+            "fields": {
+                "ends_at": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "event_id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "starts_at": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
+        },
+        "app::commands::availability::FreeBusyInput": {
+            "kind": "object",
+            "fields": {
+                "account_id": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "attendees": {
+                    "required": false,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "editing": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "ref",
+                            "name": "app::commands::availability::EditingEventInput"
+                        }
+                    }
+                },
+                "ends_at": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "excluded_calendars": {
+                    "required": false,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "starts_at": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "time_zone": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "app::commands::availability::FreeSlotsInput": {
+            "kind": "object",
+            "fields": {
+                "account_id": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "attendees": {
+                    "required": false,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "duration_minutes": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "editing": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "ref",
+                            "name": "app::commands::availability::EditingEventInput"
+                        }
+                    }
+                },
+                "excluded_calendars": {
+                    "required": false,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "from": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "time_zone": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "working_days": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "working_hours": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::availability::WorkingHoursInput"
+                    }
+                }
+            }
+        },
+        "app::commands::availability::WorkingHoursInput": {
+            "kind": "object",
+            "fields": {
+                "end_minute": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "start_minute": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "weekdays": {
+                    "required": true,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
                     }
                 }
             }
@@ -2830,6 +3689,50 @@ export default {
             "kind": "object",
             "fields": {
                 "priority": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "thread_id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "app::commands::chats::SendChatMessageInput": {
+            "kind": "object",
+            "fields": {
+                "allow_plaintext": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "allow_unsigned": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "confirm_recipients": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "expected_recipients": {
+                    "required": true,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "text": {
                     "required": true,
                     "shape": {
                         "kind": "value"
@@ -3140,6 +4043,213 @@ export default {
                     "required": true,
                     "shape": {
                         "kind": "value"
+                    }
+                }
+            }
+        },
+        "app::commands::labs::SetLabsFlagInput": {
+            "kind": "object",
+            "fields": {
+                "enabled": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "app::commands::mail_merge::CreateMailMergeJobInput": {
+            "kind": "object",
+            "fields": {
+                "account_id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "delay_seconds": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "email_field": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "fields": {
+                    "required": true,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "message": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "core::drafts::outgoing::OutgoingMessageInput"
+                    }
+                },
+                "request_id": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "rows": {
+                    "required": true,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "ref",
+                            "name": "core::mail_merge::plan::MergeRecipientInput"
+                        }
+                    }
+                },
+                "source_label": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "app::commands::mail_merge::MergeSignatureInput": {
+            "kind": "object",
+            "fields": {
+                "from_address": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "signature_id": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "signature_override_html": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "signature_override_text": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "signature_variant": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
+        },
+        "app::commands::mail_merge::ParseMailMergeCsvInput": {
+            "kind": "object",
+            "fields": {
+                "content_base64": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "app::commands::mail_merge::PreviewMailMergeInput": {
+            "kind": "object",
+            "fields": {
+                "account_id": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "email_field": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "fields": {
+                    "required": true,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "index": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "rows": {
+                    "required": true,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "ref",
+                            "name": "core::mail_merge::plan::MergeRecipientInput"
+                        }
+                    }
+                },
+                "signature": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "ref",
+                            "name": "app::commands::mail_merge::MergeSignatureInput"
+                        }
+                    }
+                },
+                "template": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "core::mail_merge::plan::MergeTemplate"
                     }
                 }
             }
@@ -3628,6 +4738,15 @@ export default {
         "app::commands::rules::UpsertRuleInput": {
             "kind": "object",
             "fields": {
+                "account_id": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
                 "actions": {
                     "required": true,
                     "shape": {
@@ -3683,6 +4802,181 @@ export default {
                     "required": true,
                     "shape": {
                         "kind": "value"
+                    }
+                }
+            }
+        },
+        "app::commands::sender_sweep::ListCleanupSendersInput": {
+            "kind": "object",
+            "fields": {
+                "account_id": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "days": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "limit": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
+        },
+        "app::commands::sender_sweep::SenderSweepTargetsInput": {
+            "kind": "object",
+            "fields": {
+                "account_id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "keep_latest": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "older_than_days": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "sender_email": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "app::commands::sender_sweep::UpsertSweepRuleInput": {
+            "kind": "object",
+            "fields": {
+                "account_id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "action": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "keep_latest": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "older_than_days": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "sender_email": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "target_folder_id": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
+        },
+        "app::commands::server_rules::EnableServerRulesInput": {
+            "kind": "object",
+            "fields": {
+                "account_id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "choice": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "expected_active": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
+        },
+        "app::commands::server_rules::ServerRulesEndpointInput": {
+            "kind": "object",
+            "fields": {
+                "account_id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "host": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "port": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "tls": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
                     }
                 }
             }
@@ -4150,6 +5444,113 @@ export default {
                 }
             }
         },
+        "app::commands::tasks::CreateTaskInput": {
+            "kind": "object",
+            "fields": {
+                "fields": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::tasks::TaskFieldsInput"
+                    }
+                },
+                "list_id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "thread_id": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
+        },
+        "app::commands::tasks::TaskFieldsInput": {
+            "kind": "object",
+            "fields": {
+                "completed_at": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "due_at": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "notes": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "priority": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "reminder_at": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "title": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "app::commands::tasks::UpdateTaskInput": {
+            "kind": "object",
+            "fields": {
+                "expected_updated_at": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "fields": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::tasks::TaskFieldsInput"
+                    }
+                },
+                "id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "app::commands::templates::RenderTemplateInput": {
             "kind": "object",
             "fields": {
@@ -4273,6 +5674,17 @@ export default {
                 }
             }
         },
+        "app::commands::thread_actions::SetSpamFilterModeInput": {
+            "kind": "object",
+            "fields": {
+                "mode": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "app::commands::thread_actions::SpamThreadsInput": {
             "kind": "object",
             "fields": {
@@ -4283,6 +5695,18 @@ export default {
                         "item": {
                             "kind": "value"
                         }
+                    }
+                }
+            }
+        },
+        "app::commands::thread_actions::UndoNotSpamInput": {
+            "kind": "object",
+            "fields": {
+                "receipt": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "core::mail_actions::NotSpamReceipt"
                     }
                 }
             }
@@ -4761,6 +6185,95 @@ export default {
                 }
             }
         },
+        "app::commands::translation::MessageTranslationInput": {
+            "kind": "object",
+            "fields": {
+                "message_id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "target_language": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "app::commands::translation::SaveTranslationSettingsInput": {
+            "kind": "object",
+            "fields": {
+                "engine": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "log_sent_text": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "target_language": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
+        },
+        "app::commands::translation::SetTranslationApiKeyInput": {
+            "kind": "object",
+            "fields": {
+                "api_key": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "engine": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "app::commands::translation::SetTranslationConsentInput": {
+            "kind": "object",
+            "fields": {
+                "account_id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "engine": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "granted": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "app::commands::tray::TrayThreadActionInput": {
             "kind": "object",
             "fields": {
@@ -4937,6 +6450,12 @@ export default {
                         "kind": "value"
                     }
                 },
+                "notification_task_due": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
                 "notification_trash": {
                     "required": false,
                     "shape": {
@@ -5044,7 +6563,40 @@ export default {
         "app::commands::unsubscribe::UnsubscribeInput": {
             "kind": "object",
             "fields": {
+                "confirmed_mail": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "ref",
+                            "name": "app::commands::unsubscribe::UnsubscribeMail"
+                        }
+                    }
+                },
                 "message_id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "app::commands::unsubscribe::UnsubscribeMail": {
+            "kind": "object",
+            "fields": {
+                "body": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "subject": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "to": {
                     "required": true,
                     "shape": {
                         "kind": "value"
@@ -5148,6 +6700,41 @@ export default {
                     "required": true,
                     "shape": {
                         "kind": "value"
+                    }
+                }
+            }
+        },
+        "core::chat::ChatSendOptions": {
+            "kind": "object",
+            "fields": {
+                "allow_unsigned": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "encryption_required": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "group_id": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "group_name": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
                     }
                 }
             }
@@ -5549,6 +7136,15 @@ export default {
                         }
                     }
                 },
+                "auto_submitted": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
                 "bcc": {
                     "required": false,
                     "shape": {
@@ -5579,6 +7175,16 @@ export default {
                         "kind": "array",
                         "item": {
                             "kind": "value"
+                        }
+                    }
+                },
+                "chat": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "ref",
+                            "name": "core::chat::ChatSendOptions"
                         }
                     }
                 },
@@ -5742,6 +7348,102 @@ export default {
                         "item": {
                             "kind": "value"
                         }
+                    }
+                }
+            }
+        },
+        "core::mail_actions::NotSpamReceipt": {
+            "kind": "object",
+            "fields": {
+                "move_receipts": {
+                    "required": true,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "moved_thread_ids": {
+                    "required": true,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "restored_thread_ids": {
+                    "required": true,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "thread_ids": {
+                    "required": true,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "undo_token": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
+        },
+        "core::mail_merge::plan::MergeRecipientInput": {
+            "kind": "object",
+            "fields": {
+                "line": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "values": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "core::mail_merge::plan::MergeTemplate": {
+            "kind": "object",
+            "fields": {
+                "body": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "body_html": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "subject": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
                     }
                 }
             }

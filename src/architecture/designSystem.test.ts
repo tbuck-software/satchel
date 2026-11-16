@@ -161,13 +161,9 @@ const MAX_KNOWN_PALETTE_CLASSES = 0;
 // Rule 3 — new UI is assembled from src/components/ui/.
 // ---------------------------------------------------------------------------
 
-/* All application controls use the kit. These two isolated surfaces have
- * documented reasons for owning their buttons; do not add routine controls. */
+/* All application controls use the kit. This isolated surface has
+ * documented reasons for owning its buttons; do not add routine controls. */
 const KNOWN_RAW_BUTTON_GROUPS: KnownGroup[] = [
-  {
-    reason: 'Full-width call-to-action row; a permanent exception (STYLEGUIDE.md).',
-    files: { 'src/components/settings/AccountSetup.vue': 1 },
-  },
   {
     reason: 'Menu-bar popover; it ships its own minimal stylesheet (tray.css).',
     files: { 'src/tray/TrayPopover.vue': 2 },
@@ -177,7 +173,7 @@ const KNOWN_RAW_BUTTON_GROUPS: KnownGroup[] = [
 const KNOWN_RAW_BUTTONS = flatten(KNOWN_RAW_BUTTON_GROUPS);
 
 // Only ever lower this. See KNOWN_RAW_BUTTON_GROUPS.
-const MAX_KNOWN_RAW_BUTTONS = 3;
+const MAX_KNOWN_RAW_BUTTONS = 2;
 
 /*
  * Outside the kit a hand-rolled button is already counted above, so this rule
@@ -204,7 +200,6 @@ const KNOWN_SCALE_LITERAL_GROUPS: KnownGroup[] = [
   {
     reason: 'Settings pane sizing its own chrome; UI-11 puts it on the scale.',
     files: {
-      'src/components/settings/AccountSetup.vue': 1,
       'src/components/settings/BackupExport.vue': 1,
       'src/components/settings/MobileSyncSettings.vue': 1,
       'src/components/settings/SwipeSettings.vue': 3,
@@ -253,7 +248,7 @@ const KNOWN_SCALE_LITERAL_GROUPS: KnownGroup[] = [
 const KNOWN_SCALE_LITERALS = flatten(KNOWN_SCALE_LITERAL_GROUPS);
 
 // Only ever lower this. See KNOWN_SCALE_LITERAL_GROUPS.
-const MAX_KNOWN_SCALE_LITERALS = 45;
+const MAX_KNOWN_SCALE_LITERALS = 44;
 
 // ---------------------------------------------------------------------------
 // Rule 4b — icons share one line weight, a few grids and three sizes.

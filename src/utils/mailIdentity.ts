@@ -1,6 +1,6 @@
 import type { Account, Participant } from '@/types/mail';
 
-type MailAccountIdentity = Pick<Account, 'displayName' | 'email'>;
+type MailAccountIdentity = Pick<Account, 'displayName' | 'email' | 'senderName'>;
 
 function normalizedEmail(email?: string | null): string {
   return email?.trim().toLowerCase() ?? '';
@@ -27,5 +27,7 @@ export function participantDisplayName(
   participant: Participant,
 ): string {
   const ownAccount = ownAccountForEmail(accounts, participant.email);
-  return ownAccount?.displayName.trim() || participant.name.trim() || participant.email;
+  // The person's own name, not the label they gave the account ("Work").
+  const ownName = ownAccount ? (ownAccount.senderName ?? ownAccount.displayName).trim() : '';
+  return ownName || participant.name.trim() || participant.email;
 }

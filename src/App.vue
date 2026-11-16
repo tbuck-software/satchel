@@ -3,11 +3,12 @@ import { computed, defineAsyncComponent, provide, ref, watch } from 'vue';
 import { RouterView, useRoute } from 'vue-router';
 import Sidebar from '@/components/layout/Sidebar.vue';
 import PaneResizeHandle from '@/components/ui/PaneResizeHandle.vue';
-import { useAccountsStore } from '@/stores/accounts';
 import { useComposerStore } from '@/stores/composer';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { usePrompt } from '@/composables/usePrompt';
+import { useSenderSweep } from '@/composables/useSenderSweep';
+import { useTaskEditor } from '@/composables/useTaskEditor';
 import { useTopicsStore } from '@/stores/topics';
 import { useSettingsStore } from '@/stores/settings';
 import { SIDEBAR_WIDTH_LIMITS, useUiStore } from '@/stores/ui';
@@ -22,7 +23,7 @@ const route = useRoute();
  * Settings, Calendar and Contacts have a primary action of their own that a
  * mail pencil would only compete with.
  */
-const COMPOSE_FAB_HIDDEN_ON = new Set(['thread', 'settings', 'calendar', 'contacts']);
+const COMPOSE_FAB_HIDDEN_ON = new Set(['thread', 'settings', 'calendar', 'contacts', 'chats']);
 /**
  * Screens without the phone's tab bar: pushed details with a Back of their own,
  * and those with their own bottom bar (a thread's actions, the composer's send).
@@ -37,6 +38,8 @@ const toastMounted = ref(false);
 watch(() => toast.state.toasts.length, (count) => { if (count > 0) toastMounted.value = true; }, { immediate: true });
 const { state: confirmState } = useConfirm();
 const { state: promptState } = usePrompt();
+const { state: senderSweepState } = useSenderSweep();
+const { state: taskEditorState } = useTaskEditor();
 const standaloneCompose = computed(() =>
   route.name === 'compose' && route.query.standalone === '1',
 );
@@ -47,7 +50,9 @@ const tabBarVisible = computed(() =>
   && !standaloneCompose.value
   && !composer.isOpen
   && !keyboardVisible.value
-  && !TAB_BAR_HIDDEN_ON.has(String(route.name)),
+  && !TAB_BAR_HIDDEN_ON.has(String(route.name))
+  // An open chat is a reader with its own field at the bottom (Labs → Chats).
+  && !(route.name === 'chats' && route.query.thread),
 );
 const mailboxSwitcherMounted = ref(false);
 watch(() => ui.mailboxSwitcherOpen, (open) => { if (open) mailboxSwitcherMounted.value = true; });
@@ -58,18 +63,12 @@ watch(() => ui.mailboxSwitcherOpen, (open) => { if (open) mailboxSwitcherMounted
 const loadComposerHost = () => import('@/components/mail/ComposerHost.vue');
 const ComposerHost = defineAsyncComponent(loadComposerHost);
 const ToastStack = defineAsyncComponent(() => import('@/components/ui/ToastStack.vue'));
-// Only an expired sign-in or an unreadable credential store shows it.
-const AccountReauthBanner = defineAsyncComponent(() => import('@/components/settings/AccountReauthBanner.vue'));
-const accounts = useAccountsStore();
-const reauthNeeded = computed(() =>
-  Boolean(accounts.credentialLock) || accounts.accountsWithAuthError.length > 0);
 const UndoFab = defineAsyncComponent(() => import('@/components/ui/UndoFab.vue'));
 // The phone's buttons on a blocked-images notice; the viewer has no provider.
 provide(
   IMAGE_GUARD_PHONE_ACTIONS,
   defineAsyncComponent(() => import('@/components/mail/ImageGuardPhoneActions.vue')),
 );
-const SyncStatusLine = defineAsyncComponent(() => import('@/components/layout/SyncStatusLine.vue'));
 const OmniSearch = defineAsyncComponent(loadOmniSearch);
 // Phone-only, and shown only while the backend reports trouble: neither is
 // needed to draw the first desktop frame.
@@ -85,6 +84,9 @@ const SettingsModal = defineAsyncComponent(() => import('@/components/settings/S
 // `usePrompt`, so the frame (ModalShell, focus trap) loads with the first question.
 const ConfirmDialog = defineAsyncComponent(() => import('@/components/ui/ConfirmDialog.vue'));
 const PromptDialog = defineAsyncComponent(() => import('@/components/ui/PromptDialog.vue'));
+const SenderSweepDialog = defineAsyncComponent(() => import('@/components/mail/SenderSweepDialog.vue'));
+// The editor brings the tasks store with it; neither is parsed before a task is opened.
+const TaskEditorDialog = defineAsyncComponent(() => import('@/components/tasks/TaskEditorDialog.vue'));
 
 watch(() => route.fullPath, () => {
   if (ui.mailboxSwitcherOpen) {
@@ -127,17 +129,11 @@ if (standaloneCompose.value) {
         data-tauri-drag-region
       />
 
-      <AccountReauthBanner v-if="!standaloneCompose && reauthNeeded" />
-      <ConnectionBanner v-if="!standaloneCompose" />
-
-      <!-- The phone has no sidebar and so no sync button. Keep connection
-           status visible here, with resting state suppressed. -->
-      <SyncStatusLine
-        v-if="ui.isMobile && !standaloneCompose"
-        class="mobile-sync-status"
-        hide-idle
-        banner-failures
-      />
+      <!-- No status bands above the page: the desktop shows these notices as
+           cards in the sidebar footer, the phone as a chip on the list's
+           subtitle line (ShellStatusChip). This instance only hosts the
+           drawer dot and the certificate dialog. -->
+      <ConnectionBanner v-if="ui.isMobile && !standaloneCompose" :notice="false" />
 
       <main>
         <RouterView />
@@ -171,6 +167,8 @@ if (standaloneCompose.value) {
     </Transition>
     <ToastStack v-if="toastMounted" />
     <ConfirmDialog v-if="confirmState.pending" />
+    <SenderSweepDialog v-if="senderSweepState.request" />
+    <TaskEditorDialog v-if="taskEditorState.request" />
     <PromptDialog v-if="promptState.pending" />
     <UndoFab v-if="toastMounted" :variant="ui.isSinglePane ? 'floating' : 'docked'" />
   </div>
@@ -270,11 +268,6 @@ main {
 
 .shell--mobile .main-shell {
   grid-template-rows: 1fr;
-}
-
-.mobile-sync-status {
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--border-color-muted);
 }
 
 .window-drag-strip {

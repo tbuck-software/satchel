@@ -6,32 +6,42 @@ import SectionHeading from '@/components/ui/SectionHeading.vue';
 import { backendOauthStatus } from '@/services/backend';
 import { useAccountsStore } from '@/stores/accounts';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
+import { hasOptionalGrant } from '@/utils/oauthGrants';
 
-const props = defineProps<{ purpose: 'contacts' | 'calendar' }>();
+/**
+ * Connect an optional OAuth feature for the accounts of one provider. Google
+ * covers calendar and contacts; Outlook signs in with contacts already, so
+ * only its calendar is offered here.
+ */
+const props = withDefaults(defineProps<{
+  purpose: 'contacts' | 'calendar';
+  provider?: 'gmail' | 'outlook';
+}>(), { provider: 'gmail' });
 const emit = defineEmits<{ connected: [accountId: string] }>();
 const { t } = useI18n();
 const accounts = useAccountsStore();
-const googleAccounts = computed(() => accounts.accounts.filter((account) => account.provider === 'gmail'));
+const providerAccounts = computed(() => accounts.accounts.filter((account) => account.provider === props.provider));
 const connected = ref<Record<string, boolean>>({});
 const loading = ref(true);
 const busy = ref('');
 const error = ref('');
-const title = computed(() => props.purpose === 'calendar'
-  ? t('settings.google.calendarTitle') : t('settings.google.contactsTitle'));
-const hint = computed(() => props.purpose === 'calendar'
-  ? t('settings.google.calendarHint') : t('settings.google.contactsHint'));
+const title = computed(() => {
+  if (props.provider === 'outlook') return t('settings.google.outlookCalendarTitle');
+  return props.purpose === 'calendar' ? t('settings.google.calendarTitle') : t('settings.google.contactsTitle');
+});
+const hint = computed(() => {
+  if (props.provider === 'outlook') return t('settings.google.outlookCalendarHint');
+  return props.purpose === 'calendar' ? t('settings.google.calendarHint') : t('settings.google.contactsHint');
+});
 
 let revision = 0;
 async function refresh() {
   const request = ++revision;
   loading.value = true;
   try {
-    const entries = await Promise.all(googleAccounts.value.map(async (account) => {
+    const entries = await Promise.all(providerAccounts.value.map(async (account) => {
       const status = await backendOauthStatus(account.id);
-      const scope = props.purpose === 'calendar'
-        ? 'https://www.googleapis.com/auth/calendar.readonly'
-        : 'https://www.googleapis.com/auth/contacts.readonly';
-      return [account.id, status.granted_scopes?.includes(scope) ?? false] as const;
+      return [account.id, hasOptionalGrant(props.provider, props.purpose, status.granted_scopes)] as const;
     }));
     if (request === revision) connected.value = Object.fromEntries(entries);
   } catch (cause) {
@@ -41,7 +51,7 @@ async function refresh() {
   }
 }
 
-watch(() => [props.purpose, ...googleAccounts.value.map((account) => account.id)], () => void refresh(), { immediate: true });
+watch(() => [props.provider, props.purpose, ...providerAccounts.value.map((account) => account.id)], () => void refresh(), { immediate: true });
 
 async function connect(accountId: string) {
   if (busy.value) return;
@@ -60,11 +70,11 @@ async function connect(accountId: string) {
 </script>
 
 <template>
-  <div v-if="googleAccounts.length" class="google-connections">
+  <div v-if="providerAccounts.length" class="google-connections">
     <SectionHeading :label="title" />
     <p class="hint">{{ hint }}</p>
     <ListRowButton
-      v-for="account in googleAccounts"
+      v-for="account in providerAccounts"
       :key="account.id"
       :disabled="loading || Boolean(busy) || connected[account.id]"
       @click="connect(account.id)"

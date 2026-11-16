@@ -85,7 +85,8 @@ for (const entry of ['index', 'viewer', 'tray'] as const) {
   for (const locale of ['en', 'de'] as const) {
     test(`${entry} loads only its active ${locale} catalogue under the production CSP`, async ({ page }) => {
       const manifest = JSON.parse(readFileSync('dist/.vite/manifest.json', 'utf8'));
-      const prefix = entry === 'index' ? '' : `${entry}.`;
+      // The main window loads its startup catalogue first (ADR 0017).
+      const prefix = entry === 'index' ? 'startup.' : `${entry}.`;
       const activeChunk = manifest[`src/i18n/${prefix}${locale}.json`].file;
       const inactiveChunk = manifest[`src/i18n/${prefix}${locale === 'en' ? 'de' : 'en'}.json`].file;
       const requests: string[] = [];

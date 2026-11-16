@@ -75,6 +75,7 @@
       },
       "toolbar": {
         "attach": "Attach file",
+        "attachWithCount": "Attach file ({count} attached)",
         "attachShort": "Attach",
         "template": "Use template",
         "more": "More options"
@@ -189,6 +190,18 @@
           "wrapRight": "Wrap text on the left",
           "asAttachment": "Use as attachment"
         },
+        "table": {
+          "insert": "Insert table",
+          "toolbar": "Table",
+          "addRowBefore": "Insert row above",
+          "addRowAfter": "Insert row below",
+          "addColumnBefore": "Insert column left",
+          "addColumnAfter": "Insert column right",
+          "deleteRow": "Delete row",
+          "deleteColumn": "Delete column",
+          "headerRow": "Header row",
+          "deleteTable": "Delete table"
+        },
         "linkDialog": {
           "title": "Insert link",
           "text": "Text (optional)",
@@ -214,7 +227,7 @@
       },
       "unsaved": {
         "title": "Not saved",
-        "conflictTitle": "Not saved: this draft changed in another window",
+        "conflictTitle": "Draft not saved",
         "saveAsNew": "Save as new draft",
         "discardMine": "Discard my changes"
       },
@@ -447,6 +460,7 @@
       },
       "toolbar": {
         "attach": "Datei anhängen",
+        "attachWithCount": "Datei anhängen ({count} angehängt)",
         "attachShort": "Anhängen",
         "template": "Vorlage verwenden",
         "more": "Weitere Optionen"
@@ -561,6 +575,18 @@
           "wrapRight": "Text links umfließen lassen",
           "asAttachment": "Als Anhang verwenden"
         },
+        "table": {
+          "insert": "Tabelle einfügen",
+          "toolbar": "Tabelle",
+          "addRowBefore": "Zeile darüber einfügen",
+          "addRowAfter": "Zeile darunter einfügen",
+          "addColumnBefore": "Spalte links einfügen",
+          "addColumnAfter": "Spalte rechts einfügen",
+          "deleteRow": "Zeile löschen",
+          "deleteColumn": "Spalte löschen",
+          "headerRow": "Überschriftenzeile",
+          "deleteTable": "Tabelle löschen"
+        },
         "linkDialog": {
           "title": "Link einfügen",
           "text": "Text (optional)",
@@ -586,7 +612,7 @@
       },
       "unsaved": {
         "title": "Nicht gespeichert",
-        "conflictTitle": "Nicht gespeichert: Der Entwurf wurde in einem anderen Fenster geändert",
+        "conflictTitle": "Entwurf nicht gespeichert",
         "saveAsNew": "Als neuen Entwurf speichern",
         "discardMine": "Meine Änderungen verwerfen"
       },

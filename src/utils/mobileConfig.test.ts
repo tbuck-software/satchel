@@ -236,15 +236,12 @@ describe("mobile build configuration", () => {
       new URL("../../src-tauri/gen/android/app/src/main/AndroidManifest.xml", import.meta.url),
       "utf8",
     );
-    const notificationIcon = readFileSync(
-      new URL(
-        "../../src-tauri/gen/android/app/src/main/res/drawable-hdpi/ic_notification.png",
-        import.meta.url,
-      ),
-    );
-    const macMenuBarIcon = readFileSync(
-      new URL("../../src-tauri/icons/trayTemplate.png", import.meta.url),
-    );
+    // Both are rendered from the transparent mark by scripts/render-icons.mjs (pnpm icons).
+    const pngSize = (path: string) => {
+      const png = readFileSync(new URL(`../../${path}`, import.meta.url));
+      return [png.readUInt32BE(16), png.readUInt32BE(20)];
+    };
+    const notificationDensities = { mdpi: 24, hdpi: 36, xhdpi: 48, xxhdpi: 72, xxxhdpi: 96 };
     const adaptiveIcons = ["ic_launcher", "ic_launcher_round"].map((name) =>
       readFileSync(
         new URL(
@@ -266,7 +263,14 @@ describe("mobile build configuration", () => {
 
     expect(manifest).toContain('android:icon="@mipmap/ic_launcher"');
     expect(manifest).toContain('android:roundIcon="@mipmap/ic_launcher_round"');
-    expect(notificationIcon).toEqual(macMenuBarIcon);
+    // A status-bar icon in every density: a single hdpi file left the other
+    // densities to scale it, and it kept the old bag after the app icon changed.
+    for (const [density, size] of Object.entries(notificationDensities)) {
+      expect(
+        pngSize(`src-tauri/gen/android/app/src/main/res/drawable-${density}/ic_notification.png`),
+      ).toEqual([size, size]);
+    }
+    expect(pngSize("src-tauri/icons/trayTemplate.png")).toEqual([32, 32]);
     // The vector mark sits inside the safe zone; a full-bleed PNG foreground
     // lost its corners to the launcher's circle mask.
     for (const adaptiveIcon of adaptiveIcons) {

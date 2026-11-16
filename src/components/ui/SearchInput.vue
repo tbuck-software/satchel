@@ -35,7 +35,7 @@ defineExpose({
       ref="input"
       v-model="model"
       class="search-input"
-      type="search"
+      type="search" autocorrect="off"
       inputmode="search"
       autocomplete="off"
       :aria-label="label"

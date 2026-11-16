@@ -10,9 +10,12 @@ import {
 } from '@/services/backend';
 import AppButton from '@/components/ui/AppButton.vue';
 
+/** On an account's page: that account, with no picker and no title of its own. */
+const props = defineProps<{ accountId?: string }>();
+
 const { t } = useI18n();
 const accounts = useAccountsStore();
-const accountId = ref('');
+const accountId = ref(props.accountId ?? '');
 const labels = ref<BackendProviderLabel[]>([]);
 const name = ref('');
 const color = ref('');
@@ -22,6 +25,10 @@ const busy = ref(false);
 const account = computed(() => accounts.emailAccounts.find((item) => item.id === accountId.value));
 
 onMounted(async () => {
+  if (props.accountId) {
+    await loadCached();
+    return;
+  }
   await accounts.load();
   accountId.value = accounts.emailAccounts.find((item) => item.id === accounts.activeAccountId)?.id
     || accounts.emailAccounts[0]?.id
@@ -109,7 +116,7 @@ async function create() {
       </AppButton>
     </div>
 
-    <p v-if="account" class="hint">
+    <p v-if="account && !props.accountId" class="hint">
       {{ $t('settings.providerFeatures.provider', { provider: account.provider }) }}
     </p>
     <ul v-if="labels.length > 0">

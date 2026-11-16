@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useDismissable } from '@/composables/useDismissable';
 import { useFocusTrap } from '@/composables/useFocusTrap';
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import {
   addDays,
   formatTime,
@@ -16,6 +16,9 @@ import IconButton from '@/components/ui/IconButton.vue';
 import ToggleSwitch from '@/components/ui/ToggleSwitch.vue';
 import { useI18n } from 'vue-i18n';
 import { useUiStore } from '@/stores/ui';
+
+// Free/busy loads with the first timed event someone edits, not with the calendar.
+const AvailabilityStrip = defineAsyncComponent(() => import('./AvailabilityStrip.vue'));
 
 export interface EventEditorPayload {
   id: string | null;
@@ -33,6 +36,13 @@ export interface EventEditorPayload {
 const props = defineProps<{
   draft: CalendarEventDraft | null;
   saving: boolean;
+  /**
+   * A new event goes to a connected Outlook calendar, where guests are kept
+   * only with invitations on (Exchange mails everyone on the list).
+   */
+  guestsNeedInvites?: boolean;
+  /** The account the event belongs to; it is asked about the attendees' free/busy. */
+  accountId?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -56,6 +66,37 @@ const titleField = ref<HTMLInputElement | null>(null);
 const dialogRef = ref<HTMLElement | null>(null);
 
 const isEdit = computed(() => props.draft?.id != null);
+const descriptionLocked = computed(() => isEdit.value && props.draft?.descriptionLocked === true);
+const guestsDropped = computed(() =>
+  !isEdit.value && props.guestsNeedInvites === true && !sendInvites.value && attendees.value.trim() !== '');
+
+function attendeeAddresses(raw: string): string[] {
+  return raw
+    .split(/[,;\n]+/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+const attendeeList = computed(() => attendeeAddresses(attendees.value));
+
+/** The timed slot the form describes, for the availability strip. */
+const proposal = computed(() => {
+  if (allDay.value) return null;
+  const { start, end } = parseInputs(false);
+  if (!start || !end || end.getTime() <= start.getTime()) return null;
+  return { start, end };
+});
+
+/** A saved timed event being edited: its own slot is not a conflict with itself. */
+const editingEvent = computed(() => {
+  const draft = props.draft;
+  return draft?.id && !draft.allDay ? { id: draft.id, start: draft.start, end: draft.end } : null;
+});
+
+function moveSlot(start: Date, end: Date) {
+  startInput.value = toDateTimeLocalInput(start);
+  endInput.value = toDateTimeLocalInput(end);
+}
 
 // The title field takes the focus itself, so the trap only keeps Tab off the
 // calendar behind the dialog and returns the focus to the day that opened it.
@@ -150,16 +191,16 @@ function submit() {
     error.value = t('calendar.editor.errors.endBeforeStart');
     return;
   }
-  const attendeeList = attendees.value
-    .split(/[,;\n]+/)
-    .map((value) => value.trim())
-    .filter(Boolean);
+  const attendeeList = attendeeAddresses(attendees.value);
   emit('save', {
     id: props.draft?.id ?? null,
     expectedUpdatedAt: props.draft?.expectedUpdatedAt ?? null,
     title: title.value.trim(),
     location: (location.value === props.draft?.location ? location.value : location.value.trim()) || null,
-    description: (description.value === props.draft?.description ? description.value : description.value.trim()) || null,
+    // A locked description goes back exactly as it came, so nothing changes.
+    description: descriptionLocked.value
+      ? props.draft?.description || null
+      : (description.value === props.draft?.description ? description.value : description.value.trim()) || null,
     allDay: allDay.value,
     startsAt: allDay.value ? toDateInput(start) : start.toISOString(),
     endsAt: allDay.value ? toDateInput(end) : end.toISOString(),
@@ -248,16 +289,31 @@ useDismissable(() => props.draft !== null, () => emit('close'));
 
             <label class="field">
               <span>{{ $t('common.description') }}</span>
-              <textarea :disabled="saving" v-model="description" rows="3" :placeholder="$t('calendar.editor.descriptionPlaceholder')"></textarea>
+              <textarea :disabled="saving || descriptionLocked" v-model="description" rows="3" :placeholder="$t('calendar.editor.descriptionPlaceholder')"></textarea>
             </label>
+            <p v-if="descriptionLocked" class="event-editor__hint">{{ $t('calendar.editor.descriptionLocked') }}</p>
 
             <label class="field">
               <span>{{ $t('calendar.event.attendees') }}</span>
               <input :disabled="saving" v-model="attendees" :placeholder="$t('calendar.editor.attendeesPlaceholder')" />
             </label>
 
+            <AvailabilityStrip
+              v-if="proposal"
+              :account-id="accountId ?? null"
+              :attendees="attendeeList"
+              :start="proposal.start"
+              :end="proposal.end"
+              :editing="editingEvent"
+              :disabled="saving"
+              @move="moveSlot"
+            />
+
             <ToggleSwitch :disabled="saving" v-model="sendInvites">{{ $t('calendar.editor.sendInvites') }}</ToggleSwitch>
+            <p v-if="guestsDropped" class="event-editor__hint" role="status">{{ $t('calendar.editor.guestsNeedInvites') }}</p>
             <p class="event-editor__hint">{{ $t('calendar.editor.serverNotifications') }}</p>
+            <p v-if="isEdit && draft.occurrence" class="event-editor__hint">{{ $t('calendar.editor.occurrenceOnly') }}</p>
+            <p v-if="isEdit && draft.notifiesAttendees" class="event-editor__hint">{{ $t('calendar.editor.attendeesNotified') }}</p>
 
             <p v-if="error" class="event-editor__error" role="alert">{{ error }}</p>
           </div>

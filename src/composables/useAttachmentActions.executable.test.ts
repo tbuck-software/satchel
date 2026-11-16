@@ -95,6 +95,25 @@ describe('opening an executable attachment', () => {
     await opening;
   });
 
+  it('asks with neutral wording for a type that is not known to be safe', async () => {
+    harness.openDefault
+      .mockRejectedValueOnce(refusal('backend.errors.attachmentTypeNotConfirmed', 'data.xyz', 'xyz'))
+      .mockResolvedValueOnce(undefined);
+
+    const opening = useAttachmentActions().openAttachmentDefault('attachment-1');
+    const { state } = useConfirm();
+    for (let turn = 0; turn < 8 && state.pending === null; turn += 1) {
+      await Promise.resolve();
+    }
+    expect(state.pending?.title).toBe('mail.attachment.unknownTypeTitle');
+    expect(state.pending?.body).toBe('mail.attachment.unknownTypeBody');
+    expect(state.pending?.detail).toBe('data.xyz');
+
+    useConfirm().answer(true);
+    await opening;
+    expect(harness.openDefault).toHaveBeenLastCalledWith('attachment-1', true);
+  });
+
   it('lets every other failure through untouched', async () => {
     const other = new Error('disk full');
     harness.openDefault.mockRejectedValueOnce(other);

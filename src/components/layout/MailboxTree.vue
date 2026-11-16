@@ -8,6 +8,7 @@ import { useMailboxesStore, type FavoriteFolderGroup, type FolderTreeNode } from
 import { useThreadsStore, type MailboxFilter } from '@/stores/threads';
 import { useConnectionStore } from '@/stores/connection';
 import { useOutboxStore } from '@/stores/outbox';
+import { labsSidebarItems } from '@/labs/state';
 import { useThreadActions } from '@/composables/useThreadActions';
 import { matchesWorkflowFilter, type WorkflowFilter } from '@/types/workflow';
 import { MAILBOX_SECTIONS, type CounterMode, type SectionSpec } from '@/config/mailboxSections';
@@ -17,7 +18,7 @@ import AppIcon from '@/components/ui/AppIcon.vue';
 import SectionHeading from '@/components/ui/SectionHeading.vue';
 import { outboxVisibleCount } from '@/utils/outboxLabels';
 import { activeMailboxNavNode } from '@/utils/mailboxNav';
-import { draggedThreadIds, isThreadDrag } from '@/utils/threadDrag';
+import { draggedThreadIds, isThreadDrag } from '@/utils/appDrag';
 
 type ResolvedSection = SectionSpec & {
   total: number;
@@ -298,6 +299,10 @@ async function onDropToFolder(folderId: string, event: DragEvent) {
           </template>
         </NavItem>
       </div>
+      <!-- Rows of switched-on Labs experiments (Chats), right under the Inbox. -->
+      <template v-if="section.id === 'inbox'">
+        <component :is="item" v-for="(item, index) in labsSidebarItems" :key="index" @navigate="emit('navigate')" />
+      </template>
 
     </div>
 

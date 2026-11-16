@@ -12,7 +12,7 @@ use tauri::AppHandle;
 #[cfg(desktop)]
 use tauri::Manager;
 
-use crate::commands::error::CommandResult;
+use crate::commands::error::{CommandError, CommandResult};
 use crate::email::sanitizer::sanitize_email_html;
 use crate::providers::imap::{parse_raw_rfc822, ParsedRawEmail};
 
@@ -33,6 +33,7 @@ const MAX_INLINE_EMBED_BYTES: usize = 4 * 1024 * 1024;
 pub struct MessageFileAttachment {
     /// Position in the parsed part list — the handle for reading the bytes back.
     pub index: usize,
+    #[serde(serialize_with = "satchel_core::utils::filename::serialize_filename")]
     pub filename: String,
     pub content_type: String,
     pub size: i64,
@@ -70,6 +71,7 @@ pub struct MessageFilePreview {
     ts(export, export_to = "app/commands/message_file/")
 )]
 pub struct MessageFileAttachmentData {
+    #[serde(serialize_with = "satchel_core::utils::filename::serialize_filename")]
     pub filename: String,
     pub mime_type: String,
     pub data_base64: String,
@@ -80,6 +82,28 @@ pub(crate) fn is_message_file(path: &std::path::Path) -> bool {
     path.extension()
         .and_then(|value| value.to_str())
         .is_some_and(|value| value.eq_ignore_ascii_case("eml") || value.eq_ignore_ascii_case("msg"))
+}
+
+/// The file a message-file path names, after links: its own extension, not a
+/// link's, decides, and only a regular file qualifies.
+async fn resolve_message_file(path: &str) -> CommandResult<String> {
+    let refused = || crate::commands::error::CommandError::new(NOT_A_MESSAGE_FILE);
+    if !is_message_file(std::path::Path::new(path)) {
+        return Err(refused());
+    }
+    let target = tokio::fs::canonicalize(path)
+        .await
+        .map_err(|err| format!("cannot read {path}: {err}"))?;
+    if !is_message_file(&target) {
+        return Err(refused());
+    }
+    let meta = tokio::fs::metadata(&target)
+        .await
+        .map_err(|err| format!("cannot read {path}: {err}"))?;
+    if !meta.is_file() {
+        return Err(refused());
+    }
+    target.into_os_string().into_string().map_err(|_| refused())
 }
 
 async fn read_message_file(path: &str) -> Result<Vec<u8>, String> {
@@ -108,24 +132,65 @@ fn parse_message_bytes(path: &str, bytes: &[u8]) -> Result<ParsedRawEmail, Strin
     parse_raw_rfc822(bytes)
 }
 
+/// Label prefix of the viewer windows; `capabilities/message-viewer.json` matches it.
+pub const VIEWER_LABEL_PREFIX: &str = "message-file-";
+
+/// The file each viewer window was opened for, by window label.
+#[derive(Default)]
+pub struct ViewerFiles {
+    by_label: std::sync::Mutex<std::collections::HashMap<String, String>>,
+}
+
+impl ViewerFiles {
+    pub fn bind(&self, label: &str, path: &str) {
+        if let Ok(mut bound) = self.by_label.lock() {
+            bound.insert(label.to_string(), path.to_string());
+        }
+    }
+
+    /// A viewer window may read only its own file; other windows pass.
+    pub fn check_reader(&self, label: &str, path: &str) -> CommandResult<()> {
+        if !label.starts_with(VIEWER_LABEL_PREFIX) || self.is_bound(label, path) {
+            return Ok(());
+        }
+        Err(CommandError::new("backend.errors.readSourceNotChosen")
+            .with_param("path", path.to_string()))
+    }
+
+    /// Whether `path` is the message file the window `label` shows.
+    pub fn is_bound(&self, label: &str, path: &str) -> bool {
+        is_message_file(std::path::Path::new(path))
+            && self
+                .by_label
+                .lock()
+                .is_ok_and(|bound| bound.get(label).is_some_and(|own| own == path))
+    }
+}
+
 /// Message key for a path that is not a message file.
 pub const NOT_A_MESSAGE_FILE: &str = "backend.errors.notAMessageFile";
 
 /// Parse a message file for display. Never writes to the database.
 #[tauri::command]
-pub async fn open_message_file(path: String) -> CommandResult<MessageFilePreview> {
+pub async fn open_message_file(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, crate::AppState>,
+    path: String,
+) -> CommandResult<MessageFilePreview> {
+    state.viewer_files.check_reader(window.label(), &path)?;
+    preview_message_file(path).await
+}
+
+/// The parse behind `open_message_file`, without the window check.
+pub async fn preview_message_file(path: String) -> CommandResult<MessageFilePreview> {
     // `is_message_file` existed but only the OS-open path used it. Without it
     // here, an IPC-capable caller could hand over `~/.ssh/id_ed25519`:
     // `parse_raw_rfc822` is lenient about non-MIME input and returns the whole
     // file as `body_text`, which — unlike `body_html` — is not sanitized.
-    if !is_message_file(std::path::Path::new(&path)) {
-        return Err(crate::commands::error::CommandError::new(
-            NOT_A_MESSAGE_FILE,
-        ));
-    }
-    let bytes = read_message_file(&path).await?;
+    let target = resolve_message_file(&path).await?;
+    let bytes = read_message_file(&target).await?;
     tokio::task::spawn_blocking(move || {
-        let parsed = parse_message_bytes(&path, &bytes)?;
+        let parsed = parse_message_bytes(&target, &bytes)?;
         Ok(build_preview(path, parsed))
     })
     .await
@@ -153,7 +218,7 @@ fn build_preview(path: String, parsed: ParsedRawEmail) -> MessageFilePreview {
                 filename: attachment
                     .filename
                     .as_deref()
-                    .map(satchel_core::utils::filename::strip_filename_controls)
+                    .map(satchel_core::utils::filename::safe_attachment_name)
                     .unwrap_or_else(|| "Anhang".to_string()),
                 content_type: content_type.clone(),
                 size: i64::try_from(attachment.bytes.len()).unwrap_or(i64::MAX),
@@ -196,16 +261,22 @@ fn build_preview(path: String, parsed: ParsedRawEmail) -> MessageFilePreview {
 /// has to be reaped when the viewer closes.
 #[tauri::command]
 pub async fn read_message_file_attachment(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, crate::AppState>,
     path: String,
     index: usize,
 ) -> CommandResult<MessageFileAttachmentData> {
-    if !is_message_file(std::path::Path::new(&path)) {
-        return Err(crate::commands::error::CommandError::new(
-            NOT_A_MESSAGE_FILE,
-        ));
-    }
-    let bytes = read_message_file(&path).await?;
-    let parsed = parse_message_bytes(&path, &bytes)?;
+    state.viewer_files.check_reader(window.label(), &path)?;
+    message_file_attachment(path, index).await
+}
+
+async fn message_file_attachment(
+    path: String,
+    index: usize,
+) -> CommandResult<MessageFileAttachmentData> {
+    let target = resolve_message_file(&path).await?;
+    let bytes = read_message_file(&target).await?;
+    let parsed = parse_message_bytes(&target, &bytes)?;
     let attachment = parsed
         .attachments
         .get(index)
@@ -214,7 +285,7 @@ pub async fn read_message_file_attachment(
         filename: attachment
             .filename
             .as_deref()
-            .map(satchel_core::utils::filename::strip_filename_controls)
+            .map(satchel_core::utils::filename::safe_attachment_name)
             .unwrap_or_else(|| "Anhang".to_string()),
         mime_type: attachment.content_type.clone(),
         data_base64: base64::engine::general_purpose::STANDARD.encode(&attachment.bytes),
@@ -232,7 +303,7 @@ fn viewer_window_label(path: &str) -> String {
         .take(8)
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    format!("message-file-{hex}")
+    format!("{VIEWER_LABEL_PREFIX}{hex}")
 }
 
 /// Open the viewer for `path`.
@@ -247,6 +318,9 @@ fn viewer_window_label(path: &str) -> String {
 #[cfg(desktop)]
 pub(crate) fn open_message_file_window(app: &AppHandle, path: &str) -> Result<(), String> {
     let label = viewer_window_label(path);
+    if let Some(state) = app.try_state::<crate::AppState>() {
+        state.viewer_files.bind(&label, path);
+    }
     if let Some(existing) = app.get_webview_window(&label) {
         let _ = existing.unminimize();
         let _ = existing.show();
@@ -280,9 +354,7 @@ pub(crate) fn open_message_file_window(app: &AppHandle, path: &str) -> Result<()
 /// arrived as attachments and are already sitting in the attachment cache.
 #[tauri::command]
 pub async fn open_message_file_in_window(app: AppHandle, path: String) -> CommandResult<()> {
-    if !tokio::fs::try_exists(&path).await.unwrap_or(false) {
-        return Err(format!("{path} does not exist").into());
-    }
+    resolve_message_file(&path).await?;
     #[cfg(desktop)]
     return open_message_file_window(&app, &path).map_err(Into::into);
     #[cfg(mobile)]
@@ -294,9 +366,25 @@ pub async fn open_message_file_in_window(app: AppHandle, path: String) -> Comman
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_viewer_window_reads_only_its_own_message_file() {
+        let viewers = super::ViewerFiles::default();
+        viewers.bind("message-file-aa", "/mail/own.eml");
+        assert!(viewers
+            .check_reader("message-file-aa", "/mail/own.eml")
+            .is_ok());
+        assert!(viewers
+            .check_reader("message-file-aa", "/mail/other.eml")
+            .is_err());
+        assert!(viewers
+            .check_reader("message-file-bb", "/mail/own.eml")
+            .is_err());
+        assert!(viewers.check_reader("main", "/mail/other.eml").is_ok());
+    }
+
     #[tokio::test]
     async fn attachment_reads_reject_non_message_paths_before_reading() {
-        let error = super::read_message_file_attachment("/missing/secret.txt".into(), 0)
+        let error = super::message_file_attachment("/missing/secret.txt".into(), 0)
             .await
             .unwrap_err();
         assert_eq!(error.key, super::NOT_A_MESSAGE_FILE);
@@ -309,7 +397,7 @@ mod tests {
         let key = directory.path().join("id_ed25519");
         std::fs::write(&key, b"-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n").expect("key file");
 
-        let error = super::open_message_file(key.to_string_lossy().to_string())
+        let error = super::preview_message_file(key.to_string_lossy().to_string())
             .await
             .expect_err("a private key is not a message");
         assert_eq!(error.key, super::NOT_A_MESSAGE_FILE);
@@ -322,6 +410,40 @@ mod tests {
             "mail.eml.exe"
         )));
     }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_link_named_like_a_message_file_is_judged_by_its_target() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let key = directory.path().join("id_ed25519");
+        std::fs::write(&key, b"-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n").expect("key file");
+        let link = directory.path().join("mail.eml");
+        std::os::unix::fs::symlink(&key, &link).expect("symlink");
+        let link = link.to_string_lossy().to_string();
+
+        let error = super::preview_message_file(link.clone()).await.unwrap_err();
+        assert_eq!(error.key, super::NOT_A_MESSAGE_FILE);
+        let error = super::message_file_attachment(link, 0).await.unwrap_err();
+        assert_eq!(error.key, super::NOT_A_MESSAGE_FILE);
+
+        let folder = directory.path().join("folder.eml");
+        std::fs::create_dir(&folder).expect("dir");
+        let error = super::preview_message_file(folder.to_string_lossy().to_string())
+            .await
+            .unwrap_err();
+        assert_eq!(error.key, super::NOT_A_MESSAGE_FILE);
+
+        // A link to a real message file still opens.
+        let mail = directory.path().join("real.eml");
+        std::fs::write(&mail, b"Subject: Hallo\r\n\r\nText\r\n").expect("mail");
+        let alias = directory.path().join("alias.eml");
+        std::os::unix::fs::symlink(&mail, &alias).expect("symlink");
+        let preview = super::preview_message_file(alias.to_string_lossy().to_string())
+            .await
+            .expect("message file behind a link");
+        assert_eq!(preview.subject, "Hallo");
+    }
+
     #[cfg(desktop)]
     use super::viewer_window_label;
     use super::{build_preview, is_message_file, parse_message_bytes};

@@ -22,6 +22,19 @@
     "settings": "Kontoeinstellungen …",
     "title": "Darstellung"
   },
+  "accountQuota": {
+    "asOf": "Stand: {time}",
+    "critical": "Voll oder fast voll. Neue Mails kommen womöglich schon zurück.",
+    "freeUp": "Große Mails löschen, den Papierkorb leeren oder die Mails eines Absenders aufräumen schafft Platz.",
+    "messagesMeter": "Nachrichten im Postfach",
+    "messagesUsed": "{used} von {limit} Nachrichten",
+    "sidebarCritical": "{account}: Postfach zu {percent} voll, neue Mails kommen womöglich zurück. Kontoeinstellungen öffnen.",
+    "sidebarWarning": "{account}: Postfach zu {percent} voll. Kontoeinstellungen öffnen.",
+    "storageMeter": "Belegter Postfach-Speicher",
+    "storageUsed": "{used} von {limit} belegt",
+    "title": "Postfach-Speicher",
+    "warning": "Fast voll. Ist es voll, kommen neue Mails zurück."
+  },
   "accountVisibility": {
     "accounts": "Konten",
     "always": "Immer",
@@ -99,6 +112,20 @@
     "signatures": {
       "discovered": "{count} Signatur in gesendeten Nachrichten gefunden. | {count} Signaturen in gesendeten Nachrichten gefunden."
     },
+    "status": {
+      "certificate": "Zertifikat prüfen",
+      "details": "Details anzeigen",
+      "error": "Fehler aufgetreten",
+      "importing": "Ältere E-Mails {percent}",
+      "more": "+{count}",
+      "offline": "Offline",
+      "review": "{count} zu prüfen",
+      "signIn": "Anmeldung nötig",
+      "syncFailed": "Abgleich gestört",
+      "syncNow": "Jetzt abgleichen",
+      "syncing": "Abgleich läuft",
+      "title": "Abgleich und Konten"
+    },
     "sync": {
       "failures": {
         "explanation": "Vorübergehende Verbindungsprobleme werden automatisch erneut versucht. Diese Einträge müssen geprüft werden.",
@@ -109,6 +136,21 @@
         "unavailable": "Öffne den Postausgang, um die betroffenen Einträge zu prüfen."
       },
       "mutationsFailed": "{count} Änderung ist nicht beim Server angekommen. | {count} Änderungen sind nicht beim Server angekommen.",
+      "progress": {
+        "complete": "Alles ist auf dem neuesten Stand.",
+        "counts": "{done} von {total} Nachrichten",
+        "details": "Abgleich anzeigen",
+        "explanation": "Ältere E-Mails laden im Hintergrund — du kannst weiterarbeiten. Die Summe wächst, solange weitere Ordner gefunden werden.",
+        "folder": "{folder} wird gelesen",
+        "folderCount": "{folder} · Ordner {current} von {total}",
+        "history": "Ältere E-Mails laden",
+        "needsAttention": "Dieses Konto benötigt deine Aufmerksamkeit. Prüfe den Sync-Fehler.",
+        "paused": "Offline pausiert",
+        "preparing": "Postfach verbinden …",
+        "title": "E-Mail-Abgleich",
+        "updated": "Letzte Aktivität {time}",
+        "waiting": "Läuft im Hintergrund"
+      },
       "retryFailed": "Erneuter Abgleich fehlgeschlagen: {error}",
       "retryQueued": "{count} Änderung wird erneut abgeglichen. | {count} Änderungen werden erneut abgeglichen.",
       "status": {
@@ -136,6 +178,59 @@
       "version": "Version {version}"
     }
   },
+  "availability": {
+    "insert": {
+      "button": "Meine Verfügbarkeit einfügen",
+      "duration": "Termindauer",
+      "failed": "Freie Zeit konnte nicht gefunden werden: {error}",
+      "hoursHint": "Arbeitszeiten: {hours}. Änderbar unter Einstellungen → Kalender.",
+      "hoursShort": "{count} Std.",
+      "insert": "Einfügen",
+      "insertFailed": "Die Verfügbarkeit konnte nicht eingefügt werden. Klicke in die Nachricht und versuche es erneut.",
+      "loading": "Freie Zeit wird gesucht …",
+      "minutesShort": "{count} Min.",
+      "none": "Am nächsten Arbeitstag gibt es in der Arbeitszeit keine freie Zeit. | In den nächsten {count} Arbeitstagen gibt es in der Arbeitszeit keine freie Zeit.",
+      "range": "Innerhalb der nächsten",
+      "title": "Meine Verfügbarkeit einfügen",
+      "workingDays": "{count} Arbeitstag | {count} Arbeitstage"
+    },
+    "settings": {
+      "calendars": "Kalender, die dich belegt machen",
+      "description": "Deine Arbeitszeiten und die Kalender, die dich belegt machen. „Meine Verfügbarkeit einfügen“ im Verfassen-Fenster und „Nächste Zeit, zu der alle frei sind“ im Termineditor richten sich danach.",
+      "invalidHours": "Der Arbeitstag muss nach seinem Beginn enden.",
+      "title": "Verfügbarkeit",
+      "workDays": "Arbeitstage",
+      "workEnd": "Arbeitstag endet",
+      "workStart": "Arbeitstag beginnt"
+    },
+    "strip": {
+      "allFreeAt": "Alle Bekannten sind um {time} frei.",
+      "busyThen": "Dann belegt",
+      "busyTimes": "Belegt {times}",
+      "conflicts": "{count} Person ist um {time} belegt. | {count} Personen sind um {time} belegt.",
+      "freeAllDay": "Den ganzen Tag frei",
+      "freeThen": "Dann frei",
+      "loadFailed": "Die Verfügbarkeit konnte nicht geladen werden.",
+      "loading": "Verfügbarkeit wird geladen …",
+      "nextDay": "Nächster Tag",
+      "nextFree": "Nächste Zeit, zu der alle frei sind",
+      "noneFree": "In den nächsten {count} Arbeitstagen sind nie alle zugleich frei.",
+      "notCounted": "Nicht berücksichtigt, Verfügbarkeit unbekannt: {people}",
+      "previousDay": "Vorheriger Tag",
+      "searchFailed": "Freie Zeit konnte nicht gefunden werden: {error}",
+      "searching": "Wird gesucht …",
+      "title": "Verfügbarkeit",
+      "unknown": "Verfügbarkeit unbekannt",
+      "unknownHint": "Gestreifte Zeilen: Deren Kalender teilt mit diesem Konto keine Frei/Belegt-Zeiten.",
+      "you": "Du"
+    },
+    "text": {
+      "day": "{day}: {times}",
+      "hours": "{count} Stunde | {count} Stunden",
+      "intro": "Ich habe zu diesen Zeiten {duration} Zeit ({zone}):",
+      "minutes": "{count} Minute | {count} Minuten"
+    }
+  },
   "backend": {
     "errors": {
       "accountAvatarInvalid": "Das Bild muss ein kleines PNG-, JPEG- oder WebP-Bild sein.",
@@ -144,6 +239,7 @@
       "accountConfigurationInvalid": "Die Kontokonfiguration ist ungültig.",
       "accountCredentialAccessFailed": "Auf die gespeicherten Zugangsdaten des Kontos konnte nicht zugegriffen werden. Bitte versuche es erneut.",
       "accountHasNoPassword": "Dieses Konto meldet sich über seinen Anbieter an und hat kein Passwort, das sich ändern ließe.",
+      "accountNameInvalid": "Verwende einen Namen ohne Zeilenumbrüche mit höchstens 120 Zeichen.",
       "accountNotFound": "Das Konto wurde nicht gefunden.",
       "accountNotImap": "Dieses Konto verwendet kein IMAP.",
       "accountPasswordRequired": "Gib das Kontopasswort ein.",
@@ -160,6 +256,11 @@
       "attachmentExecutableNotConfirmed": "\"{filename}\" ist ein Programm (.{extension}), kein Dokument. Satchel übergibt es ohne deine Bestätigung nicht an das Betriebssystem.",
       "attachmentNotBase64": "\"{filename}\" ließ sich nicht anhängen: Die Daten sind beschädigt. Den Anhang entfernen und die Datei erneut hinzufügen.",
       "attachmentPayloadMissing": "Der Anhang ließ sich nicht lesen: Satchel hat weder seinen Inhalt noch einen Pfad dorthin bekommen.",
+      "attachmentTypeNotConfirmed": "Satchel weiß nicht, womit \"{filename}\" geöffnet wird, und übergibt es ohne deine Bestätigung nicht an das Betriebssystem.",
+      "availabilityDurationInvalid": "Wähle eine Termindauer zwischen 5 Minuten und 24 Stunden.",
+      "availabilityRangeInvalid": "Dieser Zeitraum lässt sich nicht auf freie Zeit prüfen.",
+      "availabilityTimeZoneInvalid": "Die Zeitzone dieses Geräts kennt Satchel nicht.",
+      "availabilityWorkingHoursInvalid": "Arbeitszeiten brauchen einen Beginn vor dem Ende und mindestens einen Arbeitstag.",
       "backupPassphraseOrAcknowledgementRequired": "Setze eine Passphrase für den Master-Key oder bestätige, dass der Sicherungsordner ihn ungeschützt enthalten darf.",
       "backupPassphraseRejected": "Diese Passphrase öffnet den Master-Key dieser Sicherung nicht.",
       "backupPassphraseRequired": "Der Master-Key dieser Sicherung ist umschlossen. Gib die Passphrase ein, mit der sie erstellt wurde.",
@@ -175,6 +276,7 @@
       "calendarEventEndInvalid": "Der Termin muss nach seinem Beginn enden.",
       "calendarEventNotFound": "Der Kalendertermin wurde nicht gefunden.",
       "calendarEventOwnership": "Dieser Kalendertermin gehört zu einem anderen Konto.",
+      "calendarEventReadOnly": "Outlook erlaubt diesem Konto keine Änderung am Termin: Du nimmst nur teil, oder der Kalender ist schreibgeschützt.",
       "calendarFileReadFailed": "Die Kalenderdatei konnte nicht gelesen werden.",
       "calendarInviteCancelled": "Eine abgesagte Einladung kann nicht beantwortet werden.",
       "calendarInviteInvalid": "Die gespeicherte Einladung ist ungültig.",
@@ -186,8 +288,11 @@
       "calendarRemoteUnavailable": "Synchronisiere diesen Kalender vor dem Ändern. Die entfernte Version des Termins ist nicht verfügbar.",
       "calendarRemoteWriteFailed": "Der Kalenderserver konnte die Änderung nicht bestätigen. Synchronisiere den Kalender vor einem erneuten Versuch.",
       "calendarResponseInvalid": "Wähle eine gültige Antwort auf die Einladung.",
+      "calendarRichDescriptionReadOnly": "Diese Beschreibung ist in Outlook formatiert und verlöre hier Links und Layout. Bearbeite sie in Outlook.",
       "calendarTimeInvalid": "Gib eine gültige Terminzeit ein.",
       "calendarTitleRequired": "Gib einen Termintitel ein.",
+      "chatConfirmationNeeded": "Chat geändert. Erneut senden.",
+      "chatEncryptionLost": "Diese Antwort sollte verschlüsselt rausgehen und kann es nicht mehr. Bis das wieder geht, bleibt die Antwort im Postausgang.",
       "composeWindowUnsupported": "Ein eigenes Schreibfenster gibt es nur auf dem Desktop.",
       "contactAvatarFallbackSyncFailed": "Ersatz-Kontaktbilder konnten nicht synchronisiert werden.",
       "contactAvatarLocalSyncFailed": "Lokale Kontaktbilder konnten nicht synchronisiert werden.",
@@ -197,8 +302,8 @@
       "decryptedAttachmentUnavailable": "Dieser Anhang stammt aus einer verschlüsselten Nachricht, und seine entschlüsselte Kopie ist nicht mehr gespeichert. Öffne die Nachricht, um ihn erneut zu entschlüsseln.",
       "desktopUnavailable": "Das Desktop-Backend ist nicht verfügbar. Starte Satchel mit `pnpm tauri:dev`.",
       "directorySelectionUnavailable": "Die Ordnerauswahl ist auf dieser Plattform nicht verfügbar.",
-      "draftChangedElsewhere": "Dieser Entwurf wurde in einem anderen Fenster geändert. Dein Text hier ist nicht gespeichert.",
-      "draftGoneElsewhere": "Dieser Entwurf wurde in einem anderen Fenster gesendet oder verworfen. Dein Text hier ist nicht gespeichert.",
+      "draftChangedElsewhere": "Der Entwurf wurde anderswo geändert, deine letzten Änderungen sind noch nicht gespeichert.",
+      "draftGoneElsewhere": "Der Entwurf wurde anderswo gesendet oder gelöscht, deine letzten Änderungen sind noch nicht gespeichert.",
       "draftSendPending": "Dieser Entwurf hat einen aktiven Versand. Öffne ihn unter Entwürfe, um den Versand vor dem Bearbeiten abzubrechen.",
       "draftSyncQueueInvalid": "Der gespeicherte Auftrag zur Entwurfssynchronisierung ist ungültig.",
       "draftSyncTimedOut": "Der Anbieter hat die Entwurfssynchronisierung nicht rechtzeitig abgeschlossen.",
@@ -226,6 +331,7 @@
       "groupwareContactSyncFailed": "Kontakte für {account} konnten nicht synchronisiert werden.",
       "groupwareCredentialsRejected": "Kein CalDAV- oder CardDAV-Dienst hat die gespeicherten Zugangsdaten akzeptiert.",
       "groupwareSyncFailed": "Groupware für {account} konnte nicht synchronisiert werden.",
+      "groupwareTaskSyncFailed": "Aufgaben für {account} konnten nicht synchronisiert werden.",
       "imapConnectionFailed": "Es konnte keine sichere IMAP-Verbindung hergestellt werden. Letzter Versuch: {reason}. Du kannst den Server unter \"Erweitert\" von Hand eintragen.",
       "imapCredentialsRejected": "Keine sichere IMAP-Konfiguration hat diese Zugangsdaten akzeptiert. Prüfe den Benutzernamen oder trage den Server von Hand ein.",
       "imapDraftUidWithoutValidity": "Für diesen älteren Entwurf in \"{folder}\" fehlt eine bestätigte Serverkennung. Seine Serverkopie wurde nicht verändert.",
@@ -239,6 +345,24 @@
       "inlineBackfillAlreadyRunning": "Der Abgleich der Inline-Bilder läuft bereits.",
       "logsFolderUnavailable": "Der Log-Ordner konnte nicht geöffnet werden.",
       "mailActionFailed": "Die Mail-Aktion konnte nicht gespeichert werden. Bitte erneut versuchen.",
+      "mailMergeCsvEmpty": "Die Datei ist leer.",
+      "mailMergeCsvNoRows": "Die Datei hat eine Kopfzeile, aber keine Adressen.",
+      "mailMergeCsvTooLarge": "Die Datei ist größer als 5 MB. Das ist keine Adressliste.",
+      "mailMergeCsvTooManyColumns": "Die Datei hat mehr als {limit} Spalten. Das ist keine Adressliste.",
+      "mailMergeCsvUnreadable": "Die Datei konnte nicht gelesen werden.",
+      "mailMergeCsvUnterminatedQuote": "Ein Anführungszeichen in Zeile {line} wird nie geschlossen.",
+      "mailMergeDelayInvalid": "Wähle zwischen 1 und 3600 Sekunden Abstand.",
+      "mailMergeInvalidState": "Das geht bei dieser Serienmail gerade nicht. Vielleicht hat sie sich inzwischen geändert.",
+      "mailMergeJobNotFound": "Diese Serienmail gibt es nicht mehr.",
+      "mailMergeMissingKeys": "Adressen ohne Schlüssel: {count} ({addresses}). Es wurde nichts gesendet.",
+      "mailMergeMissingValues": "Ein Platzhalter hatte für diese Adresse keinen Wert.",
+      "mailMergeNoRecipients": "Keine Zeile der Liste lässt sich senden.",
+      "mailMergePersistenceFailed": "Die Serienmail konnte nicht gespeichert werden.",
+      "mailMergeRemovedFromOutbox": "Vor dem Senden aus dem Postausgang entfernt.",
+      "mailMergeReplyNotAllowed": "Eine Serienmail ist eine neue Nachricht und kann keine Unterhaltung beantworten oder weiterleiten.",
+      "mailMergeSmimeSigningUnavailable": "Das S/MIME-Signaturzertifikat ist gesperrt oder fehlt. Entsperre es und starte erneut.",
+      "mailMergeTooManyRecipients": "Eine Serienmail sendet höchstens {limit} Nachrichten. Teile die Liste.",
+      "mailMoveInterrupted": "Das Verschieben wurde unterbrochen, bevor es fertig war. Bitte erneut versuchen.",
       "mailMovePending": "Die Verschiebung auf dem Server wird noch abgeschlossen. Bitte gleich erneut versuchen.",
       "mailUndoUnavailable": "Diese Aktion kann nicht mehr rückgängig gemacht werden.",
       "messageBodyProviderUnsupported": "Das Nachladen von Nachrichten wird für {provider}-Konten nicht unterstützt.",
@@ -273,6 +397,9 @@
       "oauthReloadRequired": "Die Anmeldung des Kontos hat sich währenddessen geändert. Bitte versuche es erneut.",
       "oauthUrlRejected": "Satchel hat eine unerwartete Anmeldeadresse abgelehnt.",
       "outboxActionCannotBeDiscarded": "Dieser Eintrag im Postausgang kann nicht sicher verworfen werden.",
+      "outlookCalendarAccessMissing": "Der Kalender-Zugriff für dieses Outlook-Konto ist nicht verbunden. Verbinde ihn unter Einstellungen → Kalender.",
+      "outlookCalendarSyncFailed": "Der Outlook-Kalender für {account} konnte nicht synchronisiert werden.",
+      "outlookEventChangedRemotely": "Dieser Termin wurde in Outlook geändert. Der Kalender wurde aktualisiert; öffne den Termin erneut und versuche es noch einmal.",
       "passwordCheckFailed": "Die Anmeldung mit dem neuen Passwort ist fehlgeschlagen: {reason}",
       "pgpDecodeFailed": "Der entschlüsselte OpenPGP-Inhalt konnte nicht gelesen werden.",
       "pgpDecryptFailed": "Die OpenPGP-Nachricht konnte mit den entsperrten Schlüsseln nicht entschlüsselt werden.",
@@ -317,6 +444,7 @@
       "queueRejected": "Der Server hat diese Aktion abgelehnt. Prüfe die Details vor einem erneuten Versuch.",
       "queueTemporary": "Der Server ist vorübergehend nicht erreichbar. Satchel versucht es automatisch erneut.",
       "queuedDraftNotRestorable": "Diese Nachricht lässt sich nicht mehr als Entwurf öffnen, weil sich ihr Entwurf nach dem Einreihen geändert hat. Im Postausgang kannst du sie noch ansehen oder vor dem Senden verwerfen.",
+      "readSourceNotChosen": "Satchel liest nur eine Datei oder einen Ordner, die im eigenen Dialog gewählt wurden. Bitte {path} erneut auswählen.",
       "recipientAddressInvalid": "Das ist keine gültige Empfängeradresse: {value}",
       "replyContextLoadFailed": "Der Antwortkontext konnte nicht geladen werden. Die Nachricht wurde noch nicht gesendet.",
       "replyThreadNotFound": "Die Unterhaltung für diese Antwort ist nicht mehr verfügbar.",
@@ -329,15 +457,49 @@
       "restoreSearchIndexInvalid": "Der Suchindex der Sicherung passt nicht zu ihren Nachrichten. Lege lieber eine frische Sicherung an, statt diese zurückzuspielen.",
       "restoreStagingChanged": "Die vorgemerkte Sicherung ist unvollständig oder wurde verändert. Merke die Sicherung erneut vor.",
       "revealTargetBlocked": "Dieses Ziel kann nicht im Dateimanager geöffnet werden.",
+      "rules": {
+        "actionsInvalid": "Ordner oder Weiterleitungsadresse dieser Regel sind nicht erlaubt."
+      },
       "scheduledTimeInvalid": "Wähle einen gültigen Sendezeitpunkt in der Zukunft.",
+      "senderAddressMissing": "Dieses Konto hat keine Absenderadresse. Trage sie unter Einstellungen → Konten ein und sende erneut.",
       "senderAddressNotOwned": "\"{address}\" ist weder die Adresse dieses Kontos noch einer seiner Aliase. Wähle einen anderen Absender.",
       "senderPreferenceAccountInvalid": "Das Konto für diese Absenderpräferenz ist ungültig.",
       "senderPreferenceCategoryInvalid": "Wähle eine gültige Absenderkategorie.",
       "senderPreferenceEmailInvalid": "Gib eine gültige Absender-E-Mail-Adresse ein.",
       "senderPreferencePersistenceFailed": "Absenderpräferenzen sind momentan nicht verfügbar. Bitte versuche es erneut.",
+      "senderSweepAccountInvalid": "Dieses Konto lässt sich nicht aufräumen.",
+      "senderSweepActionInvalid": "Unbekannte Aufräum-Aktion.",
+      "senderSweepDaysInvalid": "Wähle zwischen 0 und 3650 Tagen.",
+      "senderSweepFolderInvalid": "Wähle einen Ordner dieses Kontos.",
+      "senderSweepOwnAddress": "Die eigene Adresse lässt sich nicht aufräumen.",
+      "senderSweepPersistenceFailed": "Die Aufräum-Regel konnte nicht gespeichert werden.",
+      "senderSweepRuleNotFound": "Diese Regel gibt es nicht mehr.",
+      "senderSweepSenderInvalid": "Das ist keine Absenderadresse.",
+      "senderSweepTrashNeedsAge": "Eine Regel, die Mails in den Papierkorb verschiebt, braucht ein Alter von mindestens einem Tag.",
       "sentMessagePersistenceFailed": "Die Nachricht wurde gesendet, aber der lokale Gesendet-Eintrag konnte nicht gespeichert werden. Sende sie nicht erneut.",
       "sentMessagePostProcessingFailed": "Die Nachricht wurde gesendet, aber die lokale Nachbereitung konnte nicht abgeschlossen werden. Sende sie nicht erneut.",
       "serverHostAndPortRequired": "Gib Serveradresse und Port ein.",
+      "serverRules": {
+        "authFailed": "Der Filter-Server hat das Passwort des Kontos abgelehnt.",
+        "consentNeeded": "Ein anderes Filterskript ist aktiv. Entscheide unter Einstellungen → Konten → Server-Regeln.",
+        "includeUnavailable": "Dieser Server kann keine zwei Skripte nebeneinander ausführen.",
+        "invalidChoice": "Unbekannte Wahl.",
+        "invalidHost": "Gib einen gültigen Hostnamen ein.",
+        "invalidPort": "Gib einen gültigen Port ein.",
+        "invalidTls": "Wähle STARTTLS oder TLS.",
+        "nameTaken": "Ein eigenes Skript trägt schon Satchels Namen. Benenne es zuerst um.",
+        "noMechanism": "Der Filter-Server bietet kein unterstütztes Anmeldeverfahren.",
+        "notConfigured": "Prüfe zuerst den Server oder trage ihn ein.",
+        "persistence": "Die Einstellungen für Server-Regeln ließen sich nicht speichern.",
+        "protocol": "Der Filter-Server hat unerwartet geantwortet.",
+        "quota": "Das Filterskript überschreitet den Platz auf dem Server.",
+        "refused": "Der Filter-Server hat das Skript abgelehnt.",
+        "tls": "Der Filter-Server bietet keine sichere Verbindung.",
+        "turnOffFirst": "Schalte die Server-Regeln aus, bevor du den Server änderst.",
+        "unreachable": "Der Filter-Server war nicht erreichbar.",
+        "unverified": "Der Server hat Satchels Skript nicht als aktiv bestätigt.",
+        "vacationUnsupported": "Dieser Server kann die Antwort so nicht senden."
+      },
       "signatureAccountMismatch": "Diese Signatur gehört zu einem anderen Konto.",
       "signatureAssetContentIdDuplicate": "Jedes Signaturbild benötigt eine eindeutige Content-ID.",
       "signatureAssetContentInvalid": "Ein Signaturbild konnte nicht dekodiert werden.",
@@ -371,7 +533,20 @@
       "smimeUndecodedPart": "Der entschlüsselte S/MIME-Inhalt enthält einen Teil, den Satchel nicht anzeigen kann.",
       "smimeVerificationFailed": "Die S/MIME-Signatur konnte nicht überprüft werden.",
       "snapshotMessagesHeld": "{count} Nachrichten in {folder} konnten für {account} nicht vom Server aktualisiert werden und bleiben vorerst, wo sie sind. Satchel versucht es in einem Tag erneut.",
+      "spamFilterUnavailable": "Die Einstellungen des Spamfilters ließen sich nicht lesen oder speichern.",
       "systemFolderImmutable": "\"{name}\" ist ein Systemordner und kann nicht geändert werden.",
+      "taskChanged": "Diese Aufgabe wurde inzwischen geändert.",
+      "taskCompletedInvalid": "Der Erledigt-Zeitpunkt ist nicht lesbar.",
+      "taskDueInvalid": "Das Fälligkeitsdatum ist nicht lesbar.",
+      "taskListNameRequired": "Eine Liste braucht einen Namen.",
+      "taskListNotFound": "Diese Aufgabenliste gibt es nicht mehr.",
+      "taskListNotLocal": "Listen eines Kontos werden auf dessen Server umbenannt und gelöscht.",
+      "taskListReadOnly": "Diese Aufgabenliste ist schreibgeschützt.",
+      "taskNotFound": "Diese Aufgabe gibt es nicht mehr.",
+      "taskPersistenceFailed": "Die Aufgabe konnte nicht gespeichert werden.",
+      "taskPriorityInvalid": "Diese Priorität kennt Satchel nicht.",
+      "taskReminderInvalid": "Die Erinnerungszeit ist nicht lesbar.",
+      "taskTitleRequired": "Eine Aufgabe braucht einen Titel.",
       "templateNotFound": "Die Vorlage wurde nicht gefunden.",
       "templatePersistenceFailed": "Vorlagen sind momentan nicht verfügbar. Bitte versuche es erneut.",
       "threadMetadataInvalid": "Die Organisationsangaben der Unterhaltung sind ungültig.",
@@ -392,12 +567,36 @@
       "topicNoteContentEmpty": "Gib einen Notizinhalt ein.",
       "topicPersistenceFailed": "Das Thema konnte nicht gespeichert werden. Bitte versuche es erneut.",
       "topicStatusInvalid": "Der Themenstatus ist ungültig.",
+      "translation": {
+        "consentRequired": "Mails dieses Kontos dürfen noch nicht zur Übersetzung gesendet werden.",
+        "credentialsUnavailable": "Der Schlüsselbund ist gesperrt, der API-Schlüssel kann nicht gelesen oder gespeichert werden.",
+        "encrypted": "Verschlüsselte Mails werden nicht zur Übersetzung gesendet.",
+        "engineUnknown": "Unbekannte Übersetzungs-Engine.",
+        "freePlanNotForMail": "Kostenlose DeepL-API-Schlüssel taugen nicht für Mails: DeepL verbietet über die kostenlose API personenbezogene Daten, und jede Mail enthält welche. Für Übersetzungen braucht es einen Pro-Schlüssel.",
+        "invalidKey": "DeepL hat den API-Schlüssel nicht angenommen. Prüfe ihn unter Einstellungen → Übersetzung.",
+        "invalidResponse": "Die Antwort von DeepL konnte nicht gelesen werden.",
+        "keyMalformed": "Das sieht nicht nach einem API-Schlüssel aus. Füge den Schlüssel ohne Leerzeichen und Zeilenumbrüche ein.",
+        "keyMissing": "Für die Übersetzungs-Engine ist kein API-Schlüssel gespeichert.",
+        "messageNotFound": "Diese Nachricht ist auf diesem Gerät nicht gespeichert.",
+        "network": "DeepL konnte nicht erreicht werden. Prüfe die Verbindung.",
+        "notConfigured": "Übersetzung ist nicht eingerichtet. Wähle eine Engine unter Einstellungen → Übersetzung.",
+        "nothingToTranslate": "Diese Nachricht hat keinen Text zum Übersetzen.",
+        "persistenceFailed": "Die Übersetzung konnte auf diesem Gerät nicht gespeichert werden.",
+        "quotaExceeded": "Das DeepL-Zeichenkontingent ist für diesen Abrechnungszeitraum aufgebraucht.",
+        "rateLimited": "DeepL bekommt gerade zu viele Anfragen. Versuche es in einer Minute erneut.",
+        "rejected": "DeepL hat die Anfrage abgelehnt.",
+        "tooLarge": "Diese Nachricht ist zu lang, um sie in einem Stück zu übersetzen.",
+        "unavailable": "DeepL ist gerade nicht erreichbar. Versuche es später erneut.",
+        "unsupportedLanguage": "Die Übersetzungs-Engine übersetzt nicht in diese Sprache."
+      },
       "trayDestinationInvalid": "Dieses Tray-Ziel ist nicht verfügbar.",
       "trayMessageNotFound": "Diese E-Mail ist nicht mehr verfügbar.",
       "trayThreadInvalid": "Diese Tray-E-Mail-Referenz ist ungültig.",
       "unexpected": "Ein unerwarteter Backend-Fehler ist aufgetreten.",
       "unsubscribeBrowserOpenFailed": "Die Abmeldeseite konnte nicht geöffnet werden: {message}",
+      "unsubscribeConfirmationStale": "Die Abmelde-Mail entspricht nicht mehr dem, was bestätigt wurde. Es wurde nichts gesendet.",
       "unsubscribeHeaderMissing": "Diese E-Mail enthält keine Abmeldeadresse.",
+      "unsubscribeMailtoInvalid": "Die Abmeldeadresse dieser E-Mail ist keine einzelne gültige Adresse. Satchel sendet nicht an sie.",
       "unsubscribeMessageNotFound": "Diese E-Mail ist nicht mehr verfügbar.",
       "unsubscribeNoTarget": "Diese E-Mail enthält keine verwendbare Abmeldeadresse.",
       "unsubscribePostFailed": "Die Abmeldung ist fehlgeschlagen: {message}",
@@ -423,7 +622,9 @@
     "createHint": "Klicke auf einen freien Tag oder eine freie Uhrzeit, um einen Termin anzulegen.",
     "editor": {
       "add": "Hinzufügen",
+      "attendeesNotified": "Die Teilnehmenden werden über deine Änderungen benachrichtigt.",
       "attendeesPlaceholder": "person{'@'}example.com, team{'@'}example.com",
+      "descriptionLocked": "Diese Beschreibung ist in Outlook formatiert (Links, Tabellen). Bearbeite sie dort; alles andere lässt sich hier ändern.",
       "descriptionPlaceholder": "Notizen, Agenda, …",
       "editTitle": "Termin bearbeiten",
       "errors": {
@@ -431,10 +632,12 @@
         "invalidDates": "Start und Ende enthalten kein gültiges Datum.",
         "titleRequired": "Bitte einen Titel angeben."
       },
+      "guestsNeedInvites": "Gäste werden nur mit eingeschalteten Einladungen gespeichert.",
       "locationPlaceholder": "Ort oder Videolink",
       "newTitle": "Neuer Termin",
+      "occurrenceOnly": "Änderungen gelten nur für diesen Termin der Serie.",
       "sendInvites": "ICS-Einladungen per Mail senden",
-      "serverNotifications": "CalDAV-Server können Gäste auch dann benachrichtigen, wenn Einladungen per E-Mail ausgeschaltet sind.",
+      "serverNotifications": "Kalenderserver können Gäste auch dann benachrichtigen, wenn Einladungen per E-Mail ausgeschaltet sind.",
       "submit": "Termin erstellen",
       "titlePlaceholder": "Titel des Termins"
     },
@@ -442,7 +645,10 @@
       "allDay": "Ganztägig",
       "attendees": "Teilnehmer",
       "delete": "Termin löschen",
+      "deleteConfirmAttendees": "Der Termin wird im Kalender auf dem Server gelöscht, und die Teilnehmenden werden benachrichtigt. Das lässt sich nicht rückgängig machen.",
       "deleteConfirmBody": "Der Termin wird aus deinem Kalender entfernt. Das lässt sich nicht rückgängig machen.",
+      "deleteConfirmOccurrence": "Nur dieser Termin der Serie wird im Kalender auf dem Server gelöscht; die übrigen bleiben. Das lässt sich nicht rückgängig machen.",
+      "deleteConfirmOccurrenceAttendees": "Nur dieser Termin der Serie wird im Kalender auf dem Server gelöscht, und die Teilnehmenden werden benachrichtigt; die übrigen bleiben. Das lässt sich nicht rückgängig machen.",
       "deleteConfirmRemote": "Der Termin wird auch im Kalender auf dem Server gelöscht. Das lässt sich nicht rückgängig machen.",
       "deleteConfirmTitle": "Diesen Termin löschen?",
       "details": "Termindetails",
@@ -450,6 +656,7 @@
       "end": "Ende",
       "location": "Ort",
       "organizer": "Organisator",
+      "readOnlyOutlook": "Ändere diesen Termin in Outlook: Du nimmst nur teil, oder der Kalender ist schreibgeschützt.",
       "start": "Start",
       "title": "Titel",
       "untitled": "(ohne Titel)"
@@ -498,6 +705,7 @@
       "hide": "Ausblenden",
       "invites": "Einladungen",
       "local": "Lokal",
+      "outlook": "Outlook-Kalender",
       "show": "Einblenden"
     },
     "status": {
@@ -506,6 +714,7 @@
       "declined": "Abgesagt",
       "googleCalendar": "Google Kalender",
       "needsAction": "Antwort offen",
+      "outlookCalendar": "Outlook-Kalender",
       "ownEvent": "Eigener Termin",
       "tentative": "Vielleicht"
     },
@@ -600,7 +809,100 @@
       "problem": "{account}: {problem}"
     }
   },
+  "chats": {
+    "allAccounts": "Alle Konten",
+    "composer": {
+      "hint": "Enter sendet, Umschalt+Enter fügt eine Zeile ein",
+      "label": "Nachricht",
+      "placeholder": "Nachricht an {name} …",
+      "queued": "In der Warteschlange. Geht raus, sobald die Verbindung wieder da ist.",
+      "send": "Senden",
+      "sendFailed": "Die Nachricht konnte nicht gesendet werden.",
+      "sending": "Wird gesendet …"
+    },
+    "confirm": {
+      "firstBody": "Das ist deine erste Antwort in diesem Chat. Empfänger:",
+      "firstGroupBody": "Das ist deine erste Antwort in dieser Gruppe. Empfänger:",
+      "firstGroupTitle": "Dieser Gruppe antworten?",
+      "firstTitle": "Deine erste Antwort senden?",
+      "plainBody": "Dieser Chat war Ende-zu-Ende-verschlüsselt. Diese Antwort ginge unverschlüsselt raus, weil nicht alle Empfänger einen Autocrypt-Schlüssel haben.",
+      "plainTitle": "Ohne Verschlüsselung senden?",
+      "recipientsBody": "Die Empfänger haben sich seit deiner letzten Antwort oder seit Beginn des Chats geändert.",
+      "recipientsTitle": "An diese Personen senden?",
+      "send": "Senden",
+      "sendPlain": "Unverschlüsselt senden"
+    },
+    "empty": {
+      "description": "Nachrichten aus Delta Chat erscheinen hier, sobald sie ankommen.",
+      "title": "Noch keine Chats"
+    },
+    "encrypted": "Ende-zu-Ende-verschlüsselt",
+    "list": "Chats",
+    "loadFailed": "Die Chats konnten nicht geladen werden.",
+    "members": "{count} Mitglied | {count} Mitglieder",
+    "messagesLoadFailed": "Die Nachrichten konnten nicht geladen werden.",
+    "notEncrypted": "Unverschlüsselt",
+    "notEncryptedNoKey": "Antworten gehen unverschlüsselt raus: Für {address} gibt es keinen OpenPGP-Schlüssel.",
+    "notEncryptedNoPeerKey": "Antworten gehen unverschlüsselt raus, bis alle Mitglieder einen Autocrypt-Schlüssel geschickt haben.",
+    "notMember": "{name} · nicht in diesem Chat",
+    "partHidden": "Ein Teil der Nachricht ist ausgeblendet · Als Mail anzeigen",
+    "select": {
+      "description": "Die Nachrichten erscheinen als Sprechblasen, darunter das Antwortfeld.",
+      "title": "Chat auswählen"
+    },
+    "showAsMail": "Als Mail anzeigen",
+    "title": "Chats",
+    "today": "Heute",
+    "unlock": {
+      "body": "Diese Antwort wird Ende-zu-Ende-verschlüsselt und mit deinem OpenPGP-Schlüssel für {address} signiert.",
+      "confirm": "Entsperren und senden",
+      "failed": "Der Schlüssel konnte nicht entsperrt werden.",
+      "label": "Passphrase",
+      "title": "Schlüssel entsperren, um zu senden",
+      "wrong": "Diese Passphrase entsperrt den Schlüssel nicht."
+    },
+    "unread": "{count} ungelesen",
+    "unsigned": {
+      "body": "Dein Schlüssel bleibt gesperrt. Die Antwort ist trotzdem Ende-zu-Ende-verschlüsselt, aber die Empfänger können nicht prüfen, dass sie von dir kommt.",
+      "confirm": "Unsigniert senden",
+      "title": "Ohne deine Signatur senden?"
+    },
+    "yesterday": "Gestern"
+  },
+  "cleanup": {
+    "actions": {
+      "archiveAll": "Alle archivieren",
+      "keepLatest": "Neueste behalten",
+      "rule": "Ab jetzt …",
+      "trashAll": "Alle in den Papierkorb"
+    },
+    "allAccounts": "Alle Konten",
+    "canUnsubscribe": "Abmelden möglich",
+    "empty": {
+      "description": "Kein Absender hat Mails aus den letzten {days} Tagen im Posteingang.",
+      "title": "Nichts aufzuräumen"
+    },
+    "keys": {
+      "move": "Bewegen",
+      "title": "Tastatur"
+    },
+    "loadFailed": "Die Absender konnten nicht geladen werden.",
+    "messages": "{count} Nachricht | {count} Nachrichten",
+    "newest": "neueste {date}",
+    "openForAccount": "Postfach aufräumen …",
+    "subtitle": "Häufigste Absender im Posteingang, letzte {days} Tage",
+    "subtitleAccount": "Häufigste Absender in {account}, letzte {days} Tage",
+    "threads": "{count} Unterhaltung | {count} Unterhaltungen",
+    "title": "Aufräumen",
+    "trashConfirm": {
+      "body": "Unterhaltungen mit anderen Beteiligten, deinen Antworten oder einer Anheftung bleiben. Für ein paar Sekunden lässt es sich rückgängig machen.",
+      "title": "Eine Unterhaltung von {sender} in den Papierkorb verschieben? | {count} Unterhaltungen von {sender} in den Papierkorb verschieben?"
+    },
+    "unreadShare": "{percent} % ungelesen",
+    "unsubscribed": "Abgemeldet"
+  },
   "commands": {
+    "addTask": "Als Aufgabe anlegen",
     "blockAddress": "Diesen Absender blockieren",
     "blockDomain": "Ganze Domain des Absenders blockieren",
     "compose": "Neue E-Mail verfassen",
@@ -611,6 +913,7 @@
     "exportText": "Unterhaltung als Text exportieren",
     "keywords": {
       "block": "blockieren block absender domain",
+      "cleanup": "aufräumen absender newsletter abmelden sweep",
       "compose": "compose new mail schreiben",
       "copyLink": "link url teilen satchel",
       "editShortcuts": "keybindings shortcuts customize anpassen belegen",
@@ -620,6 +923,8 @@
       "moveToFolder": "bewegen verschieben ordner move folder",
       "moveToInbox": "move inbox postfach",
       "mute": "stumm stummschalten mute",
+      "newTask": "aufgabe todo anlegen neu",
+      "notSpam": "kein spam erwünscht posteingang",
       "oauthGmail": "oauth google anmelden login",
       "oauthOutlook": "oauth microsoft anmelden login",
       "openSettingsSection": "settings einstellungen optionen",
@@ -644,6 +949,7 @@
     "markUnread": "Als ungelesen markieren",
     "moveToFolder": "Nach {folder} verschieben",
     "moveToInbox": "In die Inbox verschieben",
+    "newTask": "Neue Aufgabe",
     "noEmailAccount": "Kein E-Mail-Konto vorhanden.",
     "oauthFailed": "{provider}-Anmeldung konnte nicht gestartet werden.",
     "oauthFailedCause": "{provider}-Anmeldung konnte nicht gestartet werden: {cause}",
@@ -651,6 +957,7 @@
     "oauthOpened": "{provider}-Anmeldung im Browser geöffnet.",
     "oauthOutlook": "OAuth starten (Outlook)",
     "oauthStarted": "{provider}-Anmeldung gestartet: {url}",
+    "openCleanup": "Aufräum-Assistent öffnen",
     "openSettingsSection": "Einstellungen: {section}",
     "pin": "Anheften oder lösen",
     "printConversation": "Unterhaltung drucken",
@@ -658,11 +965,13 @@
     "setAside": "Beiseitelegen",
     "showShortcuts": "Tastenkürzel anzeigen",
     "snooze": "Auf Wiedervorlage legen …",
+    "sweepSender": "E-Mails dieses Absenders aufräumen …",
     "syncDone": "Synchronisierung abgeschlossen.",
     "syncFailed": "Synchronisierung fehlgeschlagen.",
     "syncFailedCause": "Synchronisierung fehlgeschlagen: {cause}",
     "syncMail": "E-Mails synchronisieren",
     "toggleTheme": "Design wechseln (hell/dunkel)",
+    "translateMessage": "Nachricht übersetzen oder Original anzeigen",
     "trashMany": "{count} E-Mails löschen",
     "undo": "Rückgängig: {label}",
     "waiting": "Auf Antwort warten"
@@ -822,6 +1131,18 @@
       "paragraph": "Text",
       "placeholder": "Nachricht verfassen…",
       "strike": "Durchgestrichen",
+      "table": {
+        "addColumnAfter": "Spalte rechts einfügen",
+        "addColumnBefore": "Spalte links einfügen",
+        "addRowAfter": "Zeile darunter einfügen",
+        "addRowBefore": "Zeile darüber einfügen",
+        "deleteColumn": "Spalte löschen",
+        "deleteRow": "Zeile löschen",
+        "deleteTable": "Tabelle löschen",
+        "headerRow": "Überschriftenzeile",
+        "insert": "Tabelle einfügen",
+        "toolbar": "Tabelle"
+      },
       "textColor": "Textfarbe"
     },
     "emlDrop": {
@@ -966,11 +1287,12 @@
     "toolbar": {
       "attach": "Datei anhängen",
       "attachShort": "Anhängen",
+      "attachWithCount": "Datei anhängen ({count} angehängt)",
       "more": "Weitere Optionen",
       "template": "Vorlage verwenden"
     },
     "unsaved": {
-      "conflictTitle": "Nicht gespeichert: Der Entwurf wurde in einem anderen Fenster geändert",
+      "conflictTitle": "Entwurf nicht gespeichert",
       "discardMine": "Meine Änderungen verwerfen",
       "saveAsNew": "Als neuen Entwurf speichern",
       "title": "Nicht gespeichert"
@@ -983,6 +1305,11 @@
       "popOutFailed": "Eigenes Fenster konnte nicht geöffnet werden: {error}",
       "restore": "Fenster verkleinern"
     }
+  },
+  "composeDrop": {
+    "add": "Zum Entwurf hinzufügen",
+    "addToTo": "Loslassen, um unter „An“ hinzuzufügen",
+    "attach": "An Entwurf anhängen"
   },
   "contacts": {
     "add": {
@@ -1250,11 +1577,16 @@
       "openWithDefault": "Mit Standard-App öffnen",
       "openWithDefaultNamed": "{filename} mit der Standard-App öffnen",
       "pdfFailed": "Die PDF-Vorschau konnte nicht dargestellt werden.",
+      "pdfNext": "Nächste Seite",
+      "pdfPage": "Seite {page} von {total}",
+      "pdfPages": "PDF-Seiten",
       "pdfPreview": "PDF Vorschau",
+      "pdfPrevious": "Vorherige Seite",
       "previewLabel": "Anhangvorschau",
       "previewUnavailable": "Vorschau für {mime} nicht verfügbar.",
       "quickLookFailed": "Schnellansicht konnte nicht geöffnet werden: {error}",
       "readFailed": "„{name}\" konnte nicht gelesen werden.",
+      "removeNamed": "{name} entfernen",
       "save": "Anhang speichern",
       "saveEllipsis": "Speichern…",
       "saveFailed": "Anhang konnte nicht gespeichert werden: {error}",
@@ -1262,6 +1594,9 @@
       "showInFolder": "Im Ordner zeigen",
       "tooLarge": "„{name}\" ist größer als {limit}.",
       "totalExceeded": "Gesamtgröße überschritten: „{name}\" passt nicht mehr in das Limit von {limit} (bereits {used} belegt).",
+      "unknownTypeBody": "Satchel kennt den Dateityp .{extension} nicht. Beim Öffnen übergibt Satchel die Datei dem Betriebssystem, das sie womöglich ausführt. Prüfe unten den vollständigen Namen, bevor du entscheidest.",
+      "unknownTypeNoExtensionBody": "Diese Datei hat keine Endung, Satchel kann also nicht erkennen, was sie ist. Beim Öffnen übergibt Satchel sie dem Betriebssystem, das sie womöglich ausführt.",
+      "unknownTypeTitle": "Diesen Anhang öffnen?",
       "useAsAttachment": "Bild als normalen Anhang verwenden",
       "viewInSatchel": "In Satchel ansehen",
       "viewInSatchelNamed": "{filename} in Satchel ansehen"
@@ -1537,6 +1872,14 @@
     "unsubscribe": {
       "action": "Abmelden",
       "banner": "Newsletter — mit einem Klick abmelden",
+      "confirm": {
+        "body": "Dieser Newsletter meldet per E-Mail ab. Satchel sendet diese Nachricht von deinem Konto:",
+        "message": "Nachricht",
+        "send": "Abmelde-E-Mail senden",
+        "subject": "Betreff",
+        "title": "Abmelde-E-Mail senden?",
+        "to": "An"
+      },
       "failed": "Abmelden fehlgeschlagen: {error}",
       "sending": "Sende…",
       "success": "Abgemeldet via {method}"
@@ -1560,6 +1903,132 @@
       "text": "Text",
       "textTitle": "Reiner Text"
     }
+  },
+  "mailMerge": {
+    "bar": {
+      "change": "Liste ändern",
+      "insertField": "Feld einfügen",
+      "insertFieldHint": "Fügt das Feld dort ein, wo der Cursor zuletzt stand, im Betreff oder in der Nachricht",
+      "recipients": "eine Person aus {source} | {count} Personen aus {source}",
+      "stop": "Serienmail beenden",
+      "title": "Serienmail"
+    },
+    "command": "Serienmail …",
+    "commandKeywords": "serienmail serienbrief seriendruck mail merge personalisiert csv liste",
+    "confirm": {
+      "body": "Von {address} ({account}), eine Nachricht je Person, jede nur an diese Person adressiert.",
+      "detail": "Die Nachrichten gehen einzeln über den Postausgang raus. Dort kannst du den Rest anhalten oder abbrechen.",
+      "send": "Senden",
+      "title": "Eine persönliche Nachricht senden? | {count} persönliche Nachrichten senden?"
+    },
+    "contactsAction": "Serienmail an einen Kontakt … | Serienmail an {count} Kontakte …",
+    "jobs": {
+      "cancel": "Rest abbrechen",
+      "cancelConfirm": {
+        "body": "Es ist nichts mehr zu senden. | Die verbleibende Nachricht wird nicht gesendet. | Die verbleibenden {count} Nachrichten werden nicht gesendet. Bereits gesendete bleiben gesendet.",
+        "title": "Diese Serienmail abbrechen?"
+      },
+      "cancelledCount": "einer nicht gesendet | {count} nicht gesendet",
+      "failed": "einer fehlgeschlagen | {count} fehlgeschlagen",
+      "hideRecipients": "Adressen ausblenden",
+      "loadFailed": "Die Serienmail-Aufträge konnten nicht geladen werden.",
+      "next": "Nächste Nachricht um {time}",
+      "noSource": "Liste",
+      "pause": "Anhalten",
+      "progressLabel": "Fortschritt von {subject}",
+      "remove": "Entfernen",
+      "resume": "Fortsetzen",
+      "retry": "Fehlgeschlagene erneut senden | {count} fehlgeschlagene erneut senden",
+      "row": {
+        "cancelled": "Nicht gesendet",
+        "failed": "Fehlgeschlagen",
+        "pending": "Wartet",
+        "queued": "Im Postausgang",
+        "sent": "Gesendet",
+        "unknown": "Zustellung unbestätigt"
+      },
+      "sent": "{count} von {total} gesendet",
+      "showRecipients": "Adressen zeigen",
+      "status": {
+        "cancelled": "Abgebrochen",
+        "completed": "Fertig",
+        "paused": "Angehalten",
+        "pausedAccountFailures": "Angehalten: eine andere Serienmail dieses Kontos ist wiederholt gescheitert",
+        "pausedFailures": "Nach wiederholten Fehlern angehalten",
+        "pausedRestart": "Beim Neustart von Satchel angehalten",
+        "running": "Wird gesendet"
+      },
+      "title": "Serienmail",
+      "unknown": "einer unbestätigt | {count} unbestätigt"
+    },
+    "menuItem": "Serienmail …",
+    "notForReplies": "Eine Serienmail geht nur als neue Nachricht, nicht als Antwort oder Weiterleitung.",
+    "review": {
+      "delay": "Abstand zwischen den Nachrichten",
+      "delayHint": "Langsamer verhindert, dass der Anbieter das Konto sperrt; Gmail und Microsoft sind streng.",
+      "delayInvalid": "Wähle zwischen 1 und 3600 Sekunden.",
+      "duration": "Geht sofort raus. | Dauert etwa eine Minute. | Dauert etwa {minutes} Minuten.",
+      "encrypted": "Jede Nachricht wird für die jeweilige Person verschlüsselt. Vor der ersten werden alle Schlüssel der Liste und dein eigener geprüft; fehlt später ein Schlüssel, scheitert diese Nachricht und geht nicht unverschlüsselt raus.",
+      "issue": {
+        "duplicate": "Die Adresse steht schon in einer früheren Zeile",
+        "invalidEmail": "Keine gültige E-Mail-Adresse",
+        "missing": "Kein Wert für {fields}"
+      },
+      "line": "Zeile {line}",
+      "next": "Nächste Person",
+      "noAddress": "Keine Adresse",
+      "overLimit": "{count} Adressen sind mehr, als ein Auftrag senden darf ({limit}).",
+      "overLimitDetail": "Teile die Liste in Teile mit höchstens {limit} Zeilen und sende jeden als eigene Serienmail.",
+      "position": "{index} von {total}",
+      "previewLabel": "Vorschau",
+      "previous": "Vorherige Person",
+      "rowSkipped": "Diese Zeile wird übersprungen",
+      "seconds": "Sekunden",
+      "skipped": "Eine Zeile wird übersprungen | {count} Zeilen werden übersprungen",
+      "start": "Eine Nachricht von {address} senden | {count} Nachrichten von {address} senden",
+      "summary": "Eine von {total} Zeilen aus {source} wird gesendet. | {count} von {total} Zeilen aus {source} werden gesendet.",
+      "title": "Serienmail prüfen",
+      "unknownFields": "Kein Feld der Liste heißt {fields}.",
+      "unknownFieldsDetail": "Felder der Liste: {fields}. Zeilen ohne Ersatzwert dafür werden übersprungen."
+    },
+    "reviewAndSend": "Prüfen und senden …",
+    "source": {
+      "apply": "Eine Person übernehmen | {count} Personen übernehmen",
+      "chooseFile": "CSV-Datei wählen …",
+      "chooseOther": "Andere Datei wählen …",
+      "contacts": "Kontakte",
+      "contactsLabel": "ein Kontakt | {count} Kontakte",
+      "csv": "CSV-Datei",
+      "csvHint": "Die erste Zeile benennt die Felder. Komma oder Semikolon, UTF-8 oder Windows-1252, so wie Excel und LibreOffice speichern.",
+      "delimiter": {
+        "comma": "kommagetrennt",
+        "semicolon": "semikolongetrennt",
+        "tab": "tabulatorgetrennt"
+      },
+      "emailColumn": "Spalte mit der E-Mail-Adresse",
+      "emailColumnPick": "Spalte wählen",
+      "emailColumnRequired": "Wähle die Spalte mit den E-Mail-Adressen.",
+      "encoding": {
+        "utf16": "UTF-16",
+        "utf8": "UTF-8",
+        "utf8Bom": "UTF-8 (BOM)",
+        "windows1252": "Windows-1252"
+      },
+      "fields": "Felder: {fields}",
+      "kindLabel": "Woher die Liste kommt",
+      "lead": "Jede Person auf der Liste bekommt eine eigene Nachricht, nur an sie adressiert. Felder aus der Liste füllen die Platzhalter in Betreff und Text.",
+      "noContacts": "Noch keine Kontakte",
+      "rows": "Eine Zeile | {count} Zeilen",
+      "searchContacts": "Kontakte durchsuchen",
+      "sectionLabel": "{section} (ein Kontakt) | {section} ({count} Kontakte)",
+      "selectAll": "Den angezeigten auswählen | Alle {count} angezeigten auswählen",
+      "selectNone": "Auswahl aufheben",
+      "title": "Serienmail",
+      "truncated": "Die Datei hat mehr Zeilen. Gelesen wurden nur die ersten {count}.",
+      "windows1252Hint": "Die Datei wurde als Windows-1252 gelesen. Sehen Umlaute falsch aus, speichere sie als „CSV UTF-8“ und wähle sie erneut."
+    },
+    "started": "Serienmail gestartet: eine Nachricht ist unterwegs. | Serienmail gestartet: {count} Nachrichten gehen nacheinander raus.",
+    "viewProgress": "Fortschritt ansehen"
   },
   "nativeUi": {
     "composeWindowTitle": "Neue Nachricht — Satchel",
@@ -1589,6 +2058,7 @@
       "summary": "{count} neue E-Mails",
       "syncFailed": "Remote-Abgleich fehlgeschlagen",
       "syncing": "Inhalte werden synchronisiert",
+      "taskDue": "Aufgabe fällig",
       "trash": "Löschen"
     },
     "oauth": {
@@ -1617,6 +2087,7 @@
       "allDayCount": "{count} Einträge",
       "more": "+{count} weitere",
       "now": "Jetzt",
+      "tasksDue": "{count} Aufgabe fällig | {count} Aufgaben fällig",
       "title": "Heute"
     },
     "calendar": "Kalender",
@@ -1714,6 +2185,7 @@
       "tomorrow14": "Morgen 14:00",
       "tomorrow8": "Morgen 08:00"
     },
+    "tasks": "Aufgaben",
     "toggleSection": "{name} auf- oder zuklappen",
     "unpinContact": "Kontakt loslösen",
     "unpinContactNamed": "{name} loslösen"
@@ -1766,12 +2238,16 @@
       "later": "Später",
       "microsoft365Detected": "{domain} empfängt Mail über Microsoft 365",
       "microsoftDetected": "Microsoft-Anmeldung erkannt",
+      "nameHint": "Nur in Satchel sichtbar.",
       "nameLabel": "Kontoname",
       "namePlaceholder": "Arbeit, Privat, …",
       "otherMethod": "Andere Anmeldeart?",
       "passwordHint": "Gilt für Posteingang, Postausgang, Kalender und Kontakte.",
       "passwordLabel": "Passwort",
       "passwordPlaceholder": "Dein Mail-Passwort",
+      "senderHint": "So sehen Empfänger dich als Absender.",
+      "senderLabel": "Dein Name",
+      "senderPlaceholder": "Alex Beispiel",
       "signInSecurely": "Sicher anmelden",
       "workspaceDetected": "{domain} empfängt Mail über Google Workspace"
     },
@@ -2031,7 +2507,24 @@
         "unreadableTitle": "{count} Konto ist gesperrt | {count} Konten sind gesperrt"
       },
       "description": "E-Mail-Konten, Synchronisierung und Anmeldung verwalten.",
+      "detail": {
+        "calendarsHint": "CalDAV-Kalender und CardDAV-Kontakte desselben Anbieters verbinden.",
+        "connection": "Verbindung",
+        "general": "Allgemein",
+        "labelsTitle": "Labels und Kategorien",
+        "passwordTitle": "Passwort",
+        "remove": "Konto entfernen",
+        "removeHint": "Löscht Mails, Ordner und gespeicherte Anmeldung dieses Kontos von diesem Gerät.",
+        "server": "Auf dem Server",
+        "signInHint": "Angemeldet über {provider}. Erneuere die Anmeldung, wenn Satchel neue Berechtigungen braucht.",
+        "signInTitle": "Anmeldung",
+        "syncTitle": "Synchronisierung"
+      },
       "disconnected": "nicht verbunden",
+      "empty": {
+        "description": "Füge ein Konto hinzu, um mit Satchel Mails zu lesen und zu schreiben.",
+        "title": "Noch kein E-Mail-Konto"
+      },
       "groupware": {
         "autoFailed": "Automatische Erkennung nicht möglich: {error}. Bitte ergänze die Zugangsdaten.",
         "badge": "CalDAV / CardDAV",
@@ -2064,7 +2557,18 @@
       "imapFailed": "IMAP-Verbindung fehlgeschlagen: {error}",
       "imapOk": "IMAP-Verbindung OK ({folders} Ordner)",
       "imapOkWithSample": "IMAP-Verbindung OK ({folders} Ordner): {sample}",
+      "mailAccounts": "E-Mail-Konten",
+      "names": {
+        "label": "Kontoname",
+        "labelHint": "So heißt das Konto in der Seitenleiste und in Listen.",
+        "saveFailed": "Die Namen konnten nicht gespeichert werden.",
+        "saved": "Namen gespeichert.",
+        "sender": "Absendername",
+        "senderHint": "Empfänger sehen diesen Namen neben {email}.",
+        "senderPlaceholder": "Vor- und Nachname"
+      },
       "oauthStatus": "{provider}: {state}",
+      "openAccount": "Einstellungen für {name}",
       "password": {
         "action": "Passwort ändern",
         "checking": "Anmeldung läuft …",
@@ -2101,6 +2605,10 @@
       "removeRequiresApp": "Konten löschen ist nur in der Desktop-App möglich.",
       "removeTitle": "Konto entfernen",
       "removed": "Konto gelöscht: {email}",
+      "status": {
+        "signInNeeded": "Anmeldung nötig",
+        "upToDate": "Aktuell"
+      },
       "statusUnavailable": "Status nicht verfügbar: {error}",
       "sync": {
         "accountsCount": "{count} Konto | {count} Konten",
@@ -2350,6 +2858,7 @@
           "filter_no_date": "Ohne lesbares Datum",
           "filter_not_inbox": "Nicht in der Inbox",
           "filter_own_sent": "Eigene Nachricht",
+          "filter_spam_moved": "Vom Spamfilter in Spam verschoben",
           "filter_too_old": "Älter als der letzte Sync",
           "not_bundled_fallback": "Ohne App-Bundle angezeigt (Klick wirkungslos)",
           "permission_denied": "Berechtigung verweigert",
@@ -2447,7 +2956,9 @@
       "connect": "Verbinden",
       "connected": "Verbunden",
       "contactsHint": "Verbinde Google Kontakte, um Profilbilder zu verwenden. Mail funktioniert auch ohne Kontakte-Zugriff.",
-      "contactsTitle": "Google Kontakte"
+      "contactsTitle": "Google Kontakte",
+      "outlookCalendarHint": "Verbinde ein Outlook-Konto, um seine Kalender zu lesen und zu bearbeiten. Mail funktioniert auch ohne Kalender-Zugriff.",
+      "outlookCalendarTitle": "Outlook-Kalender"
     },
     "images": {
       "allow": "Zulassen",
@@ -2495,6 +3006,19 @@
       "throttled": "Anbieter drosselt gerade — Pause für ca. {duration}",
       "title": "Eingebettete Bilder",
       "upfront": "Ein vollständiger Durchlauf dauert mindestens ca. {duration} — frühestens fertig gegen {time} Uhr."
+    },
+    "labs": {
+      "experimental": "Experimentell",
+      "flags": {
+        "chats": {
+          "description": "Zeigt Mails aus Delta Chat als Chats: eine Chats-Liste unter dem Posteingang, Nachrichten als Sprechblasen und ein Antwortfeld, das sofort sendet. Die Mails bleiben in deinen Ordnern. Mit einem OpenPGP-Schlüssel für deine Adresse sind Antworten per Autocrypt Ende-zu-Ende-verschlüsselt.",
+          "title": "Chats mit Delta Chat"
+        }
+      },
+      "loadFailed": "Die Labs-Einstellungen konnten nicht geladen werden.",
+      "note": "Diese Funktionen sind nicht fertig: Was du hier einschaltest, kann sich ändern, ausfallen oder in einer späteren Version wegfallen. Jeder Schalter gilt nur für dieses Gerät.",
+      "restart": "Wirkt nach einem Neustart.",
+      "saveFailed": "Der Schalter konnte nicht gespeichert werden."
     },
     "language": {
       "de": "Deutsch",
@@ -2727,6 +3251,46 @@
       "refreshed": "{count} Labels/Kategorien aktualisiert.",
       "title": "Provider-Features"
     },
+    "ruleActions": {
+      "account": "Konto",
+      "accountHint": "Eine Regel, die E-Mails verschiebt, gehört zu dem Konto, in dessen Ordner sie verschiebt.",
+      "accountMissing": "Konto entfernt: Die Regel läuft nicht mehr",
+      "actionLocal": "Nur lokal",
+      "actionPending": "Noch nicht auf dem Server",
+      "actionServer": "Server",
+      "actionServerTitle": "Diese Aktion läuft auch auf dem Server.",
+      "addressInvalid": "Gib eine einzelne E-Mail-Adresse ohne Namen ein.",
+      "addressLabel": "Weiterleitungsadresse",
+      "addressOwn": "Das ist eine deiner eigenen Adressen: Die E-Mail käme sofort zurück.",
+      "addressPlaceholder": "name{'@'}example.com",
+      "allAccounts": "Alle Konten",
+      "chooseAccountFirst": "Wähle oben ein Konto, um einen seiner Ordner auszuwählen.",
+      "folderLabel": "Ordner",
+      "folderMissing": "Ordner fehlt: Das Verschieben bewirkt nichts",
+      "folderPlaceholder": "Ordner wählen",
+      "forwardHint": "Neue E-Mails werden einmal weitergeleitet, mit dem Original im Anhang; Regeln auf vorhandene E-Mails anzuwenden, leitet nichts weiter. Automatische Antworten und Mails von Verteilerlisten werden nicht weitergeleitet.",
+      "forwardPaused": "Weiterleiten pausiert: Diese Regel hat innerhalb einer Stunde mehr als {count} Nachrichten weitergeleitet. Prüfe die Regel und setze das Weiterleiten dann fort. Speichern lässt es pausiert.",
+      "forwardResume": "Weiterleiten fortsetzen",
+      "forwardResumed": "Weiterleiten fortgesetzt.",
+      "forwardSummary": "Weiterleiten an {address}",
+      "keepCopy": "Kopie auf dem Server behalten",
+      "keepCopyHint": "Ohne Kopie leitet der Server die Nachricht weiter und behält keine: Scheitert die Weiterleitung (die Adresse weist sie zurück), ist die Nachricht aus deinem Postfach verschwunden. Leitet Satchel sie weiter, bleibt das Original in jedem Fall erhalten.",
+      "kinds": {
+        "forward": "Weiterleiten an",
+        "moveToFolder": "In Ordner verschieben",
+        "star": "Anheften"
+      },
+      "moveSummary": "Verschieben nach {folder}",
+      "moveSummaryMissing": "In einen Ordner verschieben, den es nicht mehr gibt",
+      "noCopyConfirm": "Auf dem Server werden Nachrichten, die diese Regel weiterleitet, nicht in deinem Postfach gespeichert. Scheitert die Weiterleitung, sind sie verloren.",
+      "noCopyConfirmAction": "Ohne Kopie weiterleiten",
+      "noCopyConfirmTitle": "Ohne Kopie weiterleiten?",
+      "noFolders": "Dieses Konto hat keinen Ordner zum Verschieben.",
+      "oneMoveHint": "Eine Nachricht wird einmal verschoben: Die erste passende Regel bestimmt den Ordner.",
+      "onePerRule": "Eine Regel verschiebt in einen Ordner und leitet an eine Adresse weiter. Entferne die zusätzliche Aktion, um zu speichern.",
+      "reasonFolder": "Der Server kennt diesen Ordner nicht.",
+      "serverSkips": "Eine Weiterleitung blieb dem Server überlassen, der diese Regel beim Eintreffen ausgeführt hat. | {count} Weiterleitungen blieben dem Server überlassen, der diese Regel beim Eintreffen ausgeführt hat."
+    },
     "rules": {
       "actions": {
         "addTag": "Tag hinzufügen",
@@ -2776,6 +3340,16 @@
       "noRuleMatched": "Keine Regel hat auf die geöffnete Mail gepasst.",
       "pause": "Pausieren",
       "paused": "Pausiert",
+      "placement": {
+        "local": "Nur lokal",
+        "pending": "Noch nicht auf dem Server; geht mit dem nächsten Senden mit.",
+        "reasonAction": "„{action}“ gibt es nur in Satchel.",
+        "reasonCondition": "Diese Bedingung läuft nur in Satchel.",
+        "reasonExtension": "Dem Server fehlt die Sieve-Erweiterung „{extension}“.",
+        "reasonOther": "Diese Regel läuft nur in Satchel.",
+        "server": "Auch auf dem Server",
+        "serverOn": "Läuft zusätzlich auf dem Server für {accounts}, also auch bei geschlossenem Satchel. Der Server markiert nur die eintreffende Nachricht als gelesen (Satchel die ganze Konversation) und vergleicht Adressen ohne Namen."
+      },
       "priorities": {
         "high": "Hoch",
         "low": "Niedrig",
@@ -2886,6 +3460,10 @@
         "description": "Laden externer Inhalte steuern",
         "label": "Externe Bilder"
       },
+      "labs": {
+        "description": "Unfertige Funktionen",
+        "label": "Labs"
+      },
       "mobile-sync": {
         "description": "Neue E-Mails im Hintergrund abrufen",
         "label": "Hintergrund-Sync"
@@ -2911,7 +3489,7 @@
         "label": "Regeln"
       },
       "senders": {
-        "description": "Blockierte Absender und wer Bilder laden darf",
+        "description": "Spamfilter, blockierte Absender und wer Bilder laden darf",
         "label": "Absender & Bilder"
       },
       "sending": {
@@ -2950,6 +3528,10 @@
         "description": "Wiederverwendbare E-Mail-Texte",
         "label": "Vorlagen"
       },
+      "translation": {
+        "description": "DeepL-Schlüssel, Zielsprache und was gesendet wird",
+        "label": "Übersetzung"
+      },
       "tray": {
         "description": "Menüleisten- und Tray-Verhalten",
         "label": "System-Tray"
@@ -2958,6 +3540,51 @@
         "description": "Automatische Abwesenheitsantworten",
         "label": "Abwesenheit"
       }
+    },
+    "serverRules": {
+      "alongside": "nach Satchels: „{script}“",
+      "check": "Server prüfen",
+      "consentDetailInclude": "Nichts wurde geändert. Beide ausführen oder stattdessen Satchels verwenden.",
+      "consentDetailNoInclude": "Nichts wurde geändert. Dieser Server führt nur ein Skript aus.",
+      "consentTitle": "Dein Skript „{script}“ ist aktiv",
+      "editServer": "Server manuell eintragen",
+      "endpoint": "{host}:{port} · {tls}",
+      "forceConfirmBody": "Satchels Skripte bleiben auf dem Server und laufen dort womöglich weiter; entferne sie im Webmail deines Anbieters. Satchel sendet nichts mehr an diesen Server.",
+      "forceConfirmTitle": "Ohne den Server ausschalten?",
+      "forceTurnOff": "Ausschalten, ohne den Server zu kontaktieren",
+      "hint": "Deine Regeln und die Abwesenheitsnotiz laufen zusätzlich auf dem Mail-Server, also auch bei geschlossenem Satchel.",
+      "host": "Server",
+      "hostPlaceholder": "sieve.example.com",
+      "keepLocal": "Regeln in Satchel lassen",
+      "lastPush": "Gesendet {time}",
+      "port": "Port",
+      "portPlaceholder": "4190",
+      "pushNow": "Erneut senden",
+      "pushed": "Keine Regel auf dem Server | 1 Regel auf dem Server | {count} Regeln auf dem Server",
+      "replace": "Stattdessen Satchels",
+      "replaceConfirmBody": "„{script}“ bleibt auf dem Server, läuft aber erst wieder, wenn du die Server-Regeln ausschaltest.",
+      "replaceConfirmTitle": "„{script}“ nicht mehr ausführen?",
+      "runBoth": "Beide ausführen",
+      "security": "Verbindungssicherheit",
+      "status": {
+        "active": "Auf dem Server aktiv",
+        "available": "Verfügbar",
+        "unavailable": "Nicht verfügbar",
+        "unknown": "Nicht geprüft",
+        "waiting": "Wartet auf deine Wahl"
+      },
+      "suggestedDetail": "Der Server liegt nicht auf der Domain deines Mail-Servers. Satchel meldet sich dort nur an, wenn du zustimmst.",
+      "suggestedTitle": "Autoconfig nennt {host}:{port}",
+      "title": "Server-Regeln",
+      "tlsImplicit": "TLS",
+      "tlsStarttls": "STARTTLS",
+      "turnOff": "Ausschalten",
+      "turnOn": "Einschalten",
+      "useDetected": "Erkannten Server verwenden",
+      "useSuggested": "Diesen Server verwenden",
+      "vacationOnServer": "mit Abwesenheitsnotiz",
+      "wrapperConfirmBody": "Satchel aktiviert ein kleines Skript „satchel-main“, das zuerst Satchels Regeln und dann „{script}“ unverändert ausführt. Beim Ausschalten wird „{script}“ wieder aktiv.",
+      "wrapperConfirmTitle": "Beide Skripte ausführen?"
     },
     "shortcuts": {
       "colCommand": "Befehl",
@@ -3109,6 +3736,39 @@
       "typeScript": "Script",
       "typeWebhook": "Webhook"
     },
+    "spamFilter": {
+      "bootstrapping": "Er lernt noch aus der Mail, die du schon sortiert hast, und beurteilt bis dahin nichts.",
+      "judging": "Er beurteilt neue Mail, sobald sie eintrifft.",
+      "modeAria": "Was der Spamfilter mit vermutlichem Spam macht",
+      "modeLabel": "Neue Mail, die nach Spam aussieht",
+      "modeMark": "Markieren",
+      "modeMarkHint": "Vermutlicher Spam bleibt markiert im Posteingang, und Kein Spam ist eine Taste entfernt.",
+      "modeMarkTitle": "Vermutlichen Spam in Liste und Leseansicht markieren",
+      "modeMove": "In Spam verschieben",
+      "modeMoveHint": "Vermutlicher Spam, bei dem er sehr sicher ist, kommt in den Spam-Ordner; der Rest wird markiert. Mail von Leuten, denen du geschrieben hast, bleibt immer. Dein Server löscht Mail im Spam-Ordner womöglich nach einiger Zeit.",
+      "modeMoveTitle": "Vermutlichen Spam in den Spam-Ordner verschieben",
+      "modeOff": "Aus",
+      "modeOffHint": "Neue Mail wird nicht beurteilt. Spam und Kein Spam bringen dem Filter trotzdem etwas bei.",
+      "modeOffTitle": "Neue Mail nicht beurteilen",
+      "moveNeedsMore": "Bis er {spam} weitere Spam- und {ham} weitere erwünschte Nachrichten gelernt hat, markiert Verschieben nur.",
+      "needsMore": "Neue Mail beurteilt er, sobald er {spam} weitere Spam- und {ham} weitere erwünschte Nachrichten gelernt hat.",
+      "providers": "Gmail- und Microsoft-Konten filtert ihr Anbieter. Satchel lernt von ihnen, lässt ihre Mail aber dort, wo der Anbieter sie abgelegt hat.",
+      "purpose": "Satchel lernt, was du Spam nennst, und beurteilt neue Mail auf diesem Gerät. Nichts wird irgendwohin gesendet.",
+      "title": "Spamfilter",
+      "trained": "{spam} Spam- und {ham} erwünschte Nachrichten.",
+      "trainingLabel": "Bisher gelernt"
+    },
+    "sweep": {
+      "empty": "Noch keine Absender-Regeln. Leg eine im Menü eines Absenders oder im Aufräum-Assistenten fest.",
+      "lastRun": "Zuletzt {when}, nichts abgelegt | Zuletzt {when}, eine Unterhaltung abgelegt | Zuletzt {when}, {count} Unterhaltungen abgelegt",
+      "loadFailed": "Die Absender-Regeln konnten nicht geladen werden.",
+      "neverRun": "Noch nicht gelaufen",
+      "purpose": "Regeln, die du am Absender einer Mail oder im Aufräum-Assistenten festgelegt hast. Jede läuft alle 15 Minuten über die Unterhaltungen im Posteingang, die nur ihr Absender geschrieben hat; Unterhaltungen mit anderen, deinen Antworten oder einer Anheftung bleiben.",
+      "remove": "Entfernen",
+      "removeBody": "Bereits abgelegte Mails bleiben, wo sie sind.",
+      "removeTitle": "Regel für {sender} entfernen?",
+      "title": "Absender aufräumen"
+    },
     "swipes": {
       "ariaLong": "{direction}: weite Wischgeste",
       "ariaShort": "{direction}: kurze Wischgeste",
@@ -3174,6 +3834,59 @@
       "vim": "Vim-Navigation",
       "vimHint": "Mit j/k navigieren und Nachrichten per Tastatur bearbeiten."
     },
+    "translation": {
+      "consentAria": "Übersetzung für {account} erlauben",
+      "consentHint": "Für jedes Konto aus, bis du es einschaltest. Gilt nur für dieses Gerät.",
+      "consentTitle": "Konten, die übersetzt werden dürfen",
+      "engineAria": "Übersetzungs-Engine",
+      "engineDeepl": "DeepL",
+      "engineHint": "DeepL läuft auf den Servern von DeepL. Es ist nie eine lokale Engine.",
+      "engineLabel": "Engine",
+      "engineOff": "Aus",
+      "keyEncrypted": "Verschlüsselt gespeichert und Teil von Sicherungen; Satchel zeigt ihn nie wieder an. Ausschalten behält den Schlüssel, „Schlüssel entfernen“ löscht ihn.",
+      "keyHint": "Aus deinem DeepL-Konto unter API-Schlüssel. Satchel braucht einen DeepL-API-Pro-Schlüssel; Schlüssel mit :fx sind DeepL API Free (auch DeepL API Developer) und taugen nicht für Mails.",
+      "keyLabel": "DeepL-API-Schlüssel",
+      "keyPlaceholder": "API-Schlüssel einfügen",
+      "keyRemovedToast": "API-Schlüssel entfernt",
+      "keySaved": "Schlüssel auf diesem Gerät gespeichert ({plan})",
+      "keySavedToast": "API-Schlüssel gespeichert",
+      "logClear": "Protokoll leeren",
+      "logClearConfirm": "Anfrage-Protokoll leeren?",
+      "logClearConfirmBody": "Die Einträge werden von diesem Gerät gelöscht. Übersetzungen bleiben gespeichert.",
+      "logEmpty": "Es wurde nichts gesendet.",
+      "logEntry": "{provider} · {units}",
+      "logHideText": "Gesendeten Text ausblenden",
+      "logHint": "Jede Anfrage, die dieses Gerät in den letzten 30 Tagen verlassen hat.",
+      "logKeepText": "Gesendeten Text aufbewahren",
+      "logKeepTextHint": "Standardmäßig aus. Ausschalten löscht auch den bereits aufbewahrten Text.",
+      "logOk": "Übersetzt",
+      "logShowText": "Gesendeten Text zeigen",
+      "logTitle": "Anfrage-Protokoll",
+      "logUnits": "{count} Zeichen",
+      "noAccounts": "Noch keine Mail-Konten.",
+      "planFree": "DeepL API Free",
+      "planPro": "DeepL API Pro",
+      "purpose": "Übersetze Mails mit DeepL in deine Sprache. Gesendet wird erst, wenn du eine Nachricht aus einem freigegebenen Konto übersetzt.",
+      "removeKey": "Schlüssel entfernen",
+      "replaceKey": "Schlüssel ersetzen",
+      "saveKey": "Schlüssel speichern",
+      "sentBody": "Übersetzen schickt den Inhalt an DeepL: Text und Formatierung. Links und Adressen, die mit http(s)://, //, www. oder mailto: beginnen, hält Satchel zurück, so wie es sie erkennt, überall in HTML- und Text-Mails, und setzt sie hier wieder ein; ein über Zeilen umbrochener Link einer Text-Mail kann teilweise mitgehen. Hostnamen ohne diese Anfänge und E-Mail-Adressen im Text gehen als Text mit. Absender, Empfänger, Betreff, Anhänge und verschlüsselte Mails gehen nie mit.",
+      "sentCache": "Jede Übersetzung wird auf diesem Gerät gespeichert. Wer die Nachricht erneut öffnet, sendet nichts.",
+      "sentTerms": "Laut Bedingungen (deepl.com/pro-license, 3.1.2, 3.3.2) und Datenschutzerklärung (deepl.com/privacy, Abschnitt 4) von DeepL, Stand November 2026.",
+      "sentTitle": "Was wird gesendet?",
+      "targetFollowUi": "App-Sprache ({language})",
+      "targetHint": "Mails, die schon in dieser Sprache sind, bekommen keinen Übersetzen-Knopf.",
+      "targetLabel": "Übersetzen in",
+      "termsFree": "DeepL verbietet personenbezogene Daten über die kostenlose API und darf Gesendetes behalten. Satchel schickt mit einem kostenlosen Schlüssel keine Mails; „Testen“ zeigt trotzdem Tarif und Kontingent.",
+      "termsPro": "Mit einem Pro-Schlüssel behält DeepL den Text nur für die Übersetzung und nutzt ihn nicht zur Verbesserung des Dienstes; bei einem Fehler bis zu 72 Stunden.",
+      "test": "Testen",
+      "testHint": "Prüft den Schlüssel mit einer Anfrage und zeigt das verbleibende Kontingent.",
+      "testing": "Wird getestet …",
+      "title": "Übersetzung",
+      "usage": "{used} von {limit} Zeichen in diesem Abrechnungszeitraum verbraucht",
+      "usageMeter": "Verbrauchte DeepL-Zeichen",
+      "usageUnlimited": "{used} Zeichen in diesem Abrechnungszeitraum verbraucht, kein Limit gesetzt"
+    },
     "tray": {
       "autostart": "Satchel beim Login automatisch starten",
       "hint": "Wenn Satchel im Hintergrund läuft, kann es per IMAP-IDLE neue Mails sofort empfangen und Benachrichtigungen anzeigen — selbst wenn das Fenster geschlossen ist.",
@@ -3188,7 +3901,11 @@
       "defaultSubject": "Out of Office",
       "enable": "Auto-Reply aktivieren",
       "hint": "Eine automatische Antwort, am Mail-Server gesetzt, damit sie auch bei geschlossenem Satchel greift.",
+      "imapNoVacation": "Dieser Server kann keine automatischen Antworten senden. Nutze das Webmail deines Anbieters.",
+      "imapNoWindow": "Dieser Server kann die Antwort nicht zu einem Datum starten oder beenden.",
+      "imapServerRulesHint": "Schalte die Server-Regeln für dieses Konto ein (Einstellungen → Konten), um die Antwort am Server zu setzen, oder richte sie im Webmail ein.",
       "imapWarning": "Richte die automatische Antwort im Webmail deines Anbieters ein. Satchel kann sie nur bei Gmail- und Outlook-Konten selbst setzen.",
+      "imapWrapperOrder": "Satchels Skript läuft vor „{script}“. Sendet „{script}“ eine eigene Abwesenheitsnotiz, schalte diese dort aus.",
       "onlyContacts": "Nur an bekannte Kontakte antworten",
       "openWebmail": "Webmail öffnen",
       "saved": "Gespeichert.",
@@ -3206,6 +3923,18 @@
         "keywords": "archive archivieren erledigt done",
         "label": "Als erledigt markieren (Zweittaste)"
       },
+      "cleanupKeepLatest": {
+        "keywords": "aufräumen neueste behalten rest archivieren",
+        "label": "Neueste behalten, Rest archivieren"
+      },
+      "cleanupRule": {
+        "keywords": "aufräumen regel ab jetzt",
+        "label": "Regel für den Absender festlegen"
+      },
+      "cleanupUnsubscribe": {
+        "keywords": "aufräumen abmelden newsletter",
+        "label": "Beim Absender abmelden"
+      },
       "clearSelection": {
         "keywords": "clear selection leeren",
         "label": "Auswahl aufheben"
@@ -3217,6 +3946,10 @@
       "copyLink": {
         "keywords": "link url teilen",
         "label": "Link zu dieser E-Mail kopieren"
+      },
+      "createTask": {
+        "keywords": "aufgabe todo",
+        "label": "E-Mail als Aufgabe anlegen"
       },
       "fileTo": {
         "keywords": "ablegen verschieben ordner thema label file move",
@@ -3237,6 +3970,10 @@
       "markDone": {
         "keywords": "done archive erledigt",
         "label": "Als erledigt markieren"
+      },
+      "markNotSpam": {
+        "keywords": "kein spam erwünscht",
+        "label": "Kein Spam"
       },
       "markSpam": {
         "keywords": "spam junk werbung",
@@ -3298,6 +4035,10 @@
         "keywords": "aside beiseite",
         "label": "Beiseitelegen"
       },
+      "sweepSender": {
+        "keywords": "aufräumen absender archivieren löschen älter sweep",
+        "label": "E-Mails vom Absender aufräumen"
+      },
       "toggleAllMessages": {
         "keywords": "all messages collapse expand alle nachrichten klappen",
         "label": "Alle Nachrichten ein- / ausklappen"
@@ -3318,6 +4059,10 @@
         "keywords": "select toggle auswählen",
         "label": "Auswahl umschalten"
       },
+      "translateMessage": {
+        "keywords": "übersetzen übersetzung deepl sprache original translate",
+        "label": "Nachricht übersetzen"
+      },
       "trash": {
         "keywords": "delete trash löschen",
         "label": "Löschen"
@@ -3329,6 +4074,7 @@
     },
     "close": "Tastenkürzel schließen",
     "contexts": {
+      "cleanup": "Aufräumen",
       "global": "Immer",
       "mail": "E-Mail fokussiert",
       "mailbox": "Mailbox fokussiert",
@@ -3362,6 +4108,66 @@
     "subtitle": "Alles Wichtige bleibt direkt unter den Fingern.",
     "title": "Tastenkürzel"
   },
+  "sweep": {
+    "from": "Von {email}",
+    "inboxCount": "Keine Unterhaltung im Posteingang | Eine Unterhaltung im Posteingang | {count} Unterhaltungen im Posteingang",
+    "menuItem": "E-Mails vom Absender aufräumen …",
+    "noSender": "In dieser Unterhaltung schreibst nur du; es gibt keinen Absender zum Aufräumen.",
+    "now": {
+      "archiveAll": "Alle archivieren",
+      "heading": "Jetzt",
+      "keepLatestArchive": "Neueste behalten, Rest archivieren",
+      "keepLatestTrash": "Neueste behalten, Rest in den Papierkorb",
+      "trashAll": "Alle in den Papierkorb"
+    },
+    "result": {
+      "archivedOf": "{count} von {total} Unterhaltungen erledigt",
+      "failed": "Die Mails dieses Absenders konnten nicht aufgeräumt werden.",
+      "nothing": "Im Posteingang gibt es nichts von {sender} aufzuräumen.",
+      "trashed": "Eine Unterhaltung in den Papierkorb verschoben | {count} Unterhaltungen in den Papierkorb verschoben",
+      "trashedOf": "{count} von {total} Unterhaltungen in den Papierkorb verschoben"
+    },
+    "rule": {
+      "actionLabel": "Was mit den Mails passiert",
+      "archive": "Archivieren",
+      "customDays": "Eigene …",
+      "customInvalid": "Gib eine Zahl von Tagen zwischen 1 und 3650 ein.",
+      "customLabel": "Tage (1–3650)",
+      "customTitle": "Älter als wie viele Tage?",
+      "days": "{count} Tag | {count} Tage",
+      "folder": "Ordner",
+      "heading": "Ab jetzt",
+      "hint": "Läuft über die Mails dieses Absenders im Posteingang einmal sofort, danach alle 15 Minuten.",
+      "keepLatest": "Neueste immer behalten",
+      "matchesNow": "Noch passt nichts. | Eine Unterhaltung passt schon jetzt. | {count} Unterhaltungen passen schon jetzt.",
+      "move": "In Ordner verschieben",
+      "needsFolder": "Der Ordner existiert nicht mehr. Wähle einen anderen; bis dahin tut die Regel nichts.",
+      "olderThan": "Sobald sie älter sind als",
+      "remove": "Regel entfernen",
+      "removeFailed": "Die Regel konnte nicht entfernt werden: {error}",
+      "removed": "Regel für {sender} entfernt.",
+      "save": "Regel speichern",
+      "saveFailed": "Die Regel konnte nicht gespeichert werden: {error}",
+      "saved": "Regel für {sender} gespeichert.",
+      "trash": "In den Papierkorb",
+      "trashConfirmBody": "Ab dann wandern Mails von {sender} alle 15 Minuten in den Papierkorb, sobald sie einen Tag alt sind. Was eine Regel verschiebt, lässt sich nicht rückgängig machen. | Ab dann wandern Mails von {sender} alle 15 Minuten in den Papierkorb, sobald sie {count} Tage alt sind. Was eine Regel verschiebt, lässt sich nicht rückgängig machen.",
+      "trashConfirmTitle": "Regel speichern? Noch geht nichts in den Papierkorb. | Regel speichern und eine Unterhaltung jetzt in den Papierkorb verschieben? | Regel speichern und {count} Unterhaltungen jetzt in den Papierkorb verschieben?",
+      "update": "Regel ändern"
+    },
+    "skipped": {
+      "shared": "Eine Unterhaltung mit anderen Beteiligten, deinen Antworten oder einem Entwurf bleibt unberührt. | {count} Unterhaltungen mit anderen Beteiligten, deinen Antworten oder Entwürfen bleiben unberührt.",
+      "starred": "Eine angeheftete Unterhaltung bleibt. | {count} angeheftete Unterhaltungen bleiben."
+    },
+    "summary": {
+      "archive": "Alles archivieren",
+      "archiveAfter": "Nach {count} Tag archivieren | Nach {count} Tagen archivieren",
+      "keepingLatest": "{rule}, Neueste bleibt",
+      "move": "Nach {folder} verschieben",
+      "moveNeedsFolder": "In einen Ordner verschieben: Ordner fehlt",
+      "trashAfter": "Nach {count} Tag in den Papierkorb | Nach {count} Tagen in den Papierkorb"
+    },
+    "title": "E-Mails von {sender} aufräumen"
+  },
   "swipe": {
     "aside": "Beiseitelegen",
     "done": "Erledigt",
@@ -3370,8 +4176,116 @@
     "toggleRead": "Gelesen / ungelesen",
     "trash": "Löschen"
   },
+  "tasks": {
+    "due": {
+      "today": "Heute",
+      "tomorrow": "Morgen",
+      "yesterday": "Gestern"
+    },
+    "editor": {
+      "changedRetry": "Diese Aufgabe wurde inzwischen auf einem anderen Gerät geändert. Speichere erneut, um deine Fassung zu behalten.",
+      "completed": "Erledigt",
+      "dueDate": "Fällig am",
+      "dueTime": "Uhrzeit (optional)",
+      "editTitle": "Aufgabe bearbeiten",
+      "fromMail": "Aus einer E-Mail erstellt.",
+      "list": "Liste",
+      "newTitle": "Neue Aufgabe",
+      "notes": "Notizen",
+      "notesPlaceholder": "Details, Links, nächste Schritte",
+      "priority": "Priorität",
+      "readOnlyHint": "Diese Liste ist auf dem Server schreibgeschützt; die Aufgabe lässt sich hier nicht ändern.",
+      "remind": "Erinnern",
+      "reminderAt": "Erinnerung",
+      "syncedHint": "Diese Liste wird mit dem Server deines Kontos synchronisiert. Änderungen hier erreichen ihn im Hintergrund.",
+      "title": "Titel",
+      "titlePlaceholder": "Was ist zu tun?"
+    },
+    "empty": {
+      "description": "Lege oben eine Aufgabe an oder drücke T in einer E-Mail, um daraus eine zu machen.",
+      "title": "Nichts zu tun"
+    },
+    "groups": {
+      "completed": "Erledigt",
+      "overdue": "Überfällig",
+      "someday": "Ohne Datum",
+      "today": "Heute",
+      "upcoming": "Demnächst"
+    },
+    "hasReminder": "Erinnerung gesetzt",
+    "hideCompleted": "Erledigte Aufgaben ausblenden",
+    "keys": {
+      "add": "Hinzufügen",
+      "complete": "Erledigt / offen",
+      "delete": "Löschen",
+      "edit": "Bearbeiten",
+      "move": "Bewegen",
+      "title": "Tastatur"
+    },
+    "lists": {
+      "account": "Konto",
+      "all": "Alle Aufgaben",
+      "create": "Liste anlegen",
+      "defaultName": "Meine Aufgaben",
+      "delete": "Liste löschen",
+      "deleteBody": "Die {count} Aufgabe darin wird mitgelöscht. | Die {count} Aufgaben darin werden mitgelöscht.",
+      "deleteTitle": "„{list}“ löschen?",
+      "goneHint": "Diese Liste wurde auf dem Server entfernt. Die Aufgaben darin bleiben hier schreibgeschützt, bis du die Liste löschst.",
+      "name": "Name",
+      "new": "Neue Liste …",
+      "newTitle": "Neue Aufgabenliste",
+      "onThisDevice": "Auf diesem Gerät",
+      "readOnlyHint": "Diese Liste ist auf dem Server schreibgeschützt.",
+      "rename": "Liste umbenennen",
+      "renameTitle": "Aufgabenliste umbenennen",
+      "title": "Aufgabenlisten",
+      "withAccount": "{list} · {account}"
+    },
+    "loadFailed": "Die Aufgaben konnten nicht geladen werden.",
+    "markDone": "Als erledigt markieren",
+    "markOpen": "Als offen markieren",
+    "new": "Neue Aufgabe",
+    "notices": {
+      "conflicts": "{count} Aufgabe wurde auf dem Server geändert; deren Fassung hat deine Änderung ersetzt. | {count} Aufgaben wurden auf dem Server geändert; deren Fassungen haben deine Änderungen ersetzt.",
+      "keptLocal": "Eine auf dem Server gelöschte Aufgabe behält deine Änderung und liegt jetzt in „Meine Aufgaben“. | {count} auf dem Server gelöschte Aufgaben behalten deine Änderungen und liegen jetzt in „Meine Aufgaben“.",
+      "listsGone": "Eine Aufgabenliste wurde auf dem Server entfernt. Bis du die Liste löschst, bleibt sie hier schreibgeschützt. | {count} Aufgabenlisten wurden auf dem Server entfernt. Bis du die Listen löschst, bleiben sie hier schreibgeschützt.",
+      "readOnlyDropped": "Eine Änderung wurde nicht gespeichert: Die Liste ist auf dem Server schreibgeschützt. | {count} Änderungen wurden nicht gespeichert: Die Liste ist auf dem Server schreibgeschützt.",
+      "readOnlyKept": "Eine neue Aufgabe ließ sich nicht in eine schreibgeschützte Liste eintragen; sie liegt in „Meine Aufgaben“. | {count} neue Aufgaben ließen sich nicht in eine schreibgeschützte Liste eintragen; sie liegen in „Meine Aufgaben“.",
+      "restored": "Eine gelöschte Aufgabe ist zurück, weil jemand sie auf dem Server geändert hatte. | {count} gelöschte Aufgaben sind zurück, weil jemand sie auf dem Server geändert hatte."
+    },
+    "openMail": "E-Mail öffnen",
+    "pending": "Noch nicht synchronisiert",
+    "priority": {
+      "high": "Hoch",
+      "low": "Niedrig",
+      "medium": "Mittel",
+      "none": "Keine"
+    },
+    "quickAdd": {
+      "label": "Aufgabe hinzufügen",
+      "placeholder": "Aufgabe hinzufügen, z. B. „Anna anrufen morgen 15:00“",
+      "preview": "„{title}“, fällig {due}"
+    },
+    "recurring": {
+      "completeSeries": "Serie erledigen",
+      "confirmBody": "Diese Aufgabe wiederholt sich. Erledigst du sie hier, endet die Serie auf allen deinen Geräten.",
+      "confirmTitle": "Ganze Serie erledigen?"
+    },
+    "repeats": "Wiederholt sich",
+    "showCompleted": "{count} erledigte Aufgabe anzeigen | {count} erledigte Aufgaben anzeigen",
+    "sync": "Aufgaben synchronisieren",
+    "title": "Aufgaben",
+    "toast": {
+      "completed": "Erledigt: {title}",
+      "created": "Aufgabe angelegt",
+      "createdFromMail": "Aufgabe angelegt, mit der E-Mail verknüpft",
+      "deleted": "Aufgabe gelöscht",
+      "nextOccurrence": "Als Nächstes: „{title}“, fällig {due}"
+    }
+  },
   "thread": {
     "actions": {
+      "addTask": "Als Aufgabe anlegen",
       "aside": "Beiseite",
       "blockSender": "Absender blockieren",
       "fileTo": "Ablegen …",
@@ -3382,6 +4296,7 @@
       "moveToInbox": "Zurück in die Inbox",
       "mute": "Thread stummschalten",
       "none": "Keine Aktion",
+      "notSpam": "Kein Spam",
       "pin": "Anheften",
       "priority": "Priorität",
       "read": "Gelesen",
@@ -3488,7 +4403,8 @@
     "move": {
       "failed": "Verschieben fehlgeschlagen: {error}",
       "fallbackFolder": "Ordner",
-      "moved": "Nach „{folder}“ verschoben."
+      "moved": "Nach „{folder}“ verschoben.",
+      "partlyMoved": "{applied} von {total} nach „{folder}“ verschoben; der Rest ließ sich nicht verschieben. {reason}"
     },
     "newSenders": {
       "acceptExisting": "{count} Absender zulassen | Alle {count} Absender zulassen",
@@ -3527,6 +4443,11 @@
       "inLater": "Wartet in „Später“",
       "inbox": "E-Mail in der Inbox | {count} E-Mails in der Inbox",
       "muteChanged": "Stummschaltung geändert",
+      "notSpam": "Thread als kein Spam markiert | {count} Threads als kein Spam markiert",
+      "notSpamFailed": "Als kein Spam markieren fehlgeschlagen.",
+      "notSpamMoved": "Thread zurück in den Posteingang verschoben | {count} Threads zurück in den Posteingang verschoben",
+      "notSpamUndoFailed": "Kein Spam rückgängig machen fehlgeschlagen.",
+      "partlyFiled": "{applied} von {total} verschoben; der Rest ließ sich nicht verschieben. {reason}",
       "permanentlyDeleted": "Thread endgültig gelöscht | {count} Threads endgültig gelöscht",
       "pinChanged": "Markierung geändert",
       "pinFailed": "Anheften fehlgeschlagen.",
@@ -3568,6 +4489,16 @@
       "summaryMore": "und {count} weitere",
       "summaryTitle": "{count} Unterhaltung ausgewählt | {count} Unterhaltungen ausgewählt",
       "toInbox": "In die Inbox ({count})"
+    },
+    "spam": {
+      "bannerDetail": "Der Spamfilter auf diesem Gerät hat sie markiert. Ist sie erwünscht, sag es ihm – er lernt daraus.",
+      "bannerTitle": "Das sieht nach Spam aus",
+      "likely": "Vermutlich Spam",
+      "moved": "Vom Filter verschoben",
+      "movedBannerDetail": "Der Spamfilter auf diesem Gerät war sich sicher, dass das Spam ist. Ist sie erwünscht, sag es ihm – dann kommt sie zurück in den Posteingang, und er lernt daraus.",
+      "movedBannerTitle": "Von Satchels Filter in Spam verschoben",
+      "movedHint": "Der Spamfilter auf diesem Gerät hat diesen Thread in Spam verschoben",
+      "rowHint": "Der Spamfilter auf diesem Gerät hat diesen Thread markiert"
     },
     "state": {
       "aside": "Beiseitegelegt",
@@ -3743,6 +4674,22 @@
       "undo": "Rückgängig"
     }
   },
+  "translation": {
+    "consent": {
+      "body": "Satchel schickt den Inhalt dieser Nachricht an DeepL ({plan}): Text und Formatierung. Links und Adressen, die mit http(s)://, //, www. oder mailto: beginnen, hält Satchel zurück, so wie es sie erkennt; ein über Zeilen umbrochener Link einer Text-Mail kann teilweise mitgehen. Hostnamen ohne diese Anfänge und E-Mail-Adressen im Text gehen als Text mit. Absender, Empfänger, Betreff und Anhänge bleiben hier. Gilt für alle Mails von {account} auf diesem Gerät.",
+      "confirm": "Erlauben und übersetzen",
+      "detail": "Du kannst das unter Einstellungen → Übersetzung zurücknehmen. Dort zeigt das Anfrage-Protokoll, was gesendet wurde.",
+      "title": "Diese Nachricht an DeepL senden?"
+    },
+    "reader": {
+      "openSettings": "Einstellungen",
+      "showOriginal": "Original anzeigen",
+      "translate": "Übersetzen",
+      "translated": "Übersetzt",
+      "translatedFrom": "Übersetzt aus: {language}",
+      "translating": "Wird übersetzt …"
+    }
+  },
   "tray": {
     "actionFailed": "Aktion fehlgeschlagen: {detail}",
     "allClear": {
@@ -3814,5 +4761,11 @@
     "noPath": "Kein Dateipfad übergeben.",
     "openFailed": "Nachricht konnte nicht gelesen werden",
     "untitled": "Nachricht"
+  },
+  "workflowSync": {
+    "gmailImapBody": "Dieses Konto ist per IMAP mit Gmail verbunden; dort würden Satchels Schlüsselwörter zu Gmail-Labels. Erledigt und Wiedervorlage bleiben deshalb auf diesem Gerät; mit einer Google-Anmeldung werden sie synchronisiert. Erledigte Mails landen weiterhin im Archiv.",
+    "localOnlyBody": "Dieser Mailserver speichert keine eigenen Schlüsselwörter. Andere Geräte und Mail-Apps sehen deshalb nicht, was du als erledigt markiert oder auf Wiedervorlage gelegt hast. Erledigte Mails landen weiterhin im Archiv.",
+    "localOnlyTitle": "Erledigt und Wiedervorlage bleiben auf diesem Gerät",
+    "storeRefusedBody": "Der Mailserver hat Satchels Schlüsselwörter abgelehnt. Andere Geräte und Mail-Apps sehen deshalb vorerst nicht, was du als erledigt markiert oder auf Wiedervorlage gelegt hast. Satchel versucht es in einigen Stunden erneut. Erledigte Mails landen weiterhin im Archiv."
   }
 }

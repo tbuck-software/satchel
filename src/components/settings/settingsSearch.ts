@@ -27,6 +27,7 @@ const SECTION_KEYS: Record<SettingsSection, readonly string[]> = {
   signatures: ['settings.signatures'],
   aliases: ['settings.aliases'],
   encryption: ['settings.smime', 'settings.pgp'],
+  translation: ['settings.translation'],
   composing: [
     'settings.notifications.sending',
     'settings.notifications.undo',
@@ -41,12 +42,13 @@ const SECTION_KEYS: Record<SettingsSection, readonly string[]> = {
     'settings.backup',
   ],
   vacation: ['settings.vacation'],
-  senders: ['settings.blocked', 'settings.images'],
+  senders: ['settings.spamFilter', 'settings.blocked', 'settings.images'],
   'smart-folders': ['settings.smartFolders'],
   templates: ['settings.templates'],
-  rules: ['settings.rules'],
+  rules: ['settings.rules', 'settings.sweep'],
   plugins: ['settings.plugins', 'settings.api'],
   diagnostics: ['settings.diagnostics'],
+  labs: ['settings.labs'],
 };
 
 // Outcome messages are not what anyone looks a setting up by.
@@ -63,6 +65,8 @@ export function loadSettingsCatalogue(): Promise<CataloguePart[]> {
     import('@/i18n/parts/settings-b.json'),
     import('@/i18n/parts/settings-c.json'),
     import('@/i18n/parts/language.json'),
+    import('@/i18n/parts/translation.json'),
+    import('@/i18n/parts/labs.json'),
   ]).then((modules) => modules.map((module) => module.default as CataloguePart));
   return catalogue;
 }

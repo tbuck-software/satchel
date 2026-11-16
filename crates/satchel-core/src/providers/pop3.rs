@@ -494,6 +494,7 @@ fn envelope_from_raw(uidl: &str, raw: &[u8], receiver: &str) -> MessageEnvelope 
         // state lives only in the local database from then on.
         is_read: false,
         is_starred: false,
+        workflow_marker: None,
         body_calendar: parsed_body.calendar,
         smime_encrypted: parsed_body.smime_encrypted,
         smime_signed: parsed_body.smime_signed,
@@ -509,6 +510,11 @@ fn envelope_from_raw(uidl: &str, raw: &[u8], receiver: &str) -> MessageEnvelope 
         auth_spf: auth_results.as_ref().and_then(|results| results.0.clone()),
         auth_dkim: auth_results.as_ref().and_then(|results| results.1.clone()),
         auth_dmarc: auth_results.as_ref().and_then(|results| results.2.clone()),
+        spam_hint_headers: crate::spam::tokenizer::extract_hint_headers(&header),
+        satchel_marks: Vec::new(),
+        chat: crate::chat::parse_chat_headers(&header),
+        autocrypt_headers: crate::chat::header_values(&header, "Autocrypt"),
+        autocrypt_eligible: crate::chat::autocrypt_eligible_block(&header),
         attachments: parsed_body.attachments,
     }
 }

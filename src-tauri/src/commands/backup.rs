@@ -191,6 +191,20 @@ const PORTABLE_TABLES: &[PortableTable] = &[
         primary_key: &["id"],
         redacted_columns: &[],
     },
+    // Local task lists exist nowhere else, and a task created for a remote
+    // list may not have reached its server. Everything else of a remote list
+    // comes back through sync; see `portable_rows`. Lists before tasks, for
+    // the foreign key.
+    PortableTable {
+        name: "task_lists",
+        primary_key: &["id"],
+        redacted_columns: &[],
+    },
+    PortableTable {
+        name: "tasks",
+        primary_key: &["id"],
+        redacted_columns: &[],
+    },
     PortableTable {
         name: "provider_labels",
         primary_key: &["id"],
@@ -217,6 +231,23 @@ const PORTABLE_TABLES: &[PortableTable] = &[
         redacted_columns: &["secret"],
     },
 ];
+
+/// Which rows of a table travel. Remote tasks stay behind: their ids differ
+/// between devices (a task created here keeps its own id, the same task pulled
+/// elsewhere gets one derived from its href), so importing them would collide
+/// with `idx_tasks_remote` on a device that already synced the account.
+fn portable_rows(table: &str) -> &'static str {
+    match table {
+        "task_lists" => {
+            " WHERE provider = 'local' OR id IN (SELECT list_id FROM tasks WHERE pending_op = 'create')"
+        }
+        "tasks" => {
+            " WHERE list_id IN (SELECT id FROM task_lists WHERE provider = 'local')
+               OR (pending_op = 'create' AND remote_id IS NULL)"
+        }
+        _ => "",
+    }
+}
 
 /// Column names of one portable table, in schema order.
 ///
@@ -908,9 +939,11 @@ pub async fn export_platform_data(
 #[tauri::command]
 pub async fn import_platform_data(
     app: tauri::AppHandle,
+    state: tauri::State<'_, crate::AppState>,
     pool: tauri::State<'_, SqlitePool>,
     path: String,
 ) -> CommandResult<PlatformDataResult> {
+    state.read_grants.file(Path::new(&path))?;
     crate::commands::file_limits::guard_import_size(std::path::Path::new(&path)).await?;
     let raw = tokio::fs::read_to_string(&path)
         .await
@@ -1026,7 +1059,11 @@ async fn export_portable_table(
         .map(|column| format!("CAST(\"{column}\" AS TEXT) AS \"{column}\""))
         .collect::<Vec<_>>()
         .join(", ");
-    let sql = format!("SELECT {selections} FROM {}", table.name);
+    let sql = format!(
+        "SELECT {selections} FROM {}{}",
+        table.name,
+        portable_rows(table.name)
+    );
     let rows = sqlx::query(&sql)
         .fetch_all(pool)
         .await
@@ -1145,13 +1182,39 @@ fn reformat_date_for_mbox(rfc3339: &str) -> String {
 use crate::email::mbox::strip_mbox_from_line;
 use crate::email::mbox::MboxEntries;
 
+/// A viewer window may import only the message file it shows; every other
+/// window only a file the backend granted.
+fn check_import_source(
+    window_label: &str,
+    path: &str,
+    read_grants: &crate::commands::read_grants::ReadGrants,
+    viewer_files: &crate::commands::message_file::ViewerFiles,
+) -> CommandResult<()> {
+    if window_label.starts_with(crate::commands::message_file::VIEWER_LABEL_PREFIX) {
+        if viewer_files.is_bound(window_label, path) {
+            return Ok(());
+        }
+        return Err(CommandError::new("backend.errors.readSourceNotChosen")
+            .with_param("path", path.to_string()));
+    }
+    read_grants.file(Path::new(path)).map(|_| ())
+}
+
 #[tauri::command]
 pub async fn import_mbox(
     app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, crate::AppState>,
     pool: tauri::State<'_, SqlitePool>,
     path: String,
     account_id: String,
 ) -> CommandResult<ImportResult> {
+    check_import_source(
+        window.label(),
+        &path,
+        &state.read_grants,
+        &state.viewer_files,
+    )?;
     let account = sqlx::query_as::<_, (String,)>("SELECT email FROM accounts WHERE id = ? LIMIT 1")
         .bind(&account_id)
         .fetch_one(pool.inner())
@@ -1302,15 +1365,12 @@ pub async fn import_mbox(
 }
 
 async fn ensure_import_folder(pool: &SqlitePool, account_id: &str) -> Result<String, String> {
-    if let Some(row) = sqlx::query_as::<_, (String,)>(
-        "SELECT id FROM folders WHERE account_id = ? AND folder_type = 'archive' ORDER BY created_at ASC LIMIT 1",
-    )
-    .bind(account_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|err| err.to_string())?
+    if let Some(folder) =
+        satchel_core::db::folders::preferred_folder_of_type(pool, account_id, "archive")
+            .await
+            .map_err(|err| err.to_string())?
     {
-        return Ok(row.0);
+        return Ok(folder.id);
     }
     let now = chrono::Utc::now().to_rfc3339();
     let id = satchel_core::db::folders::resolve_provider_folder_id(pool, account_id, "Imported")
@@ -1494,7 +1554,7 @@ async fn import_parsed_message_inner(
         )
         .bind(&cached.id)
         .bind(&message_id)
-        .bind(cached.filename.as_deref().map(satchel_core::utils::filename::strip_filename_controls))
+        .bind(cached.filename.as_deref().map(satchel_core::utils::filename::safe_attachment_name))
         .bind(&cached.content_type)
         .bind(cached.size)
         .bind(cached.content_id.as_deref())
@@ -1937,7 +1997,15 @@ async fn create_backup_in(
 /// listed backup, so ten backups of a 5-GB database read 50 GB before the first
 /// row appeared. A backup without a manifest lists with zeroes.
 #[tauri::command]
-pub async fn list_backups(dir: String) -> CommandResult<Vec<BackupEntry>> {
+pub async fn list_backups(
+    state: tauri::State<'_, crate::AppState>,
+    dir: String,
+) -> CommandResult<Vec<BackupEntry>> {
+    state.read_grants.folder(Path::new(&dir))?;
+    list_backups_in(dir).await
+}
+
+async fn list_backups_in(dir: String) -> CommandResult<Vec<BackupEntry>> {
     let root = std::path::PathBuf::from(&dir);
     let mut read_dir = match tokio::fs::read_dir(&root).await {
         Ok(entries) => entries,
@@ -2011,9 +2079,11 @@ pub async fn list_backups(dir: String) -> CommandResult<Vec<BackupEntry>> {
 #[tauri::command]
 pub async fn restore_backup(
     app: tauri::AppHandle,
+    state: tauri::State<'_, crate::AppState>,
     path: String,
     passphrase: Option<String>,
 ) -> CommandResult<RestoreStaged> {
+    state.read_grants.folder_or_entry(Path::new(&path))?;
     let source = std::path::PathBuf::from(&path);
     let candidate = if source.is_dir() {
         source.clone()
@@ -2060,9 +2130,18 @@ pub async fn restore_backup(
 /// Keep the newest `keep` completed publications. Legacy or unverified backups
 /// remain visible/restorable, but neither consume retention slots nor get deleted.
 #[tauri::command]
-pub async fn prune_backups(dir: String, keep: usize) -> CommandResult<Vec<String>> {
+pub async fn prune_backups(
+    state: tauri::State<'_, crate::AppState>,
+    dir: String,
+    keep: usize,
+) -> CommandResult<Vec<String>> {
+    state.read_grants.folder(Path::new(&dir))?;
+    prune_backups_in(dir, keep).await
+}
+
+async fn prune_backups_in(dir: String, keep: usize) -> CommandResult<Vec<String>> {
     let keep = keep.max(1);
-    let stale: Vec<String> = list_backups(dir)
+    let stale: Vec<String> = list_backups_in(dir)
         .await?
         .into_iter()
         .filter(|entry| {
@@ -2465,6 +2544,90 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn local_tasks_travel_with_the_portable_export() {
+        let source = migrated_pool().await;
+        for statement in [
+            "INSERT INTO task_lists (id, account_id, provider, remote_id, name, created_at, updated_at)
+             VALUES ('tasks-local-default', NULL, 'local', NULL, '', '', '')",
+            "INSERT INTO tasks (id, list_id, uid, title, due_at, priority, thread_id, message_id,
+                created_at, updated_at)
+             VALUES ('task', 'tasks-local-default', 'uid', 'Renew passport', '2026-12-01', 1,
+                'thread', '<m@example.test>', '', '')",
+        ] {
+            sqlx::query(statement)
+                .execute(&source)
+                .await
+                .expect("seed a local task");
+        }
+        let (export, _) = collect_platform_export(&source, false)
+            .await
+            .expect("export platform data");
+        let target = migrated_pool().await;
+        apply_platform_export(None, &target, &export)
+            .await
+            .expect("import platform data");
+        let (title, due, message_id): (String, Option<String>, Option<String>) =
+            sqlx::query_as("SELECT title, due_at, message_id FROM tasks WHERE id = 'task'")
+                .fetch_one(&target)
+                .await
+                .expect("read the task back");
+        assert_eq!(title, "Renew passport");
+        assert_eq!(due.as_deref(), Some("2026-12-01"));
+        assert_eq!(message_id.as_deref(), Some("<m@example.test>"));
+    }
+
+    #[tokio::test]
+    async fn remote_tasks_stay_behind_and_the_import_meets_a_synced_device() {
+        async fn seed(pool: &SqlitePool, own_task_id: &str) {
+            for statement in [
+                "INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref,
+                    sync_state, color, is_active, created_at, updated_at)
+                 VALUES ('acc', 'Acc', 'acc@example.test', 'imap', '{}', '', '{}', '#123456', 1, '', '')",
+                "INSERT INTO task_lists (id, account_id, provider, remote_id, name, created_at, updated_at)
+                 VALUES ('tl-remote', 'acc', 'caldav', 'https://dav.example.test/tasks/', 'Work', '', '')",
+            ] {
+                sqlx::query(statement).execute(pool).await.expect("seed");
+            }
+            // The same server task: created here (own id) or pulled (derived id).
+            sqlx::query(
+                "INSERT INTO tasks (id, list_id, uid, title, remote_id, remote_version, created_at, updated_at)
+                 VALUES (?, 'tl-remote', 'u1', 'Synced', 'https://dav.example.test/tasks/u1.ics', 'e1', '', '')",
+            )
+            .bind(own_task_id)
+            .execute(pool)
+            .await
+            .expect("seed the synced task");
+        }
+        let source = migrated_pool().await;
+        seed(&source, "task-made-here").await;
+        for statement in [
+            "INSERT INTO task_lists (id, account_id, provider, remote_id, name, created_at, updated_at)
+             VALUES ('tasks-local-default', NULL, 'local', NULL, '', '', '')",
+            "INSERT INTO tasks (id, list_id, uid, title, created_at, updated_at)
+             VALUES ('local', 'tasks-local-default', 'u2', 'Local only', '', '')",
+            "INSERT INTO tasks (id, list_id, uid, title, pending_op, created_at, updated_at)
+             VALUES ('unsent', 'tl-remote', 'u3', 'Not on the server yet', 'create', '', '')",
+        ] {
+            sqlx::query(statement).execute(&source).await.expect("seed");
+        }
+        let (export, _) = collect_platform_export(&source, false)
+            .await
+            .expect("export platform data");
+        assert_eq!(export.tables["tasks"].len(), 2, "only local work travels");
+
+        let target = migrated_pool().await;
+        seed(&target, "task-pulled-there").await;
+        apply_platform_export(None, &target, &export)
+            .await
+            .expect("import next to a synced account");
+        let titles: Vec<String> = sqlx::query_scalar("SELECT title FROM tasks ORDER BY title")
+            .fetch_all(&target)
+            .await
+            .expect("read tasks");
+        assert_eq!(titles, ["Local only", "Not on the server yet", "Synced"]);
+    }
+
+    #[tokio::test]
     async fn platform_import_keeps_the_cascade_children_of_an_account() {
         let pool = migrated_pool().await;
         seed_account_with_children(&pool).await;
@@ -2716,7 +2879,7 @@ mod tests {
 
         let entries = INTEGRITY_CHECKS
             .scope(std::cell::Cell::new(0), async {
-                let entries = list_backups(root.path().to_string_lossy().to_string())
+                let entries = list_backups_in(root.path().to_string_lossy().to_string())
                     .await
                     .expect("listing");
                 assert_eq!(
@@ -2745,7 +2908,7 @@ mod tests {
         let dir = backup_dir(root.path(), "satchel-20260910-120000", 4096, 1500);
         std::fs::remove_file(dir.join(satchel_core::backup::BACKUP_MANIFEST)).expect("manifest");
 
-        let entries = list_backups(root.path().to_string_lossy().to_string())
+        let entries = list_backups_in(root.path().to_string_lossy().to_string())
             .await
             .expect("listing");
 
@@ -2832,8 +2995,8 @@ mod tests {
             .await
             .is_err()
         );
-        assert_eq!(list_backups(dir.clone()).await.unwrap().len(), 7);
-        assert!(prune_backups(dir.clone(), 5).await.unwrap().is_empty());
+        assert_eq!(list_backups_in(dir.clone()).await.unwrap().len(), 7);
+        assert!(prune_backups_in(dir.clone(), 5).await.unwrap().is_empty());
         assert!(Path::new(&valid.path).is_dir());
         assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 13);
         pool.close().await;
@@ -2857,7 +3020,7 @@ mod tests {
         drop(creation);
         drop(connection);
         assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
-        assert!(list_backups(root.path().to_string_lossy().to_string())
+        assert!(list_backups_in(root.path().to_string_lossy().to_string())
             .await
             .unwrap()
             .is_empty());
@@ -2889,7 +3052,7 @@ mod tests {
                     .unwrap(),
             );
         }
-        let removed = prune_backups(dir.clone(), 5).await.unwrap();
+        let removed = prune_backups_in(dir.clone(), 5).await.unwrap();
         assert_eq!(removed.len(), 2);
         for entry in &completed {
             let should_survive = entry.created_at != backup_time(0).to_rfc3339()
@@ -2902,7 +3065,7 @@ mod tests {
                 "legacy and unverified directories are never pruned"
             );
         }
-        assert_eq!(list_backups(dir).await.unwrap().len(), 8);
+        assert_eq!(list_backups_in(dir).await.unwrap().len(), 8);
         inspect_database(&legacy.join("satchel.db")).await.unwrap();
         let keys = crate::utils::crypto::backup_master_keys(&legacy, None).unwrap();
         let profile = tempfile::tempdir().unwrap();
@@ -2947,7 +3110,7 @@ mod tests {
         }
         assert_eq!(std::fs::read(existing.join("satchel.db")).unwrap(), before);
         assert_eq!(
-            list_backups(root.path().to_string_lossy().to_string())
+            list_backups_in(root.path().to_string_lossy().to_string())
                 .await
                 .unwrap()
                 .len(),
@@ -3063,7 +3226,7 @@ mod tests {
                 .unwrap();
         }
         assert_eq!(
-            prune_backups(root.path().to_string_lossy().to_string(), 5)
+            prune_backups_in(root.path().to_string_lossy().to_string(), 5)
                 .await
                 .unwrap()
                 .len(),
@@ -3074,7 +3237,7 @@ mod tests {
         assert!(Path::new(&changed.path).is_dir());
         assert!(Path::new(&replaced_db.path).is_dir());
         assert_eq!(
-            list_backups(root.path().to_string_lossy().to_string())
+            list_backups_in(root.path().to_string_lossy().to_string())
                 .await
                 .unwrap()
                 .len(),
@@ -3996,5 +4159,32 @@ Content-Transfer-Encoding: 8bit\r\n\r\nGr\xfc\xdfe\r\n\
         assert_eq!(entries.len(), 1);
         assert!(entries[0].contains("Subject: Real"));
         assert_eq!(dropped, 0);
+    }
+
+    #[test]
+    fn a_viewer_window_imports_only_its_own_message_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let own = directory.path().join("own.eml");
+        let other = directory.path().join("other.eml");
+        let mbox = directory.path().join("granted.mbox");
+        for path in [&own, &other, &mbox] {
+            std::fs::write(path, b"Subject: x\r\n\r\nbody").unwrap();
+        }
+        let own = own.to_string_lossy().to_string();
+        let other = other.to_string_lossy().to_string();
+        let mbox_path = mbox.to_string_lossy().to_string();
+        let grants = crate::commands::read_grants::ReadGrants::default();
+        let viewers = crate::commands::message_file::ViewerFiles::default();
+        viewers.bind("message-file-aa", &own);
+        grants.grant_file(&mbox);
+
+        assert!(check_import_source("message-file-aa", &own, &grants, &viewers).is_ok());
+        assert!(check_import_source("message-file-aa", &other, &grants, &viewers).is_err());
+        assert!(check_import_source("message-file-bb", &own, &grants, &viewers).is_err());
+        // A grant from the main window does not widen a viewer.
+        assert!(check_import_source("message-file-aa", &mbox_path, &grants, &viewers).is_err());
+
+        assert!(check_import_source("main", &mbox_path, &grants, &viewers).is_ok());
+        assert!(check_import_source("main", &own, &grants, &viewers).is_err());
     }
 }
