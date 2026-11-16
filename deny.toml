@@ -17,6 +17,18 @@ allow = [
   "bzip2-1.0.6",
 ]
 
+
+# Native clipboard support on Windows; reviewed against the Boost 1.0 text.
+[[licenses.exceptions]]
+name = "clipboard-win"
+version = "=5.4.3"
+allow = ["BSL-1.0"]
+
+[[licenses.exceptions]]
+name = "error-code"
+version = "=3.4.0"
+allow = ["BSL-1.0"]
+
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"

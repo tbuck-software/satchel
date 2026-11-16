@@ -2,10 +2,15 @@
 import { defineComponent, h, nextTick, ref } from 'vue';
 import { EditorContent, type Editor } from '@tiptap/vue-3';
 import { createPinia } from 'pinia';
-import { mount } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
 import { describe, expect, it, vi } from 'vitest';
 import RichTextEditor from './RichTextEditor.vue';
 import { insertMailTable, mailTableHtml } from '@/utils/composerTable';
+
+const clipboard = vi.hoisted(() => ({ text: null as string | null }));
+vi.mock('@/services/clipboard', () => ({
+  readClipboardText: () => Promise.resolve(clipboard.text),
+}));
 
 /** Binds the editor the way ComposeView does: the emitted HTML comes straight back. */
 function render(initialHtml: string) {
@@ -97,5 +102,24 @@ describe('RichTextEditor tables', () => {
     expect(editor.state.doc).toBe(shown);
     expect(mailTableHtml(editor.getHTML())).toBe(saved);
     wrapper.unmount();
+  });
+});
+
+describe('RichTextEditor paste without formatting', () => {
+  it('inserts the clipboard as plain paragraphs on Cmd/Ctrl+Shift+V', async () => {
+    const { wrapper, editor, html } = render('<p>Intro</p>');
+    editor.commands.focus('end');
+    clipboard.text = 'Tenant-ID\nClient-ID';
+    // jsdom has no ClipboardEvent; ProseMirror builds one for the synthetic paste.
+    vi.stubGlobal('ClipboardEvent', class extends Event {});
+
+    const event = new KeyboardEvent('keydown', { key: 'V', code: 'KeyV', shiftKey: true, ctrlKey: true, cancelable: true });
+    editor.view.dom.dispatchEvent(event);
+    await flushPromises();
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(html.value).toBe('<p>IntroTenant-ID</p><p>Client-ID</p>');
+    wrapper.unmount();
+    vi.unstubAllGlobals();
   });
 });

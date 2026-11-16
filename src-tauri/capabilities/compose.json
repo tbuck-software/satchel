@@ -12,6 +12,7 @@
     "core:window:allow-destroy",
     "core:window:allow-set-focus",
     "dialog:default",
+    "clipboard-manager:allow-read-text",
     "fs:allow-read-file",
     "fs:allow-write-file",
     "allow-app-commands",
