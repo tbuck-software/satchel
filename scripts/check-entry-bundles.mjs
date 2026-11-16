@@ -112,9 +112,15 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
  * strings), which the viewer renders with too; it measures 129.0 KiB.
  * Main entry 108 KiB since 2026-11-15: the header sync button turns while a
  * sync runs, instead of a footer line (+107 B); main measured 109,537 B, 31 B
- * under the old 107 KiB. */
+ * under the old 107 KiB.
+ * Main initial 219 KiB since 2026-11-16: Vite 8/Rolldown with the unchanged
+ * Vite 6 browser targets measures 217.7 KiB (entry 59.6 KiB). Explicit vendor
+ * splitting keeps the editor lazy and the router out of the slim windows:
+ * viewer 122.2 and tray 67.9 KiB, both below their unchanged limits. Together
+ * with the JavaScript dependency refresh, main measures 218.8 KiB, viewer
+ * 124.0 and tray 69.0 KiB; no application feature moved into startup. */
 const budgets = {
-  'index.html': { entryGzip: 108 * 1024, initialGzip: 215 * 1024, locales: ['src/i18n/startup.en.json', 'src/i18n/startup.de.json'] },
+  'index.html': { entryGzip: 108 * 1024, initialGzip: 219 * 1024, locales: ['src/i18n/startup.en.json', 'src/i18n/startup.de.json'] },
   'tray.html': { entryGzip: 5 * 1024, initialGzip: 75 * 1024, locales: ['src/i18n/tray.en.json', 'src/i18n/tray.de.json'] },
   'viewer.html': { entryGzip: 5 * 1024, initialGzip: 130 * 1024, locales: ['src/i18n/viewer.en.json', 'src/i18n/viewer.de.json'] },
 };

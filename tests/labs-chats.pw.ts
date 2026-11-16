@@ -102,7 +102,10 @@ test.describe('locked own key', () => {
     await input.press('Enter');
     await unlock.getByLabel('Passphrase').fill('wrong');
     await unlock.getByRole('button', { name: 'Unlock and send' }).click();
-    await expect(page.getByText('That passphrase does not unlock the key.')).toBeVisible();
+    // The visible toast and its screen-reader announcement share this text.
+    const unlockError = 'That passphrase does not unlock the key.';
+    await expect(page.getByRole('alert')).toHaveText(unlockError);
+    await expect(page.locator('.toast__message').filter({ hasText: unlockError })).toBeVisible();
     await unlock.getByRole('button', { name: 'Cancel' }).click();
     await unsigned.getByRole('button', { name: 'Cancel' }).click();
     await expect(own).toHaveCount(2);

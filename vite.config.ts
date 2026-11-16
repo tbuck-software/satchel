@@ -30,8 +30,10 @@ export default defineConfig(({ mode, command }) => {
       dropMessageCompiler: true,
     })] : [])],
     build: {
+      // Preserve Vite 6's targets: Satchel still supports iOS 15 WKWebView.
+      target: ['es2020', 'edge88', 'firefox78', 'chrome87', 'safari14'],
       manifest: true,
-      rollupOptions: {
+      rolldownOptions: {
         // The viewer is a second entry on purpose: an .eml opened from Finder
         // must not pay for the client's router, stores and sync bootstrap before
         // the message appears. The tray briefing follows the same rule: opening
@@ -42,34 +44,41 @@ export default defineConfig(({ mode, command }) => {
           tray: fileURLToPath(new URL('./tray.html', import.meta.url)),
         },
         output: {
-          manualChunks(id) {
-            if (!id.includes('node_modules')) return undefined;
-            if (id.includes('@tiptap')) return 'vendor-editor';
-            // Native APIs have different lifetimes: event registration is part
-            // of startup, while file dialogs, transfers and extra windows load
-            // on use. Let Rollup preserve those dynamic import boundaries.
-            if (id.includes('@tauri-apps')) return undefined;
-            if (
-              id.includes('/node_modules/vue/')
-              || id.includes('/node_modules/@vue/')
-              || id.includes('/node_modules/pinia/')
-              || id.includes('/node_modules/vue-router/')
-            ) {
-              return 'vendor-vue';
-            }
-            // Keep independently loaded feature dependencies independent.
-            if (id.includes('/node_modules/date-fns/')) return 'vendor-date';
-            // Public-suffix tables. Loaded on demand by utils/externalLinks, so
-            // this must stay a chunk of its own or it rejoins an entry.
-            if (id.includes('/node_modules/tldts')) return 'vendor-psl';
-            if (id.includes('/node_modules/marked/')) return 'vendor-markdown';
-            if (id.includes('/node_modules/@vueuse/')) return 'vendor-vueuse';
-            // The viewer and tray load i18n too; keeping it out of vendor-vue
-            // makes the cost of translating those windows visible in the build.
-            if (id.includes('/node_modules/vue-i18n/') || id.includes('/node_modules/@intlify/')) {
-              return 'vendor-i18n';
-            }
-            return undefined;
+          codeSplitting: {
+            // Do not capture shared dependencies recursively: the editor must
+            // stay lazy in the client and absent from the viewer and tray.
+            includeDependenciesRecursively: false,
+            groups: [{
+              debugName: 'feature-vendors',
+              name(id) {
+                if (!id.includes('node_modules')) return undefined;
+                // Tiptap and ProseMirror share initialization-time classes; keep
+                // them together so their chunks cannot form an execution cycle.
+                if (id.includes('@tiptap') || /\/node_modules\/(?:prosemirror-[^/]+|orderedmap|rope-sequence|w3c-keyname|linkifyjs)\//.test(id)) return 'vendor-editor';
+                // Native APIs have different lifetimes: event registration is part
+                // of startup, while file dialogs, transfers and extra windows load
+                // on use. Let the bundler preserve those dynamic import boundaries.
+                if (id.includes('@tauri-apps')) return undefined;
+                if (
+                  id.includes('/node_modules/vue/')
+                  || id.includes('/node_modules/@vue/')
+                  || id.includes('/node_modules/pinia/')
+                  || id.includes('/node_modules/vue-i18n/')
+                  || id.includes('/node_modules/@intlify/')
+                ) {
+                  return 'vendor-vue';
+                }
+                if (id.includes('/node_modules/vue-router/')) return 'vendor-router';
+                // Keep independently loaded feature dependencies independent.
+                if (id.includes('/node_modules/date-fns/')) return 'vendor-date';
+                // Public-suffix tables. Loaded on demand by utils/externalLinks, so
+                // this must stay a chunk of its own or it rejoins an entry.
+                if (id.includes('/node_modules/tldts')) return 'vendor-psl';
+                if (id.includes('/node_modules/marked/')) return 'vendor-markdown';
+                if (id.includes('/node_modules/@vueuse/')) return 'vendor-vueuse';
+                return undefined;
+              },
+            }],
           },
         },
       },
