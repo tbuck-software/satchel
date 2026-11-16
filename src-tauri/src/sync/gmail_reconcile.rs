@@ -212,6 +212,38 @@ pub(crate) async fn gmail_snapshot_message_pinned_tx(
     Ok(pending.iter().any(|(_, id)| id == remote_id))
 }
 
+/// The drafts behind a vanished message that the server still has.
+///
+/// Only drafts this device's editor wrote are asked about; everything else
+/// goes as before. `Err` keeps the message owed, so an unknown answer never
+/// deletes a draft.
+pub(crate) async fn gmail_live_drafts_behind(
+    pool: &SqlitePool,
+    provider: &dyn crate::providers::traits::MailProvider,
+    account_id: &str,
+    remote_id: &str,
+) -> Result<Result<Vec<String>, SyncError>, String> {
+    let draft_ids: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT remote_draft_id FROM messages
+         WHERE account_id = ? AND remote_id = ? AND is_draft = 1 AND draft_revision > 0
+           AND NULLIF(TRIM(remote_draft_id), '') IS NOT NULL",
+    )
+    .bind(account_id)
+    .bind(remote_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| error.to_string())?;
+    let mut live = Vec::new();
+    for draft_id in draft_ids {
+        match provider.remote_draft_exists(&draft_id).await {
+            Ok(true) => live.push(draft_id),
+            Ok(false) => {}
+            Err(error) => return Ok(Err(error)),
+        }
+    }
+    Ok(Ok(live))
+}
+
 /// Only an account-wide point lookup's explicit 404 authorizes this path.
 /// Delete polymorphic message links before the rows, and project threads in
 /// the same transaction so a failed cleanup is safe to retry after restart.
@@ -219,6 +251,7 @@ pub(crate) async fn reconcile_gmail_snapshot_deletion(
     pool: &SqlitePool,
     account_id: &str,
     remote_id: &str,
+    live_draft_ids: &[String],
 ) -> Result<SnapshotResolution, String> {
     let mut tx = pool
         .begin_with("BEGIN IMMEDIATE")
@@ -230,20 +263,21 @@ pub(crate) async fn reconcile_gmail_snapshot_deletion(
             SnapshotDeferral::PendingMutation,
         ));
     }
-    // Gmail replaces a draft's message on every update, so a missing message
-    // of a draft this device's editor wrote (`draft_revision > 0`) is an old
-    // version: the upload that replaced it may have landed between this run's
-    // draft listing and its snapshot. The draft itself lives on under its
-    // draft id; it only loses the stale message reference, and the next draft
-    // listing attaches the current one. Deleting it here took the draft out
-    // from under an open composer.
+    // Gmail replaces a draft's message on every update. A draft this
+    // device's editor wrote, which the server still has under its draft id,
+    // only lost an old version: the upload that replaced it may have landed
+    // between this run's draft listing and its snapshot. It keeps its row and
+    // drops the stale message reference; the next draft listing attaches the
+    // current one. Deleting it took the draft out from under an open
+    // composer. A draft deleted on the server goes here as well.
     sqlx::query(
         "UPDATE messages SET remote_id = NULL, remote_uid = NULL
          WHERE account_id = ? AND remote_id = ? AND is_draft = 1 AND draft_revision > 0
-           AND NULLIF(TRIM(remote_draft_id), '') IS NOT NULL",
+           AND remote_draft_id IN (SELECT value FROM json_each(?))",
     )
     .bind(account_id)
     .bind(remote_id)
+    .bind(serde_json::to_string(live_draft_ids).map_err(|error| error.to_string())?)
     .execute(&mut *tx)
     .await
     .map_err(|error| error.to_string())?;
@@ -733,8 +767,9 @@ mod tests {
     /// Gmail gives a draft a new message on every update. The sync ingests
     /// message A into the draft the composer is editing, the next autosave
     /// uploads and replaces A with B, and the snapshot later in the same run
-    /// finds A gone. That is an old version, not the draft: deleting the row
-    /// made the composer's next save fail with "sent or discarded elsewhere".
+    /// finds A gone. While the server still has the draft, that is an old
+    /// version: deleting the row made the composer's next save fail with
+    /// "sent or discarded elsewhere". A draft deleted on the server goes.
     #[tokio::test]
     async fn a_superseded_message_does_not_delete_the_draft_being_edited() {
         let pool = SqlitePoolOptions::new()
@@ -757,10 +792,13 @@ mod tests {
         .await
         .expect("fixture");
         // `draft-local`: written by this device's editor (revision 2), last
-        // seen on the server as message `version-a`. `provider-draft`: another
-        // client's draft, never edited here. `plain`: an ordinary message.
+        // seen on the server as message `version-a`; the server still has
+        // it. `draft-deleted`: also written here, but deleted in another
+        // client. `provider-draft`: another client's draft, never edited
+        // here. `plain`: an ordinary message.
         for (id, remote_id, remote_draft_id, is_draft, revision) in [
             ("draft-local", "version-a", Some("r-local"), 1, 2),
+            ("draft-deleted", "version-d", Some("r-deleted"), 1, 3),
             ("provider-draft", "version-p", Some("r-provider"), 1, 0),
             ("plain", "version-m", None, 0, 0),
         ] {
@@ -778,8 +816,9 @@ mod tests {
             .expect("message");
         }
 
-        for remote_id in ["version-a", "version-p", "version-m"] {
-            super::reconcile_gmail_snapshot_deletion(&pool, "account", remote_id)
+        let live = vec!["r-local".to_string()];
+        for remote_id in ["version-a", "version-d", "version-p", "version-m"] {
+            super::reconcile_gmail_snapshot_deletion(&pool, "account", remote_id, &live)
                 .await
                 .expect("deletion");
         }

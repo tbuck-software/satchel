@@ -769,10 +769,23 @@ async fn resolve_owed_ids(
                     .await?
                 }
                 Ok(None) => {
-                    crate::sync::gmail_reconcile::reconcile_gmail_snapshot_deletion(
-                        pool, account_id, id,
+                    match crate::sync::gmail_reconcile::gmail_live_drafts_behind(
+                        pool, provider, account_id, id,
                     )
                     .await?
+                    {
+                        Err(error) if error.is_rate_limited() => return Err(error.to_string()),
+                        Err(error) => SnapshotResolution::Deferred(SnapshotDeferral::Failed(error)),
+                        Ok(live_drafts) => {
+                            crate::sync::gmail_reconcile::reconcile_gmail_snapshot_deletion(
+                                pool,
+                                account_id,
+                                id,
+                                &live_drafts,
+                            )
+                            .await?
+                        }
+                    }
                 }
             };
             let threads = match resolution {
