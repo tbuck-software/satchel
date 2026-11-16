@@ -5,6 +5,7 @@
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "moduleResolution": "bundler",
     "skipLibCheck": true,
+    "types": ["node"],
     "noEmit": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
@@ -19,9 +20,8 @@
     "noImplicitOverride": true,
     "verbatimModuleSyntax": true,
     "noUncheckedIndexedAccess": true,
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue"]
