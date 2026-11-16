@@ -1131,15 +1131,21 @@ function openSenderDetails() {
 }
 
 /* The body, attachments and banners line up under the sender's name; the
-   header keeps the avatar in the margin. 52px = the 40px avatar plus its gap. */
+   header keeps the avatar in the margin. The inset is the 40px avatar plus
+   the header's gap (gap-3.5): at a flat 52px the body began 2px left of
+   the name above it. ThreadReplyBar keeps the same axis. */
+.message-surface--indented {
+  --message-text-inset: calc(40px + var(--space-3-5));
+}
+
 .message-surface--indented > :not(.message-header) {
-  padding-left: 52px;
+  padding-left: var(--message-text-inset);
 }
 
 /* A boxed notice moves its box there, not only its text: padded instead, the
-   frame began at the avatar and the words sat 52px inside it. */
+   frame began at the avatar and the words sat inside it by the inset. */
 .message-surface--indented > .message-notice {
-  margin-left: 52px;
+  margin-left: var(--message-text-inset);
   padding-left: var(--space-md);
 }
 

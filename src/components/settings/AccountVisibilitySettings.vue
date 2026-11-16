@@ -72,7 +72,8 @@ async function save() {
 </template>
 
 <style scoped>
-.visibility-settings { display: grid; gap: var(--space-sm); flex-basis: 100%; padding-top: var(--space-md); border-top: 1px solid var(--border-color-muted); }
+/* The account page frames each block; this one brings no border of its own. */
+.visibility-settings { display: grid; gap: var(--space-sm); }
 .visibility-settings__modes { justify-self: start; max-width: 100%; }
 .visibility-settings__heading { display: flex; justify-content: space-between; gap: var(--space-sm); }
 .visibility-settings__title { color: var(--text-primary); font-size: var(--font-size-sm); font-weight: var(--weight-semibold); }

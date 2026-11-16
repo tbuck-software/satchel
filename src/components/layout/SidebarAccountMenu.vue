@@ -64,7 +64,7 @@ function openCleanup() {
 
 function openSettings() {
   emit('close');
-  void router.push({ name: 'settings', query: { section: 'accounts' } });
+  void router.push({ name: 'settings', query: { section: 'accounts', account: props.accountId } });
 }
 </script>
 

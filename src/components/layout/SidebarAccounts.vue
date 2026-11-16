@@ -97,9 +97,8 @@ function openMarker(accountId: string, marker: Marker) {
   if (marker.kind === 'outage') {
     void router.push({ name: 'settings', query: { section: 'accounts', account: accountId } });
   } else if (marker.kind === 'quota-warning' || marker.kind === 'quota-critical') {
-    // The quota meter sits on the account's card. No `account`: that opens
-    // the password form, which is not what a full mailbox needs.
-    void router.push({ name: 'settings', query: { section: 'accounts' } });
+    // The quota meter is on the account's own page.
+    void router.push({ name: 'settings', query: { section: 'accounts', account: accountId } });
   } else {
     certificates.openDetails(accountId);
   }

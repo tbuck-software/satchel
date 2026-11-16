@@ -231,7 +231,7 @@ fn create_tray_popover(app: &AppHandle) -> Result<(), String> {
     }
 
     let strings = crate::commands::ui_strings::current();
-    crate::utils::navigation::guard(
+    let window = crate::utils::navigation::guard(
         WebviewWindowBuilder::new(app, POPOVER_LABEL, WebviewUrl::App("tray.html".into())),
         app,
     )
@@ -250,6 +250,13 @@ fn create_tray_popover(app: &AppHandle) -> Result<(), String> {
     .focused(false)
     .build()
     .map_err(err_str)?;
+    // Here rather than in the page: the popover's capability cannot listen to events.
+    let popover = window.clone();
+    window.on_window_event(move |event| {
+        if matches!(event, tauri::WindowEvent::Focused(false)) {
+            let _ = popover.hide();
+        }
+    });
     Ok(())
 }
 

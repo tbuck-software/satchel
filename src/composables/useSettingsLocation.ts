@@ -36,5 +36,19 @@ export function useSettingsLocation() {
     void (mode === 'push' ? router.push(navigation) : router.replace(navigation));
   }
 
-  return { inDialog, section, account, show };
+  /**
+   * Open one account's page under Accounts, or the list with `null`. A single
+   * pane pushes, so Back returns to the list.
+   */
+  function showAccount(id: string | null) {
+    if (inDialog.value) {
+      ui.settingsSection = 'accounts';
+      ui.settingsAccount = id;
+      return;
+    }
+    const query = id ? { section: 'accounts', account: id } : { section: 'accounts' };
+    void (id ? router.push({ name: 'settings', query }) : router.replace({ name: 'settings', query }));
+  }
+
+  return { inDialog, section, account, show, showAccount };
 }

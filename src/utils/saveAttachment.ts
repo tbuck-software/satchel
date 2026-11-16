@@ -1,5 +1,6 @@
 import { useToast } from '@/composables/useToast';
 import { t } from '@/i18n/runtime';
+import { safeAttachmentFilename } from '@/utils/attachmentFilename';
 import { showInFolderAction } from '@/utils/showInFolderAction';
 
 /**
@@ -9,10 +10,11 @@ import { showInFolderAction } from '@/utils/showInFolderAction';
  * by then — a swallowed failure would read as "the button does nothing".
  */
 export async function saveAttachmentWithDialog(
-  filename: string,
+  rawFilename: string,
   payload: string | Uint8Array,
 ): Promise<void> {
   const toast = useToast();
+  const filename = safeAttachmentFilename(rawFilename, 'attachment');
   try {
     const dialog = await import('@tauri-apps/plugin-dialog');
     const path = await dialog.save({ defaultPath: filename });

@@ -160,6 +160,42 @@ describe('threads store interactions', () => {
     expect([...listed, ...bucketed]).toContain('spam-unknown');
   });
 
+  it.each([
+    { workflow: 'all' as const, mailbox: { kind: 'section' as const, value: 'spam' }, state: 'inbox' as const, name: 'Spam' },
+    { workflow: 'all' as const, mailbox: { kind: 'section' as const, value: 'trash' }, state: 'inbox' as const, name: 'Trash' },
+    { workflow: 'all' as const, mailbox: { kind: 'section' as const, value: 'blocked' }, state: 'inbox' as const, name: 'Blocked' },
+    { workflow: 'all' as const, mailbox: { kind: 'section' as const, value: 'sent' }, state: 'inbox' as const, name: 'Sent' },
+    { workflow: 'all' as const, mailbox: { kind: 'folder' as const, value: 'Filed' }, state: 'inbox' as const, name: 'Filed' },
+    { workflow: 'later' as const, mailbox: { kind: 'all' as const, value: null }, state: 'snoozed' as const, name: 'INBOX' },
+    { workflow: 'aside' as const, mailbox: { kind: 'all' as const, value: null }, state: 'aside' as const, name: 'INBOX' },
+    { workflow: 'done' as const, mailbox: { kind: 'all' as const, value: null }, state: 'done' as const, name: 'INBOX' },
+  ])('keeps category folders out of $workflow / $name', ({ workflow, mailbox, state, name }) => {
+    const store = useThreadsStore();
+    store.threads = [
+      thread({
+        id: 'notification',
+        participants: [{ name: 'Build Bot', email: 'notifications@build.example' }],
+        category: 'updates',
+        workflowState: state,
+        mailboxNames: [name],
+      }),
+      thread({
+        id: 'newsletter',
+        participants: [{ name: 'Daily News', email: 'news@example.com' }],
+        category: 'promotions',
+        workflowState: state,
+        mailboxNames: [name],
+      }),
+    ];
+    store.workflowFilter = workflow;
+    store.setMailboxFilter(mailbox);
+
+    expect(store.smartInboxBuckets).toEqual([]);
+    expect(store.smartListEntries).toEqual(store.listEntries);
+    expect(store.smartListEntries.filter(entry => entry.kind === 'thread')
+      .map(entry => entry.thread.id).sort()).toEqual(['newsletter', 'notification']);
+  });
+
   it('uses focused-list precedence for priority, pins, invitations and notifications', () => {
     const store = useThreadsStore();
     store.threads = [

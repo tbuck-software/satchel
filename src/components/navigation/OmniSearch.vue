@@ -423,7 +423,7 @@ function onEnter(event: KeyboardEvent) {
             <input
               ref="inputRef"
               v-model="inputValue"
-              type="search"
+              type="search" autocorrect="off"
               :placeholder="ui.omniMode === 'reminder'
                 ? $t('nav.omni.reminderPlaceholder')
                 : $t('nav.omni.placeholder')"

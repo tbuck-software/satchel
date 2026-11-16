@@ -64,7 +64,8 @@ async function onFile(event: Event) {
 </template>
 
 <style scoped>
-.appearance-settings { display: grid; gap: var(--space-sm); flex-basis: 100%; padding-top: var(--space-md); border-top: 1px solid var(--border-color-muted); }
+/* The account page frames each block; this one brings no border of its own. */
+.appearance-settings { display: grid; gap: var(--space-sm); }
 .appearance-settings__title { color: var(--text-primary); font-size: var(--font-size-sm); font-weight: var(--weight-semibold); }
 .appearance-settings__body { display: flex; align-items: flex-start; gap: var(--space-md); }
 .appearance-settings__controls { display: grid; gap: var(--space-sm); min-width: 0; padding-top: var(--space-2xs); }

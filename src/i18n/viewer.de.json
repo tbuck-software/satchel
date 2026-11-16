@@ -3,6 +3,7 @@
     "errors": {
       "mailActionFailed": "Die Mail-Aktion konnte nicht gespeichert werden. Bitte erneut versuchen.",
       "notAMessageFile": "So lassen sich nur .eml- und .msg-Dateien öffnen.",
+      "readSourceNotChosen": "Satchel liest nur eine Datei oder einen Ordner, die im eigenen Dialog gewählt wurden. Bitte {path} erneut auswählen.",
       "revealTargetBlocked": "Dieses Ziel kann nicht im Dateimanager geöffnet werden.",
       "unexpected": "Ein unerwarteter Backend-Fehler ist aufgetreten."
     }
@@ -43,11 +44,16 @@
       "openWithDefault": "Mit Standard-App öffnen",
       "openWithDefaultNamed": "{filename} mit der Standard-App öffnen",
       "pdfFailed": "Die PDF-Vorschau konnte nicht dargestellt werden.",
+      "pdfNext": "Nächste Seite",
+      "pdfPage": "Seite {page} von {total}",
+      "pdfPages": "PDF-Seiten",
       "pdfPreview": "PDF Vorschau",
+      "pdfPrevious": "Vorherige Seite",
       "previewLabel": "Anhangvorschau",
       "previewUnavailable": "Vorschau für {mime} nicht verfügbar.",
       "quickLookFailed": "Schnellansicht konnte nicht geöffnet werden: {error}",
       "readFailed": "„{name}\" konnte nicht gelesen werden.",
+      "removeNamed": "{name} entfernen",
       "save": "Anhang speichern",
       "saveEllipsis": "Speichern…",
       "saveFailed": "Anhang konnte nicht gespeichert werden: {error}",
@@ -55,6 +61,9 @@
       "showInFolder": "Im Ordner zeigen",
       "tooLarge": "„{name}\" ist größer als {limit}.",
       "totalExceeded": "Gesamtgröße überschritten: „{name}\" passt nicht mehr in das Limit von {limit} (bereits {used} belegt).",
+      "unknownTypeBody": "Satchel kennt den Dateityp .{extension} nicht. Beim Öffnen übergibt Satchel die Datei dem Betriebssystem, das sie womöglich ausführt. Prüfe unten den vollständigen Namen, bevor du entscheidest.",
+      "unknownTypeNoExtensionBody": "Diese Datei hat keine Endung, Satchel kann also nicht erkennen, was sie ist. Beim Öffnen übergibt Satchel sie dem Betriebssystem, das sie womöglich ausführt.",
+      "unknownTypeTitle": "Diesen Anhang öffnen?",
       "useAsAttachment": "Bild als normalen Anhang verwenden",
       "viewInSatchel": "In Satchel ansehen",
       "viewInSatchelNamed": "{filename} in Satchel ansehen"

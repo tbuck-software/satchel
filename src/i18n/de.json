@@ -112,6 +112,20 @@
     "signatures": {
       "discovered": "{count} Signatur in gesendeten Nachrichten gefunden. | {count} Signaturen in gesendeten Nachrichten gefunden."
     },
+    "status": {
+      "certificate": "Zertifikat prüfen",
+      "details": "Details anzeigen",
+      "error": "Fehler aufgetreten",
+      "importing": "Ältere E-Mails {percent}",
+      "more": "+{count}",
+      "offline": "Offline",
+      "review": "{count} zu prüfen",
+      "signIn": "Anmeldung nötig",
+      "syncFailed": "Abgleich gestört",
+      "syncNow": "Jetzt abgleichen",
+      "syncing": "Abgleich läuft",
+      "title": "Abgleich und Konten"
+    },
     "sync": {
       "failures": {
         "explanation": "Vorübergehende Verbindungsprobleme werden automatisch erneut versucht. Diese Einträge müssen geprüft werden.",
@@ -122,6 +136,21 @@
         "unavailable": "Öffne den Postausgang, um die betroffenen Einträge zu prüfen."
       },
       "mutationsFailed": "{count} Änderung ist nicht beim Server angekommen. | {count} Änderungen sind nicht beim Server angekommen.",
+      "progress": {
+        "complete": "Alles ist auf dem neuesten Stand.",
+        "counts": "{done} von {total} Nachrichten",
+        "details": "Abgleich anzeigen",
+        "explanation": "Ältere E-Mails laden im Hintergrund — du kannst weiterarbeiten. Die Summe wächst, solange weitere Ordner gefunden werden.",
+        "folder": "{folder} wird gelesen",
+        "folderCount": "{folder} · Ordner {current} von {total}",
+        "history": "Ältere E-Mails laden",
+        "needsAttention": "Dieses Konto benötigt deine Aufmerksamkeit. Prüfe den Sync-Fehler.",
+        "paused": "Offline pausiert",
+        "preparing": "Postfach verbinden …",
+        "title": "E-Mail-Abgleich",
+        "updated": "Letzte Aktivität {time}",
+        "waiting": "Läuft im Hintergrund"
+      },
       "retryFailed": "Erneuter Abgleich fehlgeschlagen: {error}",
       "retryQueued": "{count} Änderung wird erneut abgeglichen. | {count} Änderungen werden erneut abgeglichen.",
       "status": {
@@ -210,6 +239,7 @@
       "accountConfigurationInvalid": "Die Kontokonfiguration ist ungültig.",
       "accountCredentialAccessFailed": "Auf die gespeicherten Zugangsdaten des Kontos konnte nicht zugegriffen werden. Bitte versuche es erneut.",
       "accountHasNoPassword": "Dieses Konto meldet sich über seinen Anbieter an und hat kein Passwort, das sich ändern ließe.",
+      "accountNameInvalid": "Verwende einen Namen ohne Zeilenumbrüche mit höchstens 120 Zeichen.",
       "accountNotFound": "Das Konto wurde nicht gefunden.",
       "accountNotImap": "Dieses Konto verwendet kein IMAP.",
       "accountPasswordRequired": "Gib das Kontopasswort ein.",
@@ -226,6 +256,7 @@
       "attachmentExecutableNotConfirmed": "\"{filename}\" ist ein Programm (.{extension}), kein Dokument. Satchel übergibt es ohne deine Bestätigung nicht an das Betriebssystem.",
       "attachmentNotBase64": "\"{filename}\" ließ sich nicht anhängen: Die Daten sind beschädigt. Den Anhang entfernen und die Datei erneut hinzufügen.",
       "attachmentPayloadMissing": "Der Anhang ließ sich nicht lesen: Satchel hat weder seinen Inhalt noch einen Pfad dorthin bekommen.",
+      "attachmentTypeNotConfirmed": "Satchel weiß nicht, womit \"{filename}\" geöffnet wird, und übergibt es ohne deine Bestätigung nicht an das Betriebssystem.",
       "availabilityDurationInvalid": "Wähle eine Termindauer zwischen 5 Minuten und 24 Stunden.",
       "availabilityRangeInvalid": "Dieser Zeitraum lässt sich nicht auf freie Zeit prüfen.",
       "availabilityTimeZoneInvalid": "Die Zeitzone dieses Geräts kennt Satchel nicht.",
@@ -271,8 +302,8 @@
       "decryptedAttachmentUnavailable": "Dieser Anhang stammt aus einer verschlüsselten Nachricht, und seine entschlüsselte Kopie ist nicht mehr gespeichert. Öffne die Nachricht, um ihn erneut zu entschlüsseln.",
       "desktopUnavailable": "Das Desktop-Backend ist nicht verfügbar. Starte Satchel mit `pnpm tauri:dev`.",
       "directorySelectionUnavailable": "Die Ordnerauswahl ist auf dieser Plattform nicht verfügbar.",
-      "draftChangedElsewhere": "Dieser Entwurf wurde in einem anderen Fenster geändert. Dein Text hier ist nicht gespeichert.",
-      "draftGoneElsewhere": "Dieser Entwurf wurde in einem anderen Fenster gesendet oder verworfen. Dein Text hier ist nicht gespeichert.",
+      "draftChangedElsewhere": "Der Entwurf wurde anderswo geändert, deine letzten Änderungen sind noch nicht gespeichert.",
+      "draftGoneElsewhere": "Der Entwurf wurde anderswo gesendet oder gelöscht, deine letzten Änderungen sind noch nicht gespeichert.",
       "draftSendPending": "Dieser Entwurf hat einen aktiven Versand. Öffne ihn unter Entwürfe, um den Versand vor dem Bearbeiten abzubrechen.",
       "draftSyncQueueInvalid": "Der gespeicherte Auftrag zur Entwurfssynchronisierung ist ungültig.",
       "draftSyncTimedOut": "Der Anbieter hat die Entwurfssynchronisierung nicht rechtzeitig abgeschlossen.",
@@ -413,6 +444,7 @@
       "queueRejected": "Der Server hat diese Aktion abgelehnt. Prüfe die Details vor einem erneuten Versuch.",
       "queueTemporary": "Der Server ist vorübergehend nicht erreichbar. Satchel versucht es automatisch erneut.",
       "queuedDraftNotRestorable": "Diese Nachricht lässt sich nicht mehr als Entwurf öffnen, weil sich ihr Entwurf nach dem Einreihen geändert hat. Im Postausgang kannst du sie noch ansehen oder vor dem Senden verwerfen.",
+      "readSourceNotChosen": "Satchel liest nur eine Datei oder einen Ordner, die im eigenen Dialog gewählt wurden. Bitte {path} erneut auswählen.",
       "recipientAddressInvalid": "Das ist keine gültige Empfängeradresse: {value}",
       "replyContextLoadFailed": "Der Antwortkontext konnte nicht geladen werden. Die Nachricht wurde noch nicht gesendet.",
       "replyThreadNotFound": "Die Unterhaltung für diese Antwort ist nicht mehr verfügbar.",
@@ -562,7 +594,9 @@
       "trayThreadInvalid": "Diese Tray-E-Mail-Referenz ist ungültig.",
       "unexpected": "Ein unerwarteter Backend-Fehler ist aufgetreten.",
       "unsubscribeBrowserOpenFailed": "Die Abmeldeseite konnte nicht geöffnet werden: {message}",
+      "unsubscribeConfirmationStale": "Die Abmelde-Mail entspricht nicht mehr dem, was bestätigt wurde. Es wurde nichts gesendet.",
       "unsubscribeHeaderMissing": "Diese E-Mail enthält keine Abmeldeadresse.",
+      "unsubscribeMailtoInvalid": "Die Abmeldeadresse dieser E-Mail ist keine einzelne gültige Adresse. Satchel sendet nicht an sie.",
       "unsubscribeMessageNotFound": "Diese E-Mail ist nicht mehr verfügbar.",
       "unsubscribeNoTarget": "Diese E-Mail enthält keine verwendbare Abmeldeadresse.",
       "unsubscribePostFailed": "Die Abmeldung ist fehlgeschlagen: {message}",
@@ -1253,11 +1287,12 @@
     "toolbar": {
       "attach": "Datei anhängen",
       "attachShort": "Anhängen",
+      "attachWithCount": "Datei anhängen ({count} angehängt)",
       "more": "Weitere Optionen",
       "template": "Vorlage verwenden"
     },
     "unsaved": {
-      "conflictTitle": "Nicht gespeichert: Der Entwurf wurde in einem anderen Fenster geändert",
+      "conflictTitle": "Entwurf nicht gespeichert",
       "discardMine": "Meine Änderungen verwerfen",
       "saveAsNew": "Als neuen Entwurf speichern",
       "title": "Nicht gespeichert"
@@ -1542,11 +1577,16 @@
       "openWithDefault": "Mit Standard-App öffnen",
       "openWithDefaultNamed": "{filename} mit der Standard-App öffnen",
       "pdfFailed": "Die PDF-Vorschau konnte nicht dargestellt werden.",
+      "pdfNext": "Nächste Seite",
+      "pdfPage": "Seite {page} von {total}",
+      "pdfPages": "PDF-Seiten",
       "pdfPreview": "PDF Vorschau",
+      "pdfPrevious": "Vorherige Seite",
       "previewLabel": "Anhangvorschau",
       "previewUnavailable": "Vorschau für {mime} nicht verfügbar.",
       "quickLookFailed": "Schnellansicht konnte nicht geöffnet werden: {error}",
       "readFailed": "„{name}\" konnte nicht gelesen werden.",
+      "removeNamed": "{name} entfernen",
       "save": "Anhang speichern",
       "saveEllipsis": "Speichern…",
       "saveFailed": "Anhang konnte nicht gespeichert werden: {error}",
@@ -1554,6 +1594,9 @@
       "showInFolder": "Im Ordner zeigen",
       "tooLarge": "„{name}\" ist größer als {limit}.",
       "totalExceeded": "Gesamtgröße überschritten: „{name}\" passt nicht mehr in das Limit von {limit} (bereits {used} belegt).",
+      "unknownTypeBody": "Satchel kennt den Dateityp .{extension} nicht. Beim Öffnen übergibt Satchel die Datei dem Betriebssystem, das sie womöglich ausführt. Prüfe unten den vollständigen Namen, bevor du entscheidest.",
+      "unknownTypeNoExtensionBody": "Diese Datei hat keine Endung, Satchel kann also nicht erkennen, was sie ist. Beim Öffnen übergibt Satchel sie dem Betriebssystem, das sie womöglich ausführt.",
+      "unknownTypeTitle": "Diesen Anhang öffnen?",
       "useAsAttachment": "Bild als normalen Anhang verwenden",
       "viewInSatchel": "In Satchel ansehen",
       "viewInSatchelNamed": "{filename} in Satchel ansehen"
@@ -1829,6 +1872,14 @@
     "unsubscribe": {
       "action": "Abmelden",
       "banner": "Newsletter — mit einem Klick abmelden",
+      "confirm": {
+        "body": "Dieser Newsletter meldet per E-Mail ab. Satchel sendet diese Nachricht von deinem Konto:",
+        "message": "Nachricht",
+        "send": "Abmelde-E-Mail senden",
+        "subject": "Betreff",
+        "title": "Abmelde-E-Mail senden?",
+        "to": "An"
+      },
       "failed": "Abmelden fehlgeschlagen: {error}",
       "sending": "Sende…",
       "success": "Abgemeldet via {method}"
@@ -2187,12 +2238,16 @@
       "later": "Später",
       "microsoft365Detected": "{domain} empfängt Mail über Microsoft 365",
       "microsoftDetected": "Microsoft-Anmeldung erkannt",
+      "nameHint": "Nur in Satchel sichtbar.",
       "nameLabel": "Kontoname",
       "namePlaceholder": "Arbeit, Privat, …",
       "otherMethod": "Andere Anmeldeart?",
       "passwordHint": "Gilt für Posteingang, Postausgang, Kalender und Kontakte.",
       "passwordLabel": "Passwort",
       "passwordPlaceholder": "Dein Mail-Passwort",
+      "senderHint": "So sehen Empfänger dich als Absender.",
+      "senderLabel": "Dein Name",
+      "senderPlaceholder": "Alex Beispiel",
       "signInSecurely": "Sicher anmelden",
       "workspaceDetected": "{domain} empfängt Mail über Google Workspace"
     },
@@ -2452,7 +2507,24 @@
         "unreadableTitle": "{count} Konto ist gesperrt | {count} Konten sind gesperrt"
       },
       "description": "E-Mail-Konten, Synchronisierung und Anmeldung verwalten.",
+      "detail": {
+        "calendarsHint": "CalDAV-Kalender und CardDAV-Kontakte desselben Anbieters verbinden.",
+        "connection": "Verbindung",
+        "general": "Allgemein",
+        "labelsTitle": "Labels und Kategorien",
+        "passwordTitle": "Passwort",
+        "remove": "Konto entfernen",
+        "removeHint": "Löscht Mails, Ordner und gespeicherte Anmeldung dieses Kontos von diesem Gerät.",
+        "server": "Auf dem Server",
+        "signInHint": "Angemeldet über {provider}. Erneuere die Anmeldung, wenn Satchel neue Berechtigungen braucht.",
+        "signInTitle": "Anmeldung",
+        "syncTitle": "Synchronisierung"
+      },
       "disconnected": "nicht verbunden",
+      "empty": {
+        "description": "Füge ein Konto hinzu, um mit Satchel Mails zu lesen und zu schreiben.",
+        "title": "Noch kein E-Mail-Konto"
+      },
       "groupware": {
         "autoFailed": "Automatische Erkennung nicht möglich: {error}. Bitte ergänze die Zugangsdaten.",
         "badge": "CalDAV / CardDAV",
@@ -2485,7 +2557,18 @@
       "imapFailed": "IMAP-Verbindung fehlgeschlagen: {error}",
       "imapOk": "IMAP-Verbindung OK ({folders} Ordner)",
       "imapOkWithSample": "IMAP-Verbindung OK ({folders} Ordner): {sample}",
+      "mailAccounts": "E-Mail-Konten",
+      "names": {
+        "label": "Kontoname",
+        "labelHint": "So heißt das Konto in der Seitenleiste und in Listen.",
+        "saveFailed": "Die Namen konnten nicht gespeichert werden.",
+        "saved": "Namen gespeichert.",
+        "sender": "Absendername",
+        "senderHint": "Empfänger sehen diesen Namen neben {email}.",
+        "senderPlaceholder": "Vor- und Nachname"
+      },
       "oauthStatus": "{provider}: {state}",
+      "openAccount": "Einstellungen für {name}",
       "password": {
         "action": "Passwort ändern",
         "checking": "Anmeldung läuft …",
@@ -2522,6 +2605,10 @@
       "removeRequiresApp": "Konten löschen ist nur in der Desktop-App möglich.",
       "removeTitle": "Konto entfernen",
       "removed": "Konto gelöscht: {email}",
+      "status": {
+        "signInNeeded": "Anmeldung nötig",
+        "upToDate": "Aktuell"
+      },
       "statusUnavailable": "Status nicht verfügbar: {error}",
       "sync": {
         "accountsCount": "{count} Konto | {count} Konten",

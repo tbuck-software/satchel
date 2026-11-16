@@ -3,6 +3,7 @@
     "errors": {
       "mailActionFailed": "The mail action could not be saved. Please try again.",
       "notAMessageFile": "Only .eml and .msg files can be opened this way.",
+      "readSourceNotChosen": "Satchel only reads a file or folder chosen in its own dialog. Choose {path} again.",
       "revealTargetBlocked": "This target cannot be opened in the file manager.",
       "unexpected": "An unexpected backend error occurred."
     }
@@ -43,11 +44,16 @@
       "openWithDefault": "Open with default app",
       "openWithDefaultNamed": "Open {filename} with the default app",
       "pdfFailed": "This PDF could not be displayed.",
+      "pdfNext": "Next page",
+      "pdfPage": "Page {page} of {total}",
+      "pdfPages": "PDF pages",
       "pdfPreview": "PDF preview",
+      "pdfPrevious": "Previous page",
       "previewLabel": "Attachment preview",
       "previewUnavailable": "No preview available for {mime}.",
       "quickLookFailed": "Could not open Quick Look: {error}",
       "readFailed": "“{name}” could not be read.",
+      "removeNamed": "Remove {name}",
       "save": "Save attachment",
       "saveEllipsis": "Save…",
       "saveFailed": "Could not save the attachment: {error}",
@@ -55,6 +61,9 @@
       "showInFolder": "Show in folder",
       "tooLarge": "“{name}” is larger than {limit}.",
       "totalExceeded": "Total size exceeded: “{name}” no longer fits the {limit} budget ({used} already in use).",
+      "unknownTypeBody": "Satchel does not know the file type .{extension}. Opening it hands it to the operating system, which may run it. Check the full name below before you decide.",
+      "unknownTypeNoExtensionBody": "This file has no extension, so Satchel cannot tell what it is. Opening it hands it to the operating system, which may run it.",
+      "unknownTypeTitle": "Open this attachment?",
       "useAsAttachment": "Send image as a regular attachment",
       "viewInSatchel": "View in Satchel",
       "viewInSatchelNamed": "View {filename} in Satchel"

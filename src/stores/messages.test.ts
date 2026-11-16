@@ -270,14 +270,15 @@ describe('messages store', () => {
   });
 
   it('delegates unsubscribe requests through the messages store', async () => {
-    unsubscribeMock.mockResolvedValue({ method: 'https', target: 'https://example.com/unsubscribe' });
+    unsubscribeMock.mockResolvedValue({ method: 'https', target: 'https://example.com/unsubscribe', confirm_mail: null });
     const messages = useMessagesStore();
 
     await expect(messages.unsubscribe('m-unsubscribe')).resolves.toEqual({
       method: 'https',
       target: 'https://example.com/unsubscribe',
+      confirm_mail: null,
     });
-    expect(unsubscribeMock).toHaveBeenCalledWith('m-unsubscribe');
+    expect(unsubscribeMock).toHaveBeenCalledWith('m-unsubscribe', undefined);
   });
 
   it('clears a thread the backend reports as empty', async () => {

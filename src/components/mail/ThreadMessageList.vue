@@ -15,6 +15,7 @@ const props = defineProps<{
   /** The identity a draft would go out as. */
   draftIdentity?: string;
   draftIdentityColor?: string | null;
+  draftIdentityAvatar?: string | null;
   collapsedMessageIds: ReadonlySet<string>;
   /** Messages whose renderer may mount; without it, every open message. */
   bodyMountedIds?: ReadonlySet<string>;
@@ -68,6 +69,7 @@ const shownDrafts = computed(() => props.draftMessages.filter((draft) => draft.i
       :recipient="props.draftRecipient(draft)"
       :identity="props.draftIdentity"
       :identity-color="props.draftIdentityColor"
+      :identity-avatar="props.draftIdentityAvatar"
       :busy="props.loading || props.draftBusy(draft.id)"
       :keyboard-focused="props.keyboardActive && props.focusedMessageId === draft.id"
       @edit="emit('editDraft', draft.id)"

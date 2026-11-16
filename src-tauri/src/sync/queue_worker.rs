@@ -82,6 +82,7 @@ pub fn spawn_queue_worker(state: AppState, pool: SqlitePool, app: AppHandle) {
                         "failed_outbox": snapshot.failed_outbox,
                         "failed_sends": snapshot.failed_sends,
                         "failed_remote_mutations": snapshot.failed_remote_mutations,
+                        "sync_progress": snapshot.sync_progress,
                         "unread_count": unread,
                     }),
                 );

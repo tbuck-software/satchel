@@ -112,6 +112,20 @@
     "signatures": {
       "discovered": "Found {count} signature in your sent mail. | Found {count} signatures in your sent mail."
     },
+    "status": {
+      "certificate": "Check certificate",
+      "details": "Show details",
+      "error": "Something failed",
+      "importing": "Older mail {percent}",
+      "more": "+{count}",
+      "offline": "Offline",
+      "review": "{count} to review",
+      "signIn": "Sign-in needed",
+      "syncFailed": "Sync failed",
+      "syncNow": "Sync now",
+      "syncing": "Syncing",
+      "title": "Sync and accounts"
+    },
     "sync": {
       "failures": {
         "explanation": "Temporary connection problems retry automatically. These items need a review.",
@@ -122,6 +136,21 @@
         "unavailable": "Open Outbox to review the affected items."
       },
       "mutationsFailed": "{count} change didn't reach the server. | {count} changes didn't reach the server.",
+      "progress": {
+        "complete": "Everything is up to date.",
+        "counts": "{done} of {total} messages",
+        "details": "Show sync details",
+        "explanation": "Older mail loads in the background — keep working meanwhile. Totals grow while more folders are found.",
+        "folder": "Reading {folder}",
+        "folderCount": "{folder} · folder {current} of {total}",
+        "history": "Loading older mail",
+        "needsAttention": "This account needs attention. Check its sync error.",
+        "paused": "Paused while offline",
+        "preparing": "Connecting to your mailbox…",
+        "title": "Mail sync",
+        "updated": "Last activity {time}",
+        "waiting": "Working in the background"
+      },
       "retryFailed": "Re-sync failed: {error}",
       "retryQueued": "{count} change is being synced again. | {count} changes are being synced again.",
       "status": {
@@ -210,6 +239,7 @@
       "accountConfigurationInvalid": "The account configuration is invalid.",
       "accountCredentialAccessFailed": "The saved account credentials could not be accessed. Please try again.",
       "accountHasNoPassword": "This account signs in through its provider and has no password to change.",
+      "accountNameInvalid": "Use a name without line breaks, at most 120 characters long.",
       "accountNotFound": "The account was not found.",
       "accountNotImap": "This account does not use IMAP.",
       "accountPasswordRequired": "Enter the account password.",
@@ -226,6 +256,7 @@
       "attachmentExecutableNotConfirmed": "\"{filename}\" is a program (.{extension}), not a document. Satchel will not hand it to the operating system without your confirmation.",
       "attachmentNotBase64": "\"{filename}\" could not be attached: its data is damaged. Remove the attachment and add the file again.",
       "attachmentPayloadMissing": "The attachment could not be read: Satchel received neither its content nor a path to it.",
+      "attachmentTypeNotConfirmed": "Satchel does not know what opens \"{filename}\". It will not hand it to the operating system without your confirmation.",
       "availabilityDurationInvalid": "Choose a meeting length between 5 minutes and 24 hours.",
       "availabilityRangeInvalid": "That time range cannot be checked for free time.",
       "availabilityTimeZoneInvalid": "This device's time zone is not known to Satchel.",
@@ -271,8 +302,8 @@
       "decryptedAttachmentUnavailable": "This attachment comes from an encrypted message, and its decrypted copy is no longer stored. Open the message to decrypt it again.",
       "desktopUnavailable": "The desktop backend is unavailable. Start Satchel with `pnpm tauri:dev`.",
       "directorySelectionUnavailable": "Folder selection is not available on this platform.",
-      "draftChangedElsewhere": "This draft was changed in another window. Your text here is not saved.",
-      "draftGoneElsewhere": "This draft was sent or discarded in another window. Your text here is not saved.",
+      "draftChangedElsewhere": "This draft was changed elsewhere, so your latest edits are not saved yet.",
+      "draftGoneElsewhere": "This draft was sent or deleted elsewhere, so your latest edits are not saved yet.",
       "draftSendPending": "This draft has an active send. Open it from Drafts to cancel sending before editing.",
       "draftSyncQueueInvalid": "The saved draft sync request is invalid.",
       "draftSyncTimedOut": "The provider did not finish syncing the draft in time.",
@@ -413,6 +444,7 @@
       "queueRejected": "The server rejected this action. Review its details before trying again.",
       "queueTemporary": "The server is temporarily unavailable. Satchel will try again automatically.",
       "queuedDraftNotRestorable": "This message can no longer be reopened as a draft because its draft changed after it was queued. It is still in the Outbox, where you can view it or discard it before it is sent.",
+      "readSourceNotChosen": "Satchel only reads a file or folder chosen in its own dialog. Choose {path} again.",
       "recipientAddressInvalid": "This is not a valid recipient address: {value}",
       "replyContextLoadFailed": "The reply context could not be loaded. The message has not been sent yet.",
       "replyThreadNotFound": "The conversation for this reply is no longer available.",
@@ -562,7 +594,9 @@
       "trayThreadInvalid": "This tray email reference is invalid.",
       "unexpected": "An unexpected backend error occurred.",
       "unsubscribeBrowserOpenFailed": "The unsubscribe page could not be opened: {message}",
+      "unsubscribeConfirmationStale": "The unsubscribe mail no longer matches what was confirmed. Nothing was sent.",
       "unsubscribeHeaderMissing": "This email carries no unsubscribe address.",
+      "unsubscribeMailtoInvalid": "The unsubscribe address in this email is not a single valid address. Satchel will not send to it.",
       "unsubscribeMessageNotFound": "This email is no longer available.",
       "unsubscribeNoTarget": "This email carries no usable unsubscribe address.",
       "unsubscribePostFailed": "The unsubscribe request failed: {message}",
@@ -1253,11 +1287,12 @@
     "toolbar": {
       "attach": "Attach file",
       "attachShort": "Attach",
+      "attachWithCount": "Attach file ({count} attached)",
       "more": "More options",
       "template": "Use template"
     },
     "unsaved": {
-      "conflictTitle": "Not saved: this draft changed in another window",
+      "conflictTitle": "Draft not saved",
       "discardMine": "Discard my changes",
       "saveAsNew": "Save as new draft",
       "title": "Not saved"
@@ -1542,11 +1577,16 @@
       "openWithDefault": "Open with default app",
       "openWithDefaultNamed": "Open {filename} with the default app",
       "pdfFailed": "This PDF could not be displayed.",
+      "pdfNext": "Next page",
+      "pdfPage": "Page {page} of {total}",
+      "pdfPages": "PDF pages",
       "pdfPreview": "PDF preview",
+      "pdfPrevious": "Previous page",
       "previewLabel": "Attachment preview",
       "previewUnavailable": "No preview available for {mime}.",
       "quickLookFailed": "Could not open Quick Look: {error}",
       "readFailed": "“{name}” could not be read.",
+      "removeNamed": "Remove {name}",
       "save": "Save attachment",
       "saveEllipsis": "Save…",
       "saveFailed": "Could not save the attachment: {error}",
@@ -1554,6 +1594,9 @@
       "showInFolder": "Show in folder",
       "tooLarge": "“{name}” is larger than {limit}.",
       "totalExceeded": "Total size exceeded: “{name}” no longer fits the {limit} budget ({used} already in use).",
+      "unknownTypeBody": "Satchel does not know the file type .{extension}. Opening it hands it to the operating system, which may run it. Check the full name below before you decide.",
+      "unknownTypeNoExtensionBody": "This file has no extension, so Satchel cannot tell what it is. Opening it hands it to the operating system, which may run it.",
+      "unknownTypeTitle": "Open this attachment?",
       "useAsAttachment": "Send image as a regular attachment",
       "viewInSatchel": "View in Satchel",
       "viewInSatchelNamed": "View {filename} in Satchel"
@@ -1829,6 +1872,14 @@
     "unsubscribe": {
       "action": "Unsubscribe",
       "banner": "Newsletter — unsubscribe in one click",
+      "confirm": {
+        "body": "This newsletter unsubscribes by email. Satchel sends this message from your account:",
+        "message": "Message",
+        "send": "Send unsubscribe email",
+        "subject": "Subject",
+        "title": "Send an unsubscribe email?",
+        "to": "To"
+      },
       "failed": "Unsubscribe failed: {error}",
       "sending": "Sending…",
       "success": "Unsubscribed via {method}"
@@ -2187,12 +2238,16 @@
       "later": "Later",
       "microsoft365Detected": "{domain} receives mail through Microsoft 365",
       "microsoftDetected": "Microsoft sign-in detected",
+      "nameHint": "Only shown in Satchel.",
       "nameLabel": "Account name",
       "namePlaceholder": "Work, Personal, …",
       "otherMethod": "Different sign-in method?",
       "passwordHint": "Applies to inbox, outbox, calendar and contacts.",
       "passwordLabel": "Password",
       "passwordPlaceholder": "Your mail password",
+      "senderHint": "Recipients see this as the sender.",
+      "senderLabel": "Your name",
+      "senderPlaceholder": "Alex Example",
       "signInSecurely": "Sign in securely",
       "workspaceDetected": "{domain} receives mail through Google Workspace"
     },
@@ -2452,7 +2507,24 @@
         "unreadableTitle": "{count} account is locked | {count} accounts are locked"
       },
       "description": "Manage email accounts, syncing and sign-in.",
+      "detail": {
+        "calendarsHint": "Connect CalDAV calendars and CardDAV contacts from the same provider.",
+        "connection": "Connection",
+        "general": "General",
+        "labelsTitle": "Labels and categories",
+        "passwordTitle": "Password",
+        "remove": "Remove account",
+        "removeHint": "Deletes this account's mail, folders and stored sign-in from this device.",
+        "server": "On the server",
+        "signInHint": "Signed in with {provider}. Renew the sign-in when Satchel asks for new permissions.",
+        "signInTitle": "Sign-in",
+        "syncTitle": "Mail sync"
+      },
       "disconnected": "disconnected",
+      "empty": {
+        "description": "Add an account to read and send mail with Satchel.",
+        "title": "No email account yet"
+      },
       "groupware": {
         "autoFailed": "Automatic discovery failed: {error}. Please add the credentials.",
         "badge": "CalDAV / CardDAV",
@@ -2485,7 +2557,18 @@
       "imapFailed": "IMAP connection failed: {error}",
       "imapOk": "IMAP connection OK ({folders} folders)",
       "imapOkWithSample": "IMAP connection OK ({folders} folders): {sample}",
+      "mailAccounts": "Email accounts",
+      "names": {
+        "label": "Account name",
+        "labelHint": "How the account appears in the sidebar and in lists.",
+        "saveFailed": "The names could not be saved.",
+        "saved": "Names saved.",
+        "sender": "Sender name",
+        "senderHint": "Recipients see this name next to {email}.",
+        "senderPlaceholder": "First and last name"
+      },
       "oauthStatus": "{provider}: {state}",
+      "openAccount": "Settings for {name}",
       "password": {
         "action": "Update password",
         "checking": "Signing in…",
@@ -2522,6 +2605,10 @@
       "removeRequiresApp": "Deleting accounts requires the desktop app.",
       "removeTitle": "Remove account",
       "removed": "Account deleted: {email}",
+      "status": {
+        "signInNeeded": "Sign-in needed",
+        "upToDate": "Up to date"
+      },
       "statusUnavailable": "Status unavailable: {error}",
       "sync": {
         "accountsCount": "{count} account | {count} accounts",

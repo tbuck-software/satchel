@@ -1,6 +1,6 @@
 use satchel_lib::{
     commands::calendar::{queue_invite_response, InviteResponse},
-    db::calendar::CalendarRepository,
+    db::calendar::{CalendarRepository, InviteOrigin},
     email::calendar::{build_invite_reply_ics, parse_invite},
     AppState,
 };
@@ -149,11 +149,15 @@ async fn stores_a_master_and_an_exception_as_distinct_invitations() {
     let occurrence = parse_invite(OCCURRENCE).expect("parse occurrence");
 
     CalendarRepository::new(&pool)
-        .upsert_invite("acc", Some("message-master"), &master)
+        .upsert_invite("acc", InviteOrigin::MailPart("message-master"), &master)
         .await
         .expect("store master");
     CalendarRepository::new(&pool)
-        .upsert_invite("acc", Some("message-occurrence"), &occurrence)
+        .upsert_invite(
+            "acc",
+            InviteOrigin::MailPart("message-occurrence"),
+            &occurrence,
+        )
         .await
         .expect("store occurrence");
 
@@ -172,7 +176,7 @@ async fn queues_each_logical_rsvp_once_and_leaves_it_ready_for_the_worker() {
     let pool = test_pool().await;
     let invite = parse_invite(BOUNDED_SERIES).expect("parse invite");
     CalendarRepository::new(&pool)
-        .upsert_invite("acc", Some("message-master"), &invite)
+        .upsert_invite("acc", InviteOrigin::MailPart("message-master"), &invite)
         .await
         .expect("store invite");
     let invite_id: String =

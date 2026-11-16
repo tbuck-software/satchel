@@ -640,6 +640,13 @@ pub trait MailProvider: Send + Sync {
         Ok(())
     }
 
+    /// Whether the server still has the draft `remote_draft_id`. Gmail swaps
+    /// a draft's message on every update, so a vanished message alone does
+    /// not tell a replaced draft from a deleted one. `Err` when unknown.
+    async fn remote_draft_exists(&self, _remote_draft_id: &str) -> SyncResult<bool> {
+        Err("provider cannot look up drafts by id".into())
+    }
+
     /// Start a long-lived IDLE loop on the given folder. Returns the join-handle's
     /// inner result; implementations are expected to manage their own reconnect logic.
     /// Default impl is a no-op so providers can opt in (used by IMAP, not Gmail/Outlook).

@@ -42,6 +42,7 @@ pub mod outbox;
 pub mod pgp;
 pub mod plugins;
 pub mod provider_features;
+pub mod read_grants;
 pub mod reveal;
 pub mod rules;
 pub mod runtime;

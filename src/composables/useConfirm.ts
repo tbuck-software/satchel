@@ -8,6 +8,8 @@ export interface ConfirmRequest {
   confirmLabel: string;
   /** Extra line under the body — what exactly is at stake. */
   detail?: string;
+  /** Labelled values shown verbatim, e.g. the exact mail a confirmation sends. */
+  fields?: { label: string; value: string }[];
   /** Styles the confirming button as destructive. */
   tone?: 'default' | 'danger';
 }

@@ -68,6 +68,21 @@
           "never": "Not synced yet",
           "offline": "Offline — no connection",
           "syncing": "Syncing…"
+        },
+        "progress": {
+          "title": "Mail sync",
+          "history": "Loading older mail",
+          "details": "Show sync details",
+          "counts": "{done} of {total} messages",
+          "folder": "Reading {folder}",
+          "folderCount": "{folder} · folder {current} of {total}",
+          "preparing": "Connecting to your mailbox…",
+          "waiting": "Working in the background",
+          "paused": "Paused while offline",
+          "needsAttention": "This account needs attention. Check its sync error.",
+          "updated": "Last activity {time}",
+          "explanation": "Older mail loads in the background — keep working meanwhile. Totals grow while more folders are found.",
+          "complete": "Everything is up to date."
         }
       },
       "update": {
@@ -86,6 +101,20 @@
         "checking": "Checking for updates…",
         "upToDate": "You are up to date.",
         "sourceBuild": "This build is updated from source."
+      },
+      "status": {
+        "signIn": "Sign-in needed",
+        "importing": "Older mail {percent}",
+        "syncFailed": "Sync failed",
+        "error": "Something failed",
+        "certificate": "Check certificate",
+        "review": "{count} to review",
+        "offline": "Offline",
+        "syncing": "Syncing",
+        "more": "+{count}",
+        "title": "Sync and accounts",
+        "details": "Show details",
+        "syncNow": "Sync now"
       }
     },
     "commands": {
@@ -544,6 +573,21 @@
           "never": "Noch nicht synchronisiert",
           "offline": "Offline — keine Verbindung",
           "syncing": "Wird synchronisiert …"
+        },
+        "progress": {
+          "title": "E-Mail-Abgleich",
+          "history": "Ältere E-Mails laden",
+          "details": "Abgleich anzeigen",
+          "counts": "{done} von {total} Nachrichten",
+          "folder": "{folder} wird gelesen",
+          "folderCount": "{folder} · Ordner {current} von {total}",
+          "preparing": "Postfach verbinden …",
+          "waiting": "Läuft im Hintergrund",
+          "paused": "Offline pausiert",
+          "needsAttention": "Dieses Konto benötigt deine Aufmerksamkeit. Prüfe den Sync-Fehler.",
+          "updated": "Letzte Aktivität {time}",
+          "explanation": "Ältere E-Mails laden im Hintergrund — du kannst weiterarbeiten. Die Summe wächst, solange weitere Ordner gefunden werden.",
+          "complete": "Alles ist auf dem neuesten Stand."
         }
       },
       "update": {
@@ -562,6 +606,20 @@
         "checking": "Updates werden gesucht…",
         "upToDate": "Du nutzt die aktuelle Version.",
         "sourceBuild": "Dieser Build wird aus dem Quellcode aktualisiert."
+      },
+      "status": {
+        "signIn": "Anmeldung nötig",
+        "importing": "Ältere E-Mails {percent}",
+        "syncFailed": "Abgleich gestört",
+        "error": "Fehler aufgetreten",
+        "certificate": "Zertifikat prüfen",
+        "review": "{count} zu prüfen",
+        "offline": "Offline",
+        "syncing": "Abgleich läuft",
+        "more": "+{count}",
+        "title": "Abgleich und Konten",
+        "details": "Details anzeigen",
+        "syncNow": "Jetzt abgleichen"
       }
     },
     "commands": {

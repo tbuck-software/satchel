@@ -23,6 +23,7 @@ import {
   cleanThreadSnippet,
   collectNewSenderThreadIds,
   senderReviewInScope,
+  inboxGroupingInScope,
   isVisibleInCurrentScope,
   matchesMailboxFilter,
   normalizedParticipantEmail,
@@ -261,6 +262,11 @@ export function createThreadFilterBuckets({
    * the same line. Each used to run the sender test over every thread, so a
    * single-row patch paid for it twice.
    */
+  const inboxGroupingAllowed = computed(() => inboxGroupingInScope({
+    workflow: workflowFilter.value,
+    mailbox: mailboxFilter.value,
+    contactEmail: activeContactEmail.value,
+  }));
   const newSenderThreadIds = computed(() => !senderReviewInScope({
     workflow: workflowFilter.value,
     mailbox: mailboxFilter.value,
@@ -297,11 +303,11 @@ export function createThreadFilterBuckets({
     () => currentSmartInboxSummary.value?.total_count ?? visibleThreads.value.length,
   );
   const smartInboxBuckets = computed<SmartInboxBucketGroup[]>(() =>
-    buildSmartInboxBuckets(
+    inboxGroupingAllowed.value ? buildSmartInboxBuckets(
       visibleThreads.value,
       newSenderThreadIds.value,
       currentSmartInboxSummary.value?.buckets,
-    ),
+    ) : [],
   );
   const smartInboxRemainderThreads = computed(() => {
     const reservedThreadIds = new Set(
@@ -324,8 +330,7 @@ export function createThreadFilterBuckets({
       return activeSmartBucket.value.threads;
     }
     if (
-      mailboxFilter.value.kind !== 'folder'
-      && !activeContactEmail.value
+      inboxGroupingAllowed.value
       && inboxGroupingMode() === 'smart'
     ) {
       return smartInboxRemainderThreads.value;
@@ -389,7 +394,7 @@ export function createThreadFilterBuckets({
   });
 
   const smartListEntries = computed<ThreadListEntry[]>(() => {
-    if (activeSimilarGroup.value) {
+    if (!inboxGroupingAllowed.value || activeSimilarGroup.value) {
       return listEntries.value;
     }
 

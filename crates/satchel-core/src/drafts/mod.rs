@@ -221,15 +221,13 @@ async fn ensure_drafts_folder(
     account_id: &str,
     now: &str,
 ) -> Result<String, String> {
-    let existing = sqlx::query_scalar::<_, String>(
-        "SELECT id FROM folders WHERE account_id = ? AND folder_type = 'drafts' LIMIT 1",
-    )
-    .bind(account_id)
-    .fetch_optional(&mut *connection)
-    .await
-    .map_err(|err| err.to_string())?;
-    if let Some(id) = existing {
-        return Ok(id);
+    // The same folder the APPEND targets (`push_draft_to_remote`).
+    let existing =
+        crate::db::folders::preferred_folder_of_type(&mut *connection, account_id, "drafts")
+            .await
+            .map_err(|err| err.to_string())?;
+    if let Some(folder) = existing {
+        return Ok(folder.id);
     }
     let id = crate::db::folders::resolve_provider_folder_id(&mut *connection, account_id, "Drafts")
         .await
@@ -1103,7 +1101,7 @@ async fn hydrate_imported_draft_attachments(
             })
             .unwrap_or(row.content_type);
         attachments.push(OutgoingAttachmentInput {
-            filename: crate::utils::filename::strip_filename_controls(
+            filename: crate::utils::filename::safe_attachment_name(
                 &fetched_filename
                     .or(row.filename)
                     .unwrap_or_else(|| "attachment".to_string()),
@@ -1266,24 +1264,21 @@ async fn push_draft_to_remote(
     remote_draft_id: Option<&str>,
     remote_message_id: Option<&str>,
 ) -> Result<Option<String>, String> {
-    let row: Option<(String, String, String, String, String, String)> = sqlx::query_as(
-        "SELECT id, display_name, provider, email, config,
-                COALESCE((
-                  SELECT COALESCE(NULLIF(TRIM(remote_id), ''), full_path)
-                  FROM folders
-                  WHERE account_id = accounts.id AND folder_type = 'drafts'
-                  ORDER BY updated_at DESC LIMIT 1
-                ), 'Drafts')
-         FROM accounts WHERE id = ? LIMIT 1",
+    let row: Option<(String, String, String, String, String)> = sqlx::query_as(
+        "SELECT id, display_name, provider, email, config FROM accounts WHERE id = ? LIMIT 1",
     )
     .bind(&input.account_id)
     .fetch_optional(pool)
     .await
     .map_err(|err| err.to_string())?;
-    let Some((account_id, display_name, provider_kind, email, stored_config, drafts_folder)) = row
-    else {
+    let Some((account_id, display_name, provider_kind, email, stored_config)) = row else {
         return Ok(None);
     };
+    // The folder the local draft lives in (`ensure_drafts_folder`).
+    let drafts_folder = crate::db::folders::preferred_folder_of_type(pool, &account_id, "drafts")
+        .await
+        .map_err(|err| err.to_string())?
+        .map_or_else(|| "Drafts".to_string(), |folder| folder.remote_path);
     let config = crate::utils::oauth::refresh_account_config(
         pool,
         &account_id,

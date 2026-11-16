@@ -64,14 +64,14 @@ it('replaces equal-length images without letting an older request revoke the cur
   wrapper = mount(AttachmentPreview, { props: { attachmentId: 'old' } });
   await wrapper.setProps({ attachmentId: 'new' });
   await flushPromises();
-  expect(wrapper.find('img').attributes('src')).toBe('blob:new');
+  expect(document.querySelector('img')?.getAttribute('src')).toBe('blob:new');
   resolve({ filename: 'old.png', mime_type: 'image/png', data_base64: 'QQ==' });
   await flushPromises();
   expect(revoke).not.toHaveBeenCalled();
   await wrapper.setProps({ attachmentId: 'replacement' });
   await flushPromises();
   expect(revoke).toHaveBeenCalledExactlyOnceWith('blob:new');
-  expect(wrapper.find('img').attributes('src')).toBe('blob:replacement');
+  expect(document.querySelector('img')?.getAttribute('src')).toBe('blob:replacement');
   wrapper.unmount(); wrapper = null;
   expect(revoke).toHaveBeenLastCalledWith('blob:replacement');
   vi.unstubAllGlobals();
@@ -89,7 +89,7 @@ it('ignores a delayed cache-file read after the preview is replaced or unmounted
   await flushPromises();
   await wrapper.setProps({ attachmentId: 'current' });
   await flushPromises();
-  expect(wrapper.find('img').attributes('src')).toBe('blob:current');
+  expect(document.querySelector('img')?.getAttribute('src')).toBe('blob:current');
   wrapper.unmount(); wrapper = null;
   release(new Uint8Array([1]));
   await flushPromises();

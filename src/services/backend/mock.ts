@@ -1,7 +1,10 @@
+import { MOCK_PDF_BASE64 } from './mockPdf';
 import { createPersistedSlot, persistence } from '@/persistence';
 import type { BackendAccountQuota, BackendAccountVisibilityPolicy } from './accounts';
 import type { BackendTask, BackendTaskList } from './tasks';
+import type { BackendSource, BackendWebhook } from './sources';
 import { splitSubjectPrefixes } from '@/utils/composerText';
+import { cleanContactName, isContactEmail } from '@/utils/contactIdentity';
 import { bytesToBase64 } from '@/utils/base64';
 import { joinComposerTextHistory, splitComposerTextHistory, splitComposerHtmlHistory } from '@/utils/composerHistory';
 /**
@@ -33,7 +36,7 @@ import {
 import type { Account, Message, Thread } from '@/types/mail';
 import type { BackendContact } from '@/types/contacts';
 import type { BackendDraft, BackendSignature, BackendResolvedSignature } from '@/types/composer';
-import type { BackendMessage, BackendMessageBody } from '@/types/messages';
+import type { BackendMessage, BackendMessageBody, BackendUnsubscribeMail } from '@/types/messages';
 import type { BackendCalendarEvent, BackendCalendarInvite, BackendCalendarSource } from '@/types/calendar';
 import type { BackendBusyBlock, BackendFreeBusyInput, BackendFreeSlotsInput } from './availability';
 import type { BackendOutboxItem } from '@/types/outbox';
@@ -446,15 +449,15 @@ for (const message of Object.values(messages).flat().filter((message) => !messag
   const sender = { ...message.from, name: account?.displayName || message.from.name };
   for (const person of [sender, ...[...message.to, ...(message.cc ?? [])].map((recipient) => ({ ...recipient, name: '' }))]) {
     const email = person.email.trim().toLowerCase();
-    if (!email.includes('@')) continue;
+    if (!isContactEmail(email)) continue;
     const existing = contacts.find((contact) => contact.email === email);
     if (existing) {
       existing.frequency += 1;
-      if (person.name) existing.display_name = person.name;
+      if (!existing.display_name) existing.display_name = cleanContactName(person.name) || null;
       if (!existing.last_contacted || message.timestamp > existing.last_contacted) existing.last_contacted = message.timestamp;
     } else {
       contacts.push({
-        id: `contact-${email}`, email, display_name: person.name || null,
+        id: `contact-${email}`, email, display_name: cleanContactName(person.name) || null,
         avatar_url: null, avatar_source: null, avatar_locked: 0, avatar_updated_at: null,
         frequency: 1, last_contacted: message.timestamp, notes: null,
         created_at: message.timestamp, updated_at: message.timestamp,
@@ -611,6 +614,18 @@ function takeQueuedDraft(id: string): BackendDraft {
 const calendarEvents: BackendCalendarEvent[] = mockCalendarEvents.map((event) => ({ ...event }));
 const calendarInvites: BackendCalendarInvite[] = mockCalendarInvites.map((invite) => ({ ...invite }));
 const calendarSources: BackendCalendarSource[] = mockCalendarSources.map((source) => ({ ...source }));
+// Feeds and webhooks start empty, as on a fresh install.
+const sources: BackendSource[] = [];
+const webhooks: BackendWebhook[] = [];
+
+function webhookUrlValid(raw: unknown): boolean {
+  try {
+    const url = new URL(String(raw));
+    return url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname));
+  } catch {
+    return false;
+  }
+}
 const senderPreferences = new Map<string, { category: string | null; isPriority: boolean }>();
 
 /**
@@ -709,7 +724,8 @@ function threadDto(thread: Thread) {
 function accountDto(account: Account) {
   return {
     id: account.id,
-    display_name: account.displayName,
+    display_name: account.senderName ?? account.displayName,
+    label: account.label ?? null,
     email: account.email,
     provider: account.provider,
     kind: account.kind,
@@ -1725,6 +1741,19 @@ const handlers: Record<string, Handler> = {
       || String(avatar).length > 96 * 1024)) throw new Error('backend.errors.accountAvatarInvalid');
     account.avatar = (avatar as string | null | undefined) ?? null;
   },
+  // The same refusals as AccountRepository::set_names.
+  set_account_names: ({ accountId, label, senderName }) => {
+    const account = accounts.find((item) => item.id === accountId);
+    if (!account) throw new Error('backend.errors.accountNotFound');
+    const nextLabel = String(label ?? '').trim() || null;
+    const nextSender = String(senderName ?? '').trim();
+    const control = (char: string) => { const code = char.codePointAt(0)!; return code < 0x20 || (code >= 0x7f && code <= 0x9f); };
+    const invalid = (value: string) => [...value].length > 120 || [...value].some(control);
+    if ((nextLabel && invalid(nextLabel)) || invalid(nextSender)) throw new Error('backend.errors.accountNameInvalid');
+    account.label = nextLabel;
+    account.senderName = nextSender;
+    account.displayName = nextLabel || nextSender || account.email;
+  },
   set_account_visibility: (payload) => {
     visibilityPolicies[payload.accountId as string] = JSON.parse(JSON.stringify(payload.policy)) as BackendAccountVisibilityPolicy;
     persistence.write(visibilitySlot, visibilityPolicies);
@@ -2138,8 +2167,8 @@ const handlers: Record<string, Handler> = {
   },
   /*
    * A 2x2 PNG is enough: the card only has to receive bytes it can decode.
-   * Anything else answers with its own name as text, which is what a plain
-   * `.txt` or an unknown type would hold anyway.
+   * PDFs use a valid two-page fixture; other files answer with their name,
+   * which is enough for a plain `.txt` or an unknown type.
    */
   download_attachment: (payload) => {
     const id = (input(payload).attachment_id as string | undefined) ?? '';
@@ -2152,7 +2181,7 @@ const handlers: Record<string, Handler> = {
     return {
       filename,
       mime_type: attachment?.contentType ?? 'application/octet-stream',
-      data_base64: isImage ? MOCK_PNG_BASE64 : btoa(filename),
+      data_base64: isImage ? MOCK_PNG_BASE64 : attachment?.contentType === 'application/pdf' ? MOCK_PDF_BASE64 : btoa(filename),
       cached_path: null,
     };
   },
@@ -2566,6 +2595,7 @@ const handlers: Record<string, Handler> = {
     failures: [],
   }),
   current_connection_state: () => ({
+    sync_progress: [],
     unread_count: threads.filter(thread => accountVisible(thread.accountId) && thread.workflowState === 'inbox' && thread.unreadCount > 0 && !thread.isMuted && thread.mailboxNames?.some(name => name.toLowerCase() === 'inbox')).length,
     online: true,
     syncing: false,
@@ -2630,6 +2660,57 @@ const handlers: Record<string, Handler> = {
   consume_pending_mobile_notification: () => ({ threadId: null, actionId: null }),
   // No native notification gate retains responses here.
   mobile_notification_response_handled: () => undefined,
+  list_sources: () => sources.map((source) => ({ ...source })),
+  create_source: ({ input }) => {
+    const fields = input as { name?: string; kind?: string; identity?: string; color?: string; config?: unknown };
+    const name = String(fields.name ?? '').trim();
+    const identity = String(fields.identity ?? '').trim();
+    if (!name || name.length > 160) throw new Error('invalid name');
+    if (!identity || identity.length > 2048) throw new Error('invalid identity');
+    if (!['webhook', 'script', 'rss'].includes(String(fields.kind))) throw new Error('unsupported source kind');
+    if (fields.kind === 'rss' && !/^https?:\/\//i.test(identity)) throw new Error('feed URL must use http or https');
+    const config = fields.config && typeof fields.config === 'object' && !Array.isArray(fields.config) ? fields.config : {};
+    const source: BackendSource = {
+      id: `src-${++sequence}`,
+      display_name: name,
+      identity,
+      kind: String(fields.kind),
+      provider: String(fields.kind),
+      color: fields.color ?? '#4cd68a',
+      config: JSON.stringify(config),
+      sync_state: '{}',
+    };
+    sources.push(source);
+    return { ...source };
+  },
+  delete_source: ({ sourceId }) => {
+    const index = sources.findIndex((source) => source.id === sourceId);
+    if (index >= 0) sources.splice(index, 1);
+  },
+  // The mock fetches no feeds.
+  poll_source: () => 0,
+  list_webhooks: () => webhooks.map((webhook) => ({ ...webhook })),
+  upsert_webhook: ({ input }) => {
+    const fields = input as { id?: string | null; url: string; events: string[]; enabled: boolean };
+    if (!webhookUrlValid(fields.url)) throw new Error('backend.errors.webhookUrlInvalid');
+    const now = new Date().toISOString();
+    const existing = fields.id ? webhooks.find((webhook) => webhook.id === fields.id) : undefined;
+    const webhook: BackendWebhook = {
+      id: existing?.id ?? fields.id ?? `wh-${++sequence}`,
+      url: fields.url,
+      events_json: JSON.stringify(fields.events ?? []),
+      enabled: fields.enabled ? 1 : 0,
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    if (existing) Object.assign(existing, webhook);
+    else webhooks.push(webhook);
+    return { ...webhook };
+  },
+  delete_webhook: ({ id }) => {
+    const index = webhooks.findIndex((webhook) => webhook.id === id);
+    if (index >= 0) webhooks.splice(index, 1);
+  },
   list_plugins: () => [],
   list_plugin_metrics: () => [],
   list_plugin_audit_log: () => [],
@@ -2716,7 +2797,7 @@ const handlers: Record<string, Handler> = {
   upsert_contact: ({ input: raw }) => {
     const input = raw as { id: string | null; email: string; display_name: string | null; notes: string | null; avatar_url: string | null };
     const email = input.email.trim().toLowerCase();
-    if (!email.includes('@')) throw new Error('contact email is invalid');
+    if (!isContactEmail(email)) throw new Error('backend.errors.contactEmailInvalid');
     const previous = contacts.find((contact) => contact.email === email);
     const now = new Date().toISOString();
     if (previous) {
@@ -3159,8 +3240,34 @@ const handlers: Record<string, Handler> = {
     const message = Object.values(messages).flat().find((entry) => entry.id === messageId);
     if (!message) throw new Error('backend.errors.unsubscribeMessageNotFound');
     if (!message.listUnsubscribe?.trim()) throw new Error('backend.errors.unsubscribeHeaderMissing');
-    const target = /<(https?:[^>]+)>/.exec(message.listUnsubscribe)?.[1] ?? message.listUnsubscribe;
-    return { method: target.startsWith('mailto:') ? 'mailto' : 'http-one-click', target };
+    const header = message.listUnsubscribe;
+    const url = /<(https?:[^>]+)>/i.exec(header)?.[1];
+    const confirmed = (input(payload).confirmed_mail ?? null) as BackendUnsubscribeMail | null;
+    if (url && !confirmed && message.listUnsubscribePost?.includes('List-Unsubscribe=One-Click')) {
+      return { method: 'http-one-click', target: url, confirm_mail: null };
+    }
+    // Like the backend: a mailto route sends only the exact mail the user confirmed.
+    const mailto = /<mailto:([^>]+)>/i.exec(header)?.[1];
+    if (mailto) {
+      const [address = '', query = ''] = mailto.split('?');
+      const params = new URLSearchParams(query);
+      const mail: BackendUnsubscribeMail = {
+        to: decodeURIComponent(address),
+        subject: params.get('subject')?.trim() || 'unsubscribe',
+        body: params.get('body')?.trim() || 'unsubscribe',
+      };
+      if (!/^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$/.test(mail.to)) {
+        throw new Error('backend.errors.unsubscribeMailtoInvalid');
+      }
+      if (!confirmed) return { method: 'mailto', target: mail.to, confirm_mail: mail };
+      if (confirmed.to !== mail.to || confirmed.subject !== mail.subject || confirmed.body !== mail.body) {
+        throw new Error('backend.errors.unsubscribeConfirmationStale');
+      }
+      return { method: 'mailto', target: mail.to, confirm_mail: null };
+    }
+    if (confirmed) throw new Error('backend.errors.unsubscribeConfirmationStale');
+    if (!url) throw new Error('backend.errors.unsubscribeNoTarget');
+    return { method: 'browser', target: url, confirm_mail: null };
   },
   list_blocked_senders: () => [],
   list_rules: () => mockRules.map((rule) => ({ ...rule, actions: [...rule.actions] })),

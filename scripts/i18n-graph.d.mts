@@ -1,4 +1,6 @@
 export const repoRoot: string;
+export function repoRelative(file: string): string;
+export function fsPath(id: string): string;
 export const DYNAMIC_IMPORT_RE: RegExp;
 
 export interface KeyIndex {

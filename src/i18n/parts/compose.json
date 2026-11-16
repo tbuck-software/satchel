@@ -75,6 +75,7 @@
       },
       "toolbar": {
         "attach": "Attach file",
+        "attachWithCount": "Attach file ({count} attached)",
         "attachShort": "Attach",
         "template": "Use template",
         "more": "More options"
@@ -226,7 +227,7 @@
       },
       "unsaved": {
         "title": "Not saved",
-        "conflictTitle": "Not saved: this draft changed in another window",
+        "conflictTitle": "Draft not saved",
         "saveAsNew": "Save as new draft",
         "discardMine": "Discard my changes"
       },
@@ -459,6 +460,7 @@
       },
       "toolbar": {
         "attach": "Datei anhängen",
+        "attachWithCount": "Datei anhängen ({count} angehängt)",
         "attachShort": "Anhängen",
         "template": "Vorlage verwenden",
         "more": "Weitere Optionen"
@@ -610,7 +612,7 @@
       },
       "unsaved": {
         "title": "Nicht gespeichert",
-        "conflictTitle": "Nicht gespeichert: Der Entwurf wurde in einem anderen Fenster geändert",
+        "conflictTitle": "Entwurf nicht gespeichert",
         "saveAsNew": "Als neuen Entwurf speichern",
         "discardMine": "Meine Änderungen verwerfen"
       },

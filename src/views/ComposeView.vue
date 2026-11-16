@@ -284,6 +284,9 @@ const startsInRecipients = computed(
   () => props.mode === 'new' && props.initialTo.length === 0 && !props.initialDraftId,
 );
 const attachmentZoneRef = ref<InstanceType<typeof AttachmentDropZone> | null>(null);
+const attachTitle = computed(() => (attachments.value.length > 0
+  ? t('compose.toolbar.attachWithCount', { count: attachments.value.length })
+  : t('compose.toolbar.attach')));
 // Send and the composer's own status line: no toast may sit on them.
 const footerRef = ref<HTMLElement | null>(null);
 useToastClearance(footerRef);
@@ -1120,7 +1123,7 @@ function announceAfterClose(tone: 'success' | 'info' | 'warning', text: string, 
 }
 
 /** The message as Send hands it over; a mail merge sends the same. */
-function sendPayload(account: { id: string; displayName: string }): BackendSendMessagePayload {
+function sendPayload(account: { id: string; displayName: string; senderName?: string }): BackendSendMessagePayload {
   return {
     accountId: account.id,
     to: to.value,
@@ -1135,7 +1138,7 @@ function sendPayload(account: { id: string; displayName: string }): BackendSendM
     replyToMessageId: replyToMessageId.value,
     attachments: attachments.value,
     fromAddress: fromAddress.value,
-    fromName: account.displayName,
+    fromName: account.senderName ?? account.displayName,
     replyTo: replyTo.value,
     draftId: draftId.value,
     scheduledFor: scheduledFor.value,
@@ -1402,7 +1405,7 @@ function currentDraftState(): ComposerDraftState {
   return {
     accountId: accountId.value,
     fromAddress: fromAddress.value,
-    fromName: activeAccount.value?.displayName ?? null,
+    fromName: activeAccount.value ? (activeAccount.value.senderName ?? activeAccount.value.displayName) : null,
     threadId: contextThreadId.value,
     replyTo: replyTo.value,
     sendOptions: {
@@ -1737,6 +1740,20 @@ defineExpose({
       />
     </div>
 
+    <!-- Under the subject, where they are in view as the composer opens: at
+         the end of the column they sat below the quoted history, out of sight
+         of the text they belong to. -->
+    <AttachmentDropZone
+      ref="attachmentZoneRef"
+      v-model="attachments"
+      inline-enabled
+      :show-empty-state="false"
+      class="compose-attachments"
+      @insert-inline="composerInlineAttachments.onAttachmentInsertedInline"
+      @remove-inline="composerInlineAttachments.onInlineAttachmentRemoved"
+      @move-to-attachment="composerInlineAttachments.onInlineAttachmentRemoved"
+    />
+
     <div class="body" :class="{ 'body--with-history': plainTextCompose ? historyText : historyHtml }" @click="focusComposeBody" @focusin="mergeInsertTarget = 'body'">
       <textarea
         v-if="plainTextCompose"
@@ -1827,16 +1844,6 @@ defineExpose({
       <ComposerThreadContext v-if="contextThreadId && !quoteHoldsWholeThread" :thread-id="contextThreadId" />
     </div>
 
-    <AttachmentDropZone
-      ref="attachmentZoneRef"
-      v-model="attachments"
-      inline-enabled
-      :show-empty-state="false"
-      class="compose-attachments"
-      @insert-inline="composerInlineAttachments.onAttachmentInsertedInline"
-      @remove-inline="composerInlineAttachments.onInlineAttachmentRemoved"
-      @move-to-attachment="composerInlineAttachments.onInlineAttachmentRemoved"
-    />
     </div>
 
     <footer ref="footerRef" class="footer">
@@ -1862,9 +1869,10 @@ defineExpose({
       </p>
       <div class="footer-actions">
         <!-- The attachment label folds away when the composer is narrow. -->
-        <AppButton variant="ghost" class="tool-button" :title="$t('compose.toolbar.attach')" :aria-label="$t('compose.toolbar.attach')" @click="attachmentZoneRef?.openPicker()">
+        <AppButton variant="ghost" class="tool-button" :title="attachTitle" :aria-label="attachTitle" @click="attachmentZoneRef?.openPicker()">
           <template #icon><AppIcon size="lg"><path d="M13.5 7.5l-6.2 6.2a3.5 3.5 0 01-5-5l6.5-6.5a2.5 2.5 0 013.5 3.5L5.8 12.2a1.5 1.5 0 01-2.1-2.1l6.1-6.1"/></AppIcon></template>
           <span class="tool-label">{{ $t('compose.toolbar.attachShort') }}</span>
+          <span v-if="attachments.length > 0" class="tool-count" aria-hidden="true">{{ attachments.length }}</span>
         </AppButton>
         <IconButton size="lg" v-if="supportsBackend" :title="$t('compose.toolbar.template')" :aria-label="$t('compose.toolbar.template')" @click="showTemplatePicker = true">
           <AppIcon size="lg"><path d="M3 1.5h7l3 3v10H3z"/><path d="M10 1.5v3h3M5.5 8h5M5.5 11h4"/></AppIcon>
@@ -2278,6 +2286,22 @@ textarea:focus {
   white-space: normal;
 }
 
+/* Too narrow for copy and actions side by side, the actions take a row of
+   their own instead of squeezing the title to a word or two per line. */
+.compose-notices :deep(.banner) {
+  flex-wrap: wrap;
+}
+
+.compose-notices :deep(.banner__copy) {
+  flex: 1 1 22rem;
+}
+
+.compose-notices :deep(.banner__actions) {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
 /* Composer window layout */
 .compose {
   /* Labels sit in a column of their own; every value — field, body text,
@@ -2412,26 +2436,25 @@ textarea:focus {
 .compose :deep(.chips:focus-within) { border-color: transparent; box-shadow: none; }
 .compose :deep(.chip) { padding-block: 3px; }
 
+/* The body has no scroller of its own: it grows with its text inside the
+   column, which scrolls as a whole. A body box that scrolled inside a column
+   that scrolled as well gave two scrollbars once a banner and attachments
+   took the room. Whatever else claims the height, a few lines of the answer
+   stay in view. */
 .compose .body {
-  flex: 1 1 auto;
-  min-height: 0;
+  flex: 1 0 auto;
+  min-height: min(8.5rem, 30vh);
   display: flex;
   flex-direction: column;
-  overflow: auto;
   padding: var(--space-md) 0 var(--space-xl) var(--compose-value-x);
   cursor: text;
-  /* The body scrolls under a fixed footer: without a fade its last line ended
-     in a hard cut ("Show conversation" sliced in half) that read as clipped
-     rather than as more to scroll to. The mask reads only alpha. */
-  -webkit-mask-image: linear-gradient(to bottom, var(--bg-surface) calc(100% - var(--space-lg)), transparent);
-  mask-image: linear-gradient(to bottom, var(--bg-surface) calc(100% - var(--space-lg)), transparent);
 }
 
 /* On the page, the writing area grows with the text and the action bar
    follows right under it, instead of waiting at the bottom of the window.
    The floating composer keeps filling its frame. */
 .compose:not(.compose--embedded) .body {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   min-height: min(18rem, 40vh);
 }
 
@@ -2486,15 +2509,21 @@ textarea:focus {
   line-height: var(--leading-editable);
 }
 
+/* Part of the column, not a box that scrolls on its own: the column already
+   scrolls, and the count on Attach says they are there. */
 .compose .compose-attachments {
   flex: none;
-  max-height: 132px;
-  overflow: auto;
-  margin: 3px 0 8px var(--compose-value-x);
-  padding: 8px 10px;
-  border-color: var(--border-color-muted);
+  margin: 0 0 0 var(--compose-value-x);
+  padding: var(--space-xs) 0;
+  border: 0;
+  border-bottom: var(--border-muted);
+  border-radius: 0;
+  background: transparent;
+}
+
+.compose .compose-attachments.over {
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--bg-base) 28%, transparent);
+  outline: 1px dashed var(--accent-primary);
 }
 
 .compose .compose-attachments :deep(.empty) {
@@ -2524,12 +2553,47 @@ textarea:focus {
 
 /* Labelled tools sit flush with the icon-only ones beside them. */
 .tool-button {
+  position: relative;
   padding-inline: var(--space-2-5) var(--space-3-5);
+}
+
+/* How many files ride along, also once the tray has scrolled out of view.
+   Neutral, not accent: Send is the one accented control in this bar. */
+.tool-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  min-width: 20px;
+  height: 20px;
+  margin-left: var(--space-xs);
+  padding-inline: 6px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--text-primary) 12%, transparent);
+  color: var(--text-primary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--weight-semibold);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
 }
 
 @container (max-width: 34rem) {
   .tool-label { display: none; }
   .tool-button { width: 38px; padding: 0; }
+  /* Without the label the count rides on the icon's corner. */
+  .tool-count {
+    position: absolute;
+    top: 0;
+    right: -2px;
+    min-width: 16px;
+    height: 16px;
+    margin: 0;
+    padding-inline: 4px;
+    background: var(--bg-raised);
+    box-shadow: 0 0 0 1px var(--border-color-muted);
+    font-size: var(--font-size-3xs);
+  }
   .tool-button :deep(.app-button__icon) { margin: 0; }
 }
 
@@ -2685,8 +2749,28 @@ textarea:focus {
 .compose .status,
 .compose .schedule-info { font-size: var(--font-size-xs); }
 
-/* Desktop: the wrapper adds no box; fields and body stay pinned as before. */
-.compose-scroll,
+/* Fields, body and attachments share one column between the notices and the
+   footer, which scrolls as a whole when they do not fit. Pinned fields over
+   a body that scrolled on its own let a banner and a few attachments push
+   Send and Attach out of the floating frame and squeeze the body to two
+   lines. */
+.compose-scroll {
+  flex: 0 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Room inside the clip for the fields' focus rings, given back outside. */
+  padding-inline: var(--space-2xs);
+  margin-inline: calc(-1 * var(--space-2xs));
+}
+
+.compose--embedded .compose-scroll {
+  flex: 1 1 auto;
+}
+
 .compose-fold {
   display: contents;
 }

@@ -7,6 +7,12 @@
  * It sits in the layout flow rather than over it, so it pushes the app down
  * instead of covering the window chrome.
  *
+ * `card` is the same notice as a self-contained block: rounded, inset from
+ * its surroundings, text over actions. The strip is for a pane's own content
+ * (a composer, a settings page); the shell's standing notices are cards, in
+ * the sidebar footer or the phone's status sheet, never a band across the
+ * top of the window.
+ *
  * A danger banner announces itself: `status` waits for a pause in the screen
  * reader's queue, and a failure the user is about to work around cannot wait.
  */
@@ -16,10 +22,12 @@ withDefaults(
     tone?: 'danger' | 'warning' | 'info';
     title: string;
     detail?: string;
+    variant?: 'strip' | 'card';
   }>(),
   {
     tone: 'warning',
     detail: undefined,
+    variant: 'strip',
   },
 );
 </script>
@@ -27,7 +35,7 @@ withDefaults(
 <template>
   <div
     class="banner"
-    :class="`banner--${tone}`"
+    :class="[`banner--${tone}`, `banner--${variant}`]"
     :role="tone === 'danger' ? 'alert' : 'status'"
   >
     <span class="banner__icon" aria-hidden="true">
@@ -139,5 +147,46 @@ withDefaults(
   align-items: center;
   gap: var(--space-2xs);
   flex-shrink: 0;
+}
+
+/* The card: the copy takes the whole width and wraps; the actions follow on
+   their own row, start-aligned, and wrap when the column is narrow. */
+.banner--card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  row-gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md) var(--space-md) var(--space-sm);
+  border: 1px solid var(--border-color-muted);
+  border-radius: var(--radius-md);
+}
+
+.banner--card.banner--danger { border-color: color-mix(in srgb, var(--accent-red) 26%, transparent); }
+.banner--card.banner--warning { border-color: color-mix(in srgb, var(--accent-amber) 26%, transparent); }
+.banner--card.banner--info { border-color: color-mix(in srgb, var(--accent-primary) 26%, transparent); }
+
+.banner--card .banner__icon {
+  height: calc(var(--font-size-sm) * 1.4);
+}
+
+.banner--card .banner__copy {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2xs);
+}
+
+.banner--card .banner__detail {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.banner--card .banner__actions {
+  grid-column: 2;
+  flex-wrap: wrap;
+  flex-shrink: 1;
+  min-width: 0;
 }
 </style>

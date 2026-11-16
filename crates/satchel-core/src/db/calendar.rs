@@ -331,11 +331,11 @@ impl<'a> CalendarRepository<'a> {
     pub async fn upsert_invite(
         &self,
         account_id: &str,
-        message_id: Option<&str>,
+        origin: InviteOrigin<'_>,
         invite: &ParsedInvite,
     ) -> Result<CalendarInviteRecord, CalendarError> {
         let mut connection = self.pool.acquire().await?;
-        Self::upsert_invite_on_connection(&mut connection, account_id, message_id, invite).await?;
+        Self::upsert_invite_on_connection(&mut connection, account_id, origin, invite).await?;
         drop(connection);
         self.find_invite(account_id, &invite.uid, invite.recurrence_id.as_deref())
             .await
@@ -346,25 +346,55 @@ impl<'a> CalendarRepository<'a> {
     /// Every ingest path ends here, so this is where an answer to an
     /// invitation (`METHOD:REPLY` and its kin) is dropped: it is not an
     /// invitation, and under the same UID it would overwrite the real one.
+    /// An invite that may not update the stored one (see [`may_update_invite`])
+    /// is dropped too, leaving the stored row and its message untouched.
     pub async fn upsert_invite_on_connection(
         connection: &mut sqlx::SqliteConnection,
         account_id: &str,
-        message_id: Option<&str>,
+        origin: InviteOrigin<'_>,
         invite: &ParsedInvite,
     ) -> Result<(), CalendarError> {
-        if !invite.is_invitation() {
+        if invite.uid.trim().is_empty() || !invite.is_invitation() {
             return Ok(());
         }
         let now = chrono::Utc::now().to_rfc3339();
         let recurrence_id = invite.recurrence_id.as_deref().unwrap_or("");
+        let message_id = origin.message_id();
+        let sender: Option<String> = match message_id {
+            Some(message_id) => {
+                sqlx::query_scalar("SELECT from_address FROM messages WHERE id = ?")
+                    .bind(message_id)
+                    .fetch_optional(&mut *connection)
+                    .await?
+            }
+            None => None,
+        };
+        let stored = sqlx::query_as::<_, StoredInviteAuthority>(
+            "SELECT ci.message_id, ci.organizer_email, ci.sequence,
+                    COALESCE(ci.source_sender, m.from_address) AS source_sender
+             FROM calendar_invites ci
+             LEFT JOIN messages m ON m.id = ci.message_id
+             WHERE ci.account_id = ? AND ci.uid = ? AND ci.recurrence_id = ?",
+        )
+        .bind(account_id)
+        .bind(&invite.uid)
+        .bind(recurrence_id)
+        .fetch_optional(&mut *connection)
+        .await?;
+        if let Some(stored) = &stored {
+            if !may_update_invite(stored, origin, sender.as_deref(), invite) {
+                tracing::debug!("calendar invite update from a different sender ignored");
+                return Ok(());
+            }
+        }
         let id = invite_id(account_id, &invite.uid, recurrence_id);
         sqlx::query(
             "INSERT INTO calendar_invites
                 (id, message_id, account_id, uid, organizer_email, organizer_name, summary,
                  description, location, starts_at, ends_at, all_day, rsvp_status, raw_ics,
                  sequence, method, cancelled, recurrence_id, recurring, recurrence_unbounded,
-                 created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'needs-action', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 source_sender, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'needs-action', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(account_id, uid, recurrence_id) DO UPDATE SET
                 message_id = excluded.message_id,
                 organizer_email = excluded.organizer_email,
@@ -406,6 +436,7 @@ impl<'a> CalendarRepository<'a> {
         } else {
             0_i64
         })
+        .bind(sender.as_deref().map(normalize_email))
         .bind(&now)
         .bind(&now)
         .execute(connection)
@@ -956,6 +987,76 @@ impl<'a> CalendarRepository<'a> {
     }
 }
 
+/// Where a parsed invite came from, which decides whether it may change an
+/// invite already stored under the same UID.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InviteOrigin<'a> {
+    /// A file the user imported themselves.
+    Import,
+    /// A `text/calendar` part or `.ics` attachment of this message.
+    MailPart(&'a str),
+    /// A VCALENDAR block found in this message's text or HTML body.
+    MailBody(&'a str),
+}
+
+impl<'a> InviteOrigin<'a> {
+    fn message_id(self) -> Option<&'a str> {
+        match self {
+            Self::Import => None,
+            Self::MailPart(id) | Self::MailBody(id) => Some(id),
+        }
+    }
+}
+
+#[derive(Debug, FromRow)]
+struct StoredInviteAuthority {
+    message_id: Option<String>,
+    organizer_email: Option<String>,
+    sequence: Option<i64>,
+    source_sender: Option<String>,
+}
+
+/// An update (cancellation included) from another mail needs a calendar part,
+/// the same organizer, a sender that is the organizer or the stored invite's
+/// sender, and a SEQUENCE no lower than the stored one.
+fn may_update_invite(
+    stored: &StoredInviteAuthority,
+    origin: InviteOrigin<'_>,
+    sender: Option<&str>,
+    invite: &ParsedInvite,
+) -> bool {
+    let message_id = match origin {
+        InviteOrigin::Import => return true,
+        InviteOrigin::MailPart(id) | InviteOrigin::MailBody(id) => id,
+    };
+    if stored.message_id.as_deref() == Some(message_id) {
+        return true;
+    }
+    if matches!(origin, InviteOrigin::MailBody(_)) {
+        return false;
+    }
+    let organizer = stored.organizer_email.as_deref().map(normalize_email);
+    if organizer != invite.organizer_email.as_deref().map(normalize_email) {
+        return false;
+    }
+    let Some(sender) = sender.map(normalize_email).filter(|s| !s.is_empty()) else {
+        return false;
+    };
+    let source = stored.source_sender.as_deref().map(normalize_email);
+    let authorized =
+        organizer.as_deref() == Some(sender.as_str()) || source.as_deref() == Some(sender.as_str());
+    authorized && invite.sequence.unwrap_or(0) >= stored.sequence.unwrap_or(0)
+}
+
+fn normalize_email(value: &str) -> String {
+    let value = value.trim();
+    let value = match value.get(..7) {
+        Some(scheme) if scheme.eq_ignore_ascii_case("mailto:") => &value[7..],
+        _ => value,
+    };
+    value.trim().to_ascii_lowercase()
+}
+
 fn invite_id(account_id: &str, uid: &str, recurrence_id: &str) -> String {
     crate::sync::provider_identity::provider_local_id(
         "inv",
@@ -1133,6 +1234,196 @@ mod tests {
         );
     }
 
+    async fn mail_from(pool: &SqlitePool, id: &str, from: &str) {
+        sqlx::query(
+            "INSERT OR IGNORE INTO folders (id, account_id, name, full_path, remote_id, folder_type, created_at, updated_at)
+             VALUES ('inbox', 'account', 'Inbox', 'INBOX', 'INBOX', 'inbox', '', '')",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO messages (id, account_id, folder_id, remote_id, from_address, to_addresses, date, created_at, updated_at)
+             VALUES (?, 'account', 'inbox', ?, ?, '[]', '', '', '')",
+        )
+        .bind(id)
+        .bind(id)
+        .bind(from)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    /// The invite stored from `m-original`, sent by `from`.
+    async fn stored_invite(from: &str) -> SqlitePool {
+        let pool = pool().await;
+        account(&pool, "account", "2026-01-01").await;
+        mail_from(&pool, "m-original", from).await;
+        let request = crate::email::calendar::parse_invite(REQUEST).unwrap();
+        CalendarRepository::new(&pool)
+            .upsert_invite("account", InviteOrigin::MailPart("m-original"), &request)
+            .await
+            .unwrap();
+        pool
+    }
+
+    async fn deliver(
+        pool: &SqlitePool,
+        origin: InviteOrigin<'_>,
+        ics: &str,
+    ) -> CalendarInviteRecord {
+        let invite = crate::email::calendar::parse_invite(ics).unwrap();
+        CalendarRepository::new(pool)
+            .upsert_invite("account", origin, &invite)
+            .await
+            .unwrap()
+    }
+
+    fn revised(sequence: u32) -> String {
+        REQUEST
+            .replace("SUMMARY:Planning", "SUMMARY:Moved planning")
+            .replace("SEQUENCE:1", &format!("SEQUENCE:{sequence}"))
+    }
+
+    #[tokio::test]
+    async fn the_organizer_can_update_an_invite() {
+        let pool = stored_invite("alice@example.test").await;
+        mail_from(&pool, "m-update", "Alice@Example.test").await;
+
+        let row = deliver(&pool, InviteOrigin::MailPart("m-update"), &revised(2)).await;
+
+        assert_eq!(row.summary.as_deref(), Some("Moved planning"));
+        assert_eq!(row.message_id.as_deref(), Some("m-update"));
+    }
+
+    #[tokio::test]
+    async fn the_sender_of_the_original_invite_can_update_it() {
+        // Calendar services send on the organizer's behalf from their own address.
+        let pool = stored_invite("calendar-notification@service.example").await;
+        mail_from(&pool, "m-update", "calendar-notification@service.example").await;
+        sqlx::query("DELETE FROM messages WHERE id = 'm-original'")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let row = deliver(&pool, InviteOrigin::MailPart("m-update"), &revised(2)).await;
+
+        assert_eq!(row.summary.as_deref(), Some("Moved planning"));
+    }
+
+    #[tokio::test]
+    async fn an_invite_from_a_different_sender_leaves_the_stored_one_alone() {
+        let pool = stored_invite("alice@example.test").await;
+        mail_from(&pool, "m-foreign", "mallory@other.example").await;
+
+        let row = deliver(&pool, InviteOrigin::MailPart("m-foreign"), &revised(5)).await;
+
+        assert_eq!(row.summary.as_deref(), Some("Planning"));
+        assert_eq!(row.message_id.as_deref(), Some("m-original"));
+    }
+
+    #[tokio::test]
+    async fn an_invite_naming_a_different_organizer_leaves_the_stored_one_alone() {
+        let pool = stored_invite("alice@example.test").await;
+        mail_from(&pool, "m-foreign", "mallory@other.example").await;
+        let ics = revised(5).replace("mailto:alice@example.test", "mailto:mallory@other.example");
+
+        let row = deliver(&pool, InviteOrigin::MailPart("m-foreign"), &ics).await;
+
+        assert_eq!(row.summary.as_deref(), Some("Planning"));
+        assert_eq!(row.organizer_email.as_deref(), Some("alice@example.test"));
+        assert_eq!(row.message_id.as_deref(), Some("m-original"));
+    }
+
+    #[tokio::test]
+    async fn a_lower_sequence_does_not_replace_a_newer_invite() {
+        let pool = stored_invite("alice@example.test").await;
+        mail_from(&pool, "m-update", "alice@example.test").await;
+        mail_from(&pool, "m-stale", "alice@example.test").await;
+        deliver(&pool, InviteOrigin::MailPart("m-update"), &revised(3)).await;
+
+        let row = deliver(
+            &pool,
+            InviteOrigin::MailPart("m-stale"),
+            &REQUEST.replace("SUMMARY:Planning", "SUMMARY:Stale"),
+        )
+        .await;
+
+        assert_eq!(row.summary.as_deref(), Some("Moved planning"));
+        assert_eq!(row.message_id.as_deref(), Some("m-update"));
+    }
+
+    #[tokio::test]
+    async fn a_cancellation_from_a_different_sender_is_ignored() {
+        let pool = stored_invite("alice@example.test").await;
+        mail_from(&pool, "m-foreign", "mallory@other.example").await;
+
+        let row = deliver(&pool, InviteOrigin::MailPart("m-foreign"), CANCEL).await;
+
+        assert_eq!(row.cancelled, 0);
+        assert_eq!(row.message_id.as_deref(), Some("m-original"));
+    }
+
+    #[tokio::test]
+    async fn the_organizer_can_cancel_an_invite() {
+        let pool = stored_invite("alice@example.test").await;
+        mail_from(&pool, "m-cancel", "alice@example.test").await;
+
+        let row = deliver(&pool, InviteOrigin::MailPart("m-cancel"), CANCEL).await;
+
+        assert_eq!(row.cancelled, 1);
+    }
+
+    #[tokio::test]
+    async fn an_invite_found_in_a_mail_body_cannot_update_a_stored_one() {
+        let pool = stored_invite("alice@example.test").await;
+        mail_from(&pool, "m-body", "alice@example.test").await;
+
+        let row = deliver(&pool, InviteOrigin::MailBody("m-body"), &revised(2)).await;
+        assert_eq!(row.summary.as_deref(), Some("Planning"));
+        assert_eq!(row.message_id.as_deref(), Some("m-original"));
+
+        // It may still create an invite nobody has stored yet.
+        let other = revised(1).replace("UID:event@example.test", "UID:other@example.test");
+        let created = deliver(&pool, InviteOrigin::MailBody("m-body"), &other).await;
+        assert_eq!(created.message_id.as_deref(), Some("m-body"));
+    }
+
+    #[tokio::test]
+    async fn the_same_mail_can_store_its_invite_again() {
+        let pool = stored_invite("calendar@service.example").await;
+
+        let row = deliver(&pool, InviteOrigin::MailPart("m-original"), REQUEST).await;
+
+        assert_eq!(row.message_id.as_deref(), Some("m-original"));
+    }
+
+    #[tokio::test]
+    async fn an_invite_without_a_uid_is_not_stored() {
+        let pool = pool().await;
+        account(&pool, "account", "2026-01-01").await;
+        let mut invite = crate::email::calendar::parse_invite(REQUEST).unwrap();
+        invite.uid = "  ".into();
+        CalendarRepository::upsert_invite_on_connection(
+            &mut pool.acquire().await.unwrap(),
+            "account",
+            InviteOrigin::Import,
+            &invite,
+        )
+        .await
+        .unwrap();
+
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM calendar_invites")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+        assert!(crate::email::calendar::parse_invite(
+            &REQUEST.replace("UID:event@example.test", "UID: ")
+        )
+        .is_none());
+    }
+
     #[tokio::test]
     async fn invitation_identity_preserves_a_legacy_id_and_rsvp_on_reimport() {
         let pool = pool().await;
@@ -1143,7 +1434,7 @@ mod tests {
         let revised = REQUEST.replace("SUMMARY:Planning", "SUMMARY:Revised planning");
         let request = crate::email::calendar::parse_invite(&revised).unwrap();
         let updated = repository
-            .upsert_invite("account", None, &request)
+            .upsert_invite("account", InviteOrigin::Import, &request)
             .await
             .unwrap();
         assert_eq!(updated.id, "inv-legacy-event");
@@ -1174,7 +1465,7 @@ mod tests {
             let request = crate::email::calendar::parse_invite(&raw).unwrap();
             assert_eq!(request.uid, uid);
             let invitation = repository
-                .upsert_invite("account", None, &request)
+                .upsert_invite("account", InviteOrigin::Import, &request)
                 .await
                 .unwrap();
             ids.push(invitation.id);
@@ -1213,7 +1504,7 @@ mod tests {
         let repository = CalendarRepository::new(&pool);
         let request = crate::email::calendar::parse_invite(REQUEST).unwrap();
         let stored = repository
-            .upsert_invite("account", None, &request)
+            .upsert_invite("account", InviteOrigin::Import, &request)
             .await
             .unwrap();
 
@@ -1224,7 +1515,7 @@ mod tests {
             .replace("SUMMARY:Planning\r\n", "");
         let reply = crate::email::calendar::parse_invite(&reply).unwrap();
         repository
-            .upsert_invite("account", None, &reply)
+            .upsert_invite("account", InviteOrigin::Import, &reply)
             .await
             .unwrap();
         let kept = repository.get_invite(&stored.id).await.unwrap();
@@ -1275,7 +1566,7 @@ mod tests {
         let repository = CalendarRepository::new(&pool);
         let request = crate::email::calendar::parse_invite(REQUEST).unwrap();
         let first = repository
-            .upsert_invite("account", None, &request)
+            .upsert_invite("account", InviteOrigin::Import, &request)
             .await
             .unwrap();
         repository
@@ -1283,7 +1574,7 @@ mod tests {
             .await
             .unwrap();
         repository
-            .upsert_invite("account", None, &request)
+            .upsert_invite("account", InviteOrigin::Import, &request)
             .await
             .unwrap();
         assert_eq!(
@@ -1293,11 +1584,11 @@ mod tests {
 
         let cancel = crate::email::calendar::parse_invite(CANCEL).unwrap();
         repository
-            .upsert_invite("account", None, &cancel)
+            .upsert_invite("account", InviteOrigin::Import, &cancel)
             .await
             .unwrap();
         repository
-            .upsert_invite("account", None, &request)
+            .upsert_invite("account", InviteOrigin::Import, &request)
             .await
             .unwrap();
         assert_eq!(repository.get_invite(&first.id).await.unwrap().cancelled, 1);
@@ -1306,7 +1597,7 @@ mod tests {
             REQUEST.replace("SEQUENCE:1", "RECURRENCE-ID:20260917T100000Z\r\nSEQUENCE:1");
         let recurring = crate::email::calendar::parse_invite(&recurring).unwrap();
         let occurrence = repository
-            .upsert_invite("account", None, &recurring)
+            .upsert_invite("account", InviteOrigin::Import, &recurring)
             .await
             .unwrap();
         assert_ne!(occurrence.id, first.id);
@@ -1585,7 +1876,7 @@ mod tests {
         let repository = CalendarRepository::new(&pool);
         let request = crate::email::calendar::parse_invite(REQUEST).unwrap();
         let invite = repository
-            .upsert_invite("account", None, &request)
+            .upsert_invite("account", InviteOrigin::Import, &request)
             .await
             .unwrap();
         assert_eq!(

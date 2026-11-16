@@ -64,6 +64,24 @@ describe('prepareEmailBody', () => {
     expect(dark.html).not.toBe(blocked.html);
   });
 
+  it('blocks sources the renderer would load, in the body and in quotes', () => {
+    const body = prepareEmailBody('m-quote', input({
+      html: `<div><p>Hallo</p><img alt="a > b" src="https://tracker.example/p?u=1'x"></div>`
+        + `<blockquote type="cite"><p>Earlier message</p><img src="https://tracker.example/q?u=1'x"></blockquote>`,
+    }));
+    const options = { autoDark: false, allowRemoteImages: false };
+    const prepared = body.document(options);
+    const quotes = body.extracted.quotes.map((part) => body.quoteDocument(part, options));
+
+    expect(prepared.blockedCount).toBe(1);
+    expect(quotes).toHaveLength(1);
+    for (const html of [prepared.html, ...quotes]) {
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      expect(doc.querySelector('img[src]')).toBeNull();
+      expect(doc.querySelector('img[data-blocked-src]')).not.toBeNull();
+    }
+  });
+
   it('prepares again when the body or its inline images change', () => {
     const before = prepareEmailBody('m-1', input());
     expect(before.document({ autoDark: false, allowRemoteImages: true }).html).toContain('data:image/svg+xml');

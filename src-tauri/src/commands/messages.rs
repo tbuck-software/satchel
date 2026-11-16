@@ -98,6 +98,7 @@ pub struct BodyProvenance {
 )]
 pub struct DecryptedAttachmentBinding {
     pub id: String,
+    #[serde(serialize_with = "satchel_core::utils::filename::serialize_filename")]
     pub filename: String,
     pub content_type: String,
     pub size: i64,

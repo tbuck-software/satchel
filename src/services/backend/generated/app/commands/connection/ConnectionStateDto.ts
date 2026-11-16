@@ -1,4 +1,5 @@
 // Generated from Rust. Run pnpm ipc:generate.
+import type { AccountSyncProgress } from "../../../core/db/connection_state/AccountSyncProgress";
 export type ConnectionStateDto = {
     /**
      * Native code does not infer internet reachability. The webview uses its OS network hint.
@@ -15,4 +16,5 @@ export type ConnectionStateDto = {
     failed_outbox: number;
     failed_sends: number;
     failed_remote_mutations: number;
+    sync_progress: Array<AccountSyncProgress>;
 };

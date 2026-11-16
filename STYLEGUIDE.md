@@ -505,14 +505,6 @@ The kit uses itself: `EmptyState` renders its action as an `AppButton`, not as
 a copy of one. A block that hand-rolls what another block already does is the
 same bug as a feature doing it, one floor down.
 
-One row is deliberately not in the kit: the full-width call-to-action that
-opens account setup (`settings/AccountSetup.vue`). It is an icon tile, a label
-and a trailing arrow on a tinted, accent-bordered card — neither a pill
-(`AppButton`) nor a sidebar row (`NavItem`), and it has exactly one caller. A
-kit component with one caller is how the library ended up as a set of
-suggestions rather than a system, so this stays a hand-rolled button, named as
-such in the check's known list. A second caller turns it into a component.
-
 A dialog does not build its own `position: fixed; inset: 0` scrim. `ModalShell`
 carries the scrim, the focus trap, the focus handed back to whatever opened the
 dialog, `role="dialog"` with `aria-modal`, and the scroll lock behind it — all

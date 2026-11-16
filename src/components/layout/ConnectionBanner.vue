@@ -17,6 +17,13 @@
  * gets the warning tone, names the account and the date, and can be hidden.
  * Hidden stays hidden for that certificate; the account keeps its marker in
  * the sidebar, and a different certificate is a new notice.
+ *
+ * Where it shows: as a card in the desktop sidebar footer, next to the sync
+ * button, and in the phone's status sheet. It used to be a band across the
+ * top of the window, above the page title; on the phone two of those stacked
+ * and pushed the list down by a third of the screen. One instance is the
+ * host: it keeps the drawer dot current and owns the certificate dialog,
+ * whether or not it draws a notice itself.
  */
 import { computed, defineAsyncComponent, onBeforeUnmount, ref, watchEffect } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -40,6 +47,14 @@ import IconButton from '@/components/ui/IconButton.vue';
 // always present, and the certificate code stays out of the startup bundle.
 // The sidebar marker and the account settings open the same dialog.
 const CertificateDialog = defineAsyncComponent(() => import('./CertificateDialog.vue'));
+
+const props = withDefaults(defineProps<{
+  variant?: 'strip' | 'card';
+  /** False: draw nothing, only host (the phone, whose notices live in a sheet). */
+  notice?: boolean;
+  /** False: a second, display-only instance; the host keeps dot and dialog. */
+  host?: boolean;
+}>(), { variant: 'strip', notice: true, host: true });
 
 const connection = useConnectionStore();
 const accounts = useAccountsStore();
@@ -146,12 +161,18 @@ const title = computed(() => (outage.value
 // would flicker with every hiccup. Owned here because this banner is always
 // mounted and already knows both kinds of failure.
 watchEffect(() => {
-  ui.drawerAttention = certificates.needsAttention || connection.syncFailures.some((raw) => {
+  if (!props.host) return;
+  // An expired sign-in or a locked credential store needs a look as much as an outage.
+  ui.drawerAttention = certificates.needsAttention
+    || Boolean(accounts.credentialLock)
+    || accounts.accountsWithAuthError.length > 0
+    || connection.syncFailures.some((raw) => {
     if (accountCertificateRejection(raw)) return false;
     const failure = describeSyncFailure(raw, accounts.accounts);
     return failure.accountId !== null && isOutage(failure, now.value);
   });
 });
+const compact = computed(() => props.variant === 'strip' && ui.isMobile);
 const detail = computed(() => (
   syncFailures.value.length > 0
     ? syncFailures.value.map((failure) => failure.label).join(' · ')
@@ -165,18 +186,20 @@ function updatePassword(accountId: string) {
 </script>
 
 <template>
+  <template v-if="props.notice">
   <AppBanner
     v-if="certificateProblem"
     class="connection-banner connection-banner--certificate"
-    :class="{ 'connection-banner--compact': ui.isMobile }"
+    :class="{ 'connection-banner--compact': compact }"
     tone="warning"
-    :title="ui.isMobile
+    :variant="props.variant"
+    :title="compact
       ? t('certificates.sidebar.problem', { account: certificateAccount, problem: certificateShort(certificateProblem.rejection) })
       : certificateTitle(certificateProblem.rejection, certificateAccount)"
-    :detail="ui.isMobile ? undefined : certificateDetail(certificateProblem.rejection)"
+    :detail="compact ? undefined : certificateDetail(certificateProblem.rejection)"
   >
     <template #actions>
-      <template v-if="ui.isMobile">
+      <template v-if="compact">
         <AppButton size="sm" variant="soft" @click="certificates.openDetails(certificateProblem.accountId)">
           {{ t('certificates.banner.details') }}
         </AppButton>
@@ -201,6 +224,7 @@ function updatePassword(accountId: string) {
     v-else-if="connection.backendError && !onlyCertificates"
     class="connection-banner"
     tone="danger"
+    :variant="props.variant"
     :title="title"
     :detail="detail"
   >
@@ -251,7 +275,8 @@ function updatePassword(accountId: string) {
       </AppButton>
     </template>
   </AppBanner>
-  <CertificateDialog v-if="certificates.detailsAccountId" />
+  </template>
+  <CertificateDialog v-if="props.host && certificates.detailsAccountId" />
 </template>
 
 <style scoped>
@@ -265,6 +290,10 @@ function updatePassword(accountId: string) {
 .connection-banner--certificate {
   background: color-mix(in srgb, var(--accent-orange) 10%, var(--bg-surface));
   border-bottom-color: color-mix(in srgb, var(--accent-orange) 26%, transparent);
+}
+
+.connection-banner--certificate.banner--card {
+  border-color: color-mix(in srgb, var(--accent-orange) 26%, transparent);
 }
 
 .connection-banner--certificate :deep(.banner__icon) {

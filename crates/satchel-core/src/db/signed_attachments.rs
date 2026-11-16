@@ -175,7 +175,7 @@ async fn insert_entity_rows(
             attachment
                 .filename
                 .as_deref()
-                .map(crate::utils::filename::strip_filename_controls),
+                .map(crate::utils::filename::safe_attachment_name),
         )
         .bind(&attachment.content_type)
         .bind(attachment.size)

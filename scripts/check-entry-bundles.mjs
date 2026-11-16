@@ -102,11 +102,21 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
  * row, `g h`, views) load behind it; their only startup strings are the
  * `backend.errors.chatConfirmationNeeded` and `chatEncryptionLost`; the
  * palette names the Labs section. Main 107 / 214 KiB since then: on #124's
- * 106.0 / 212.9 KiB the Labs slots measure 106.3 / 213.4 (+352 / +430 B). */
+ * 106.0 / 212.9 KiB the Labs slots measure 106.3 / 213.4 (+352 / +430 B).
+ * Main initial 215 KiB and catalogue after prefetch 35 KiB since 2026-11-12:
+ * compact sync progress plus shell status chips measure 106.8 / 214.1 KiB
+ * and 34.1 KiB after prefetch. The chip adds its short localized status
+ * labels to first paint; the status sheet and its actions load on demand.
+ * Viewer 130 KiB since 2026-11-15: the remote image blocker moved onto the
+ * parsed mail document and gained a CSS allowlist (escaped names, image-set
+ * strings), which the viewer renders with too; it measures 129.0 KiB.
+ * Main entry 108 KiB since 2026-11-15: the header sync button turns while a
+ * sync runs, instead of a footer line (+107 B); main measured 109,537 B, 31 B
+ * under the old 107 KiB. */
 const budgets = {
-  'index.html': { entryGzip: 107 * 1024, initialGzip: 214 * 1024, locales: ['src/i18n/startup.en.json', 'src/i18n/startup.de.json'] },
+  'index.html': { entryGzip: 108 * 1024, initialGzip: 215 * 1024, locales: ['src/i18n/startup.en.json', 'src/i18n/startup.de.json'] },
   'tray.html': { entryGzip: 5 * 1024, initialGzip: 75 * 1024, locales: ['src/i18n/tray.en.json', 'src/i18n/tray.de.json'] },
-  'viewer.html': { entryGzip: 5 * 1024, initialGzip: 129 * 1024, locales: ['src/i18n/viewer.en.json', 'src/i18n/viewer.de.json'] },
+  'viewer.html': { entryGzip: 5 * 1024, initialGzip: 130 * 1024, locales: ['src/i18n/viewer.en.json', 'src/i18n/viewer.de.json'] },
 };
 
 /* The startup catalogue plus the reader's and palette's chunks, which load
@@ -115,7 +125,7 @@ const budgets = {
  * startup catalogue (every backend.* key ships there) and the rest of its
  * copy into its lazy chunks: German 32.9 → 33.1 KiB after prefetch, initial
  * JS 211.3 → 211.4 KiB, entry unchanged at 105.1 KiB. */
-const CATALOGUE_AFTER_PREFETCH_GZIP = 34 * 1024;
+const CATALOGUE_AFTER_PREFETCH_GZIP = 35 * 1024;
 
 /**
  * @param {string} entry

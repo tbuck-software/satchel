@@ -11,7 +11,7 @@ use tauri::{AppHandle, Manager};
 use crate::events::bus::{AppEvent, EventBus};
 use crate::providers::{
     cursor::{backfill_pending, backfill_stats},
-    folder_mapping::provider_folder_type,
+    folder_mapping::{kind_folder_type, provider_folder_type},
     imap::imap_checkpoint,
     pop3::POP3_FOLDER,
     provider_for_stored_account,
@@ -235,6 +235,11 @@ struct ImapSyncState {
     /// drop their summary, so the next full sync reports them, once.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     unreported_holds: HashMap<String, BTreeSet<String>>,
+    /// Folders whose UIDVALIDITY changed between one run's sync and its
+    /// snapshot. GroupWise's virtual folders get a new generation on every
+    /// SELECT, so their snapshot can never apply; each run's reset covers them.
+    #[serde(default, skip_serializing_if = "HashSet::is_empty")]
+    volatile_generations: HashSet<String>,
 }
 
 /// The failed resolutions of one owed ID.
@@ -255,6 +260,25 @@ impl ImapSyncState {
         self.pending_snapshots.contains(folder)
     }
 
+    /// Whether this run owes a folder its snapshot, once its batch is in.
+    fn snapshot_after_batch(
+        &mut self,
+        folder: &str,
+        reset: bool,
+        due: bool,
+        required: bool,
+    ) -> bool {
+        // A run without a reset shows the generation held still.
+        if !reset {
+            self.volatile_generations.remove(folder);
+        }
+        // The reset already reconciled it; a snapshot would meet yet another generation.
+        if self.volatile_generations.contains(folder) {
+            return false;
+        }
+        self.request_snapshot(folder, due, required)
+    }
+
     /// Forget every per-folder entry of folders the provider no longer returns.
     fn retain_folders(&mut self, retained: &HashSet<String>) {
         self.cursors.retain(|folder, _| retained.contains(folder));
@@ -270,6 +294,20 @@ impl ImapSyncState {
             .retain(|folder, _| retained.contains(folder));
         self.unreported_holds
             .retain(|folder, _| retained.contains(folder));
+        self.volatile_generations
+            .retain(|folder| retained.contains(folder));
+    }
+
+    /// Stop snapshotting a folder whose generation changes within a run, and
+    /// drop what its snapshots owed: those UIDs named a void generation.
+    /// Returns whether the folder was not marked yet.
+    fn mark_volatile_generation(&mut self, folder: &str) -> bool {
+        self.pending_snapshots.remove(folder);
+        self.snapshot_resolutions.remove(folder);
+        self.resolved_snapshot_copies.remove(folder);
+        self.snapshot_failures.remove(folder);
+        self.unreported_holds.remove(folder);
+        self.volatile_generations.insert(folder.to_string())
     }
 
     /// Whether ordinary polls owe this folder lookups: IDs a completed
@@ -445,12 +483,16 @@ async fn reconcile_folder_snapshot(
             )
         };
     if skipped_stale_generation {
-        tracing::warn!(
-            account_id,
-            folder = remote_folder_id,
-            snapshot_uidvalidity = ?snapshot.remote_uidvalidity,
-            "folder snapshot named another generation, kept every message"
-        );
+        // This run's sync recorded the folder's generation moments ago.
+        if state.mark_volatile_generation(remote_folder_id) {
+            tracing::info!(
+                account_id,
+                folder = remote_folder_id,
+                snapshot_uidvalidity = ?snapshot.remote_uidvalidity,
+                "folder changed UIDVALIDITY within one run; snapshots paused until it holds still"
+            );
+        }
+        persist_sync_cursors(pool, account_id, state, queue, None).await?;
     } else {
         // Every ID the listing found absent is owed durably by now, so the
         // listing has nothing left to add. Ordinary polls look up what is
@@ -727,10 +769,23 @@ async fn resolve_owed_ids(
                     .await?
                 }
                 Ok(None) => {
-                    crate::sync::gmail_reconcile::reconcile_gmail_snapshot_deletion(
-                        pool, account_id, id,
+                    match crate::sync::gmail_reconcile::gmail_live_drafts_behind(
+                        pool, provider, account_id, id,
                     )
                     .await?
+                    {
+                        Err(error) if error.is_rate_limited() => return Err(error.to_string()),
+                        Err(error) => SnapshotResolution::Deferred(SnapshotDeferral::Failed(error)),
+                        Ok(live_drafts) => {
+                            crate::sync::gmail_reconcile::reconcile_gmail_snapshot_deletion(
+                                pool,
+                                account_id,
+                                id,
+                                &live_drafts,
+                            )
+                            .await?
+                        }
+                    }
                 }
             };
             let threads = match resolution {
@@ -1274,24 +1329,19 @@ pub(crate) async fn sync_mailboxes(
             // (the Graph adapter also resolves six well-known folders) and
             // defeats the point of a lightweight freshness check.
             let cached_inbox = if folder_selection == FolderSelection::Inbox {
-                sqlx::query_as::<_, (String, String)>(
-                    "SELECT COALESCE(NULLIF(remote_id, ''), full_path), name
-                     FROM folders
-                     WHERE account_id = ? AND folder_type = 'inbox'
-                     LIMIT 1",
-                )
-                .bind(&account.id)
-                .fetch_optional(pool)
-                .await
-                .map_err(|err| err.to_string())?
-                .map(|(id, name)| RemoteFolder {
-                    id,
-                    name,
-                    kind: Some("inbox".to_string()),
-                })
+                satchel_core::db::folders::preferred_folder_of_type(pool, &account.id, "inbox")
+                    .await
+                    .map_err(|err| err.to_string())?
+                    .map(|folder| RemoteFolder {
+                        id: folder.remote_path,
+                        name: folder.name,
+                        kind: Some("inbox".to_string()),
+                    })
             } else {
                 None
             };
+            // Only a real listing says what the server declares (SPECIAL-USE).
+            let folders_listed = cached_inbox.is_none();
             let mut folders = match cached_inbox {
                 Some(folder) => vec![folder],
                 None => list_folders_and_pace_quota(pool, &account.id, provider.as_ref())
@@ -1438,13 +1488,14 @@ pub(crate) async fn sync_mailboxes(
                 .await;
 
                 sqlx::query(
-                    "INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, uidvalidity, message_count, unread_count, sync_enabled, sort_order, created_at, updated_at)
-                     VALUES (?, ?, ?, ?, ?, ?, NULL, 0, 0, 1, 0, ?, ?)
+                    "INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, uidvalidity, message_count, unread_count, sync_enabled, sort_order, special_use, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, NULL, 0, 0, 1, 0, ?, ?, ?)
                      ON CONFLICT(id) DO UPDATE SET
                         name = excluded.name,
                         full_path = excluded.full_path,
                         folder_type = excluded.folder_type,
                         remote_id = excluded.remote_id,
+                        special_use = CASE WHEN ? THEN excluded.special_use ELSE folders.special_use END,
                         updated_at = excluded.updated_at",
                 )
                 .bind(&folder_id)
@@ -1453,8 +1504,10 @@ pub(crate) async fn sync_mailboxes(
                 .bind(&folder.id)
                 .bind(folder_type)
                 .bind(&folder.id)
+                .bind(folders_listed && kind_folder_type(folder.kind.as_deref()) == Some(folder_type))
                 .bind(&now)
                 .bind(&now)
+                .bind(folders_listed)
                 .execute(pool)
                 .await
                 .map_err(|err| err.to_string())?;
@@ -1529,7 +1582,7 @@ pub(crate) async fn sync_mailboxes(
                 };
                 externally_changed_threads.extend(reset_thread_ids.iter().cloned());
 
-                if state.request_snapshot(&folder.id, snapshot_due, batch.snapshot_required) {
+                if state.snapshot_after_batch(&folder.id, batch.reset_folder, snapshot_due, batch.snapshot_required) {
                     snapshot_folders.push((folder_id.clone(), folder.id.clone(), folder.name.clone()));
                 } else if account.provider.eq_ignore_ascii_case("gmail")
                     && state.owes_resolutions(&folder.id)

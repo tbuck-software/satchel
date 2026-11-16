@@ -229,16 +229,12 @@ pub async fn execute_send_action(
     // fail the send — the mail IS out, and retrying this action would resend
     // it — so the copy gets a queue row of its own that only ever appends.
     if let Some(raw) = sent_copy.and_then(|source| source.resolve(wire_copy)) {
-        let folder_hint = sqlx::query_scalar::<_, Option<String>>(
-            "SELECT COALESCE(remote_id, full_path) FROM folders
-             WHERE account_id = ? AND folder_type = 'sent' LIMIT 1",
-        )
-        .bind(&account.id)
-        .fetch_optional(pool)
-        .await
-        .ok()
-        .flatten()
-        .flatten();
+        // Same choice as the local copy, so the server copy can replace it.
+        let folder_hint = satchel_core::db::sent_copies::preferred_sent_folder(pool, &account.id)
+            .await
+            .ok()
+            .flatten()
+            .map(|folder| folder.remote_path);
         if let Err(err) = provider.append_sent(&raw, folder_hint.as_deref()).await {
             tracing::warn!(target: "outbox", "append to Sent failed, queued for retry: {err}");
             if let Err(queue_err) = satchel_core::sync::remote_mutations::enqueue_append_sent(

@@ -214,6 +214,7 @@ impl From<TopicTimelineItemRecord> for TopicTimelineItemDto {
 #[cfg_attr(feature = "ipc-types", ts(export, export_to = "app/commands/topics/", optional_fields = nullable))]
 pub struct TopicFileInput {
     pub topic_id: String,
+    #[serde(deserialize_with = "satchel_core::utils::filename::deserialize_filename")]
     pub filename: String,
     #[serde(default)]
     pub mime_type: Option<String>,
@@ -226,6 +227,7 @@ pub struct TopicFileInput {
 pub struct TopicFileDto {
     pub id: String,
     pub topic_id: String,
+    #[serde(serialize_with = "satchel_core::utils::filename::serialize_filename")]
     pub filename: String,
     pub mime_type: String,
     pub size: i64,
@@ -249,6 +251,7 @@ impl From<TopicFileRecord> for TopicFileDto {
 #[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ipc-types", ts(export, export_to = "app/commands/topics/"))]
 pub struct TopicFileDownload {
+    #[serde(serialize_with = "satchel_core::utils::filename::serialize_filename")]
     pub filename: String,
     pub mime_type: String,
     pub data_base64: String,

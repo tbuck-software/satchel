@@ -86,7 +86,8 @@ const asOf = computed(() => {
 </template>
 
 <style scoped>
-.quota-settings { display: grid; gap: var(--space-sm); flex-basis: 100%; padding-top: var(--space-md); border-top: 1px solid var(--border-color-muted); }
+/* The account page frames each block; this one brings no border of its own. */
+.quota-settings { display: grid; gap: var(--space-sm); }
 .quota-settings__heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-sm); }
 .quota-settings__title { color: var(--text-primary); font-size: var(--font-size-sm); font-weight: var(--weight-semibold); }
 .quota-settings__row { display: grid; gap: var(--space-xs); }

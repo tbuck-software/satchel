@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { keyIndex, mentionsInSource, messageKeys, repoRoot } from '../../scripts/i18n-graph.mjs';
+import { keyIndex, mentionsInSource, messageKeys, repoRelative, repoRoot } from '../../scripts/i18n-graph.mjs';
 import { SUBSETS } from '../../scripts/i18n-merge.mjs';
 import {
   FIRST_PAINT,
@@ -27,7 +27,8 @@ const allKeys = keyPaths(en);
 const index = keyIndex(allKeys);
 const split = computeSplit(allKeys);
 const startup = new Set(split.startupKeys);
-const rel = (file: string) => path.relative(repoRoot, file);
+// `FIRST_PAINT` and friends are written with `/`; so is this, on Windows too.
+const rel = (file: string) => repoRelative(file);
 
 /*
  * The main window loads `startup.<locale>.json` before its first frame and

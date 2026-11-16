@@ -154,7 +154,12 @@ export interface Thread {
 
 export interface Account {
   id: string;
+  /** What Satchel calls the account: its label, else the sender name. */
   displayName: string;
+  /** The name the user gave the account; `null` when it shows the sender name. */
+  label?: string | null;
+  /** The name on outgoing mail. Absent means `displayName`. */
+  senderName?: string;
   email: string;
   provider: string;
   kind: 'email' | 'webhook' | 'script' | 'rss';
