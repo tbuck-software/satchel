@@ -1513,8 +1513,22 @@ mod webhook_tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener");
         let url = format!("http://{}/hook", listener.local_addr().expect("addr"));
         tokio::spawn(async move {
-            use tokio::io::AsyncWriteExt;
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
             while let Ok((mut stream, _)) = listener.accept().await {
+                // Consume this fixture's complete POST before replying. Closing
+                // with unread data can reset the connection and make Hyper
+                // report UnexpectedMessage instead of the redirect response.
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n{\"a\":1}") {
+                    assert_ne!(
+                        stream
+                            .read_buf(&mut request)
+                            .await
+                            .expect("read webhook POST"),
+                        0,
+                        "client closed before sending the complete webhook POST"
+                    );
+                }
                 let _ = stream
                     .write_all(
                         b"HTTP/1.1 302 Found\r\nLocation: http://198.51.100.7/steal\r\nContent-Length: 0\r\n\r\n",
