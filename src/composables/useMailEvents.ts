@@ -25,6 +25,8 @@ export interface MailEventHandlers {
   onIncoming?: () => void;
   onThreadsUpdated?: (threadIds: string[]) => void;
   onResync?: () => void;
+  /** A mail merge job moved on: a copy settled, or the job changed state. */
+  onMailMergeUpdated?: () => void;
 }
 
 export function useMailEvents(handlers: MailEventHandlers): () => void {
@@ -56,6 +58,9 @@ export function useMailEvents(handlers: MailEventHandlers): () => void {
         }
         if (handlers.onResync) {
           registered.push(await listen('mail:resync', () => handlers.onResync?.()));
+        }
+        if (handlers.onMailMergeUpdated) {
+          registered.push(await listen('mail-merge:updated', () => handlers.onMailMergeUpdated?.()));
         }
 
         // The component may have unmounted while `listen()` was in flight —

@@ -143,6 +143,13 @@ and RUSTSEC-2026-0383 in certificate validation and the bundled trust stores.
 The 0.26 webpki-roots compatibility wrapper delegates to the patched 1.0.10
 trust store. No additional audit exception is needed.
 
+Satchel also vendors `sqlx-sqlite` 0.8.6 with only its `libsqlite3-sys`
+requirement changed to 0.39.1, which bundles SQLite 3.54.1. This fixes
+RUSTSEC-2026-0459 (uninitialized page-cache memory when a database is opened
+beside a `-wal` of another page size) in both lockfiles. No sqlx release
+accepts `libsqlite3-sys` 0.39 yet, sqlx 0.9.0 included. See
+`vendor/sqlx-sqlite/SATCHEL_PATCH.md` for the diff and removal condition.
+
 The lettre fork remains based on 0.11.19 for Android verifier compatibility.
 Upstream's 0.11.22 SMTP response limits are backported. Reviewed release drift
 through 0.11.23 is accepted until 2026-11-12 UTC in

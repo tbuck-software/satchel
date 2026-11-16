@@ -221,15 +221,13 @@ async fn ensure_drafts_folder(
     account_id: &str,
     now: &str,
 ) -> Result<String, String> {
-    let existing = sqlx::query_scalar::<_, String>(
-        "SELECT id FROM folders WHERE account_id = ? AND folder_type = 'drafts' LIMIT 1",
-    )
-    .bind(account_id)
-    .fetch_optional(&mut *connection)
-    .await
-    .map_err(|err| err.to_string())?;
-    if let Some(id) = existing {
-        return Ok(id);
+    // The same folder the APPEND targets (`push_draft_to_remote`).
+    let existing =
+        crate::db::folders::preferred_folder_of_type(&mut *connection, account_id, "drafts")
+            .await
+            .map_err(|err| err.to_string())?;
+    if let Some(folder) = existing {
+        return Ok(folder.id);
     }
     let id = crate::db::folders::resolve_provider_folder_id(&mut *connection, account_id, "Drafts")
         .await
@@ -359,6 +357,7 @@ async fn save_draft_in_transaction(
     cancel_obsolete_draft_deletions(tx, &id, &input.account_id)
         .await
         .map_err(DraftError::unexpected)?;
+    let from_address = draft_sender(tx, input).await?;
 
     sqlx::query(
         "INSERT INTO messages (id, account_id, folder_id, thread_id, message_id_header, in_reply_to, references_header, from_address, from_name, to_addresses, cc_addresses, bcc_addresses, reply_to, subject, date, body_text, body_html, snippet, is_read, is_starred, is_draft, is_sent, has_attachments, remote_uid, remote_id, raw_size, raw_headers, scheduled_for, remote_draft_id, draft_attachments_json, signature_id, signature_variant, signature_override_text, signature_override_html, created_at, updated_at, draft_revision)
@@ -395,7 +394,7 @@ async fn save_draft_in_transaction(
     .bind(&folder_id)
     .bind(thread_id.as_deref())
     .bind(format!("<{id}@satchel.draft>"))
-    .bind(input.from_address.as_deref())
+    .bind(&from_address)
     .bind(input.from_name.as_deref())
     .bind(&to_json)
     .bind(&cc_json)
@@ -475,6 +474,30 @@ async fn save_draft_in_transaction(
     }
 
     Ok((row.into(), now))
+}
+
+/// The address a draft row is stored under: the identity the composer named,
+/// or the account's own address when it named none. The composer leaves
+/// `from_address` empty for the primary identity, and `messages.from_address`
+/// is `NOT NULL`, so this lookup is what keeps such a save from failing.
+async fn draft_sender(tx: &mut Transaction<'_, Sqlite>, input: &DraftInput) -> DraftResult<String> {
+    if let Some(chosen) = input
+        .from_address
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return Ok(chosen.to_string());
+    }
+    let primary: Option<String> = sqlx::query_scalar("SELECT email FROM accounts WHERE id = ?")
+        .bind(&input.account_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(DraftError::unexpected)?;
+    primary
+        .map(|email| email.trim().to_string())
+        .filter(|email| !email.is_empty())
+        .ok_or(DraftError::SenderAddressMissing)
 }
 
 fn draft_input_for_send(
@@ -1078,7 +1101,7 @@ async fn hydrate_imported_draft_attachments(
             })
             .unwrap_or(row.content_type);
         attachments.push(OutgoingAttachmentInput {
-            filename: crate::utils::filename::strip_filename_controls(
+            filename: crate::utils::filename::safe_attachment_name(
                 &fetched_filename
                     .or(row.filename)
                     .unwrap_or_else(|| "attachment".to_string()),
@@ -1241,24 +1264,21 @@ async fn push_draft_to_remote(
     remote_draft_id: Option<&str>,
     remote_message_id: Option<&str>,
 ) -> Result<Option<String>, String> {
-    let row: Option<(String, String, String, String, String, String)> = sqlx::query_as(
-        "SELECT id, display_name, provider, email, config,
-                COALESCE((
-                  SELECT COALESCE(NULLIF(TRIM(remote_id), ''), full_path)
-                  FROM folders
-                  WHERE account_id = accounts.id AND folder_type = 'drafts'
-                  ORDER BY updated_at DESC LIMIT 1
-                ), 'Drafts')
-         FROM accounts WHERE id = ? LIMIT 1",
+    let row: Option<(String, String, String, String, String)> = sqlx::query_as(
+        "SELECT id, display_name, provider, email, config FROM accounts WHERE id = ? LIMIT 1",
     )
     .bind(&input.account_id)
     .fetch_optional(pool)
     .await
     .map_err(|err| err.to_string())?;
-    let Some((account_id, display_name, provider_kind, email, stored_config, drafts_folder)) = row
-    else {
+    let Some((account_id, display_name, provider_kind, email, stored_config)) = row else {
         return Ok(None);
     };
+    // The folder the local draft lives in (`ensure_drafts_folder`).
+    let drafts_folder = crate::db::folders::preferred_folder_of_type(pool, &account_id, "drafts")
+        .await
+        .map_err(|err| err.to_string())?
+        .map_or_else(|| "Drafts".to_string(), |folder| folder.remote_path);
     let config = crate::utils::oauth::refresh_account_config(
         pool,
         &account_id,
@@ -1338,6 +1358,10 @@ async fn push_draft_to_remote(
         pgp_sign_with_key_id: None,
         pgp_encrypt_to_recipients: false,
         priority: None,
+        auto_submitted: None,
+        // A server draft is mail in progress; chat headers go on at send.
+        extra_headers: Vec::new(),
+        recipient_public_keys: Vec::new(),
     };
     provider
         .upsert_draft(
@@ -1417,6 +1441,38 @@ mod tests {
                     ('B', 'B', 'b@example.test', 'imap', '{}', '', '2026-01-01', '2026-01-01');",
         ).execute(&pool).await.expect("accounts");
         pool
+    }
+
+    #[tokio::test]
+    async fn a_draft_without_a_chosen_identity_is_stored_under_the_account_address() {
+        let pool = draft_test_pool().await;
+        let queue = crate::sync::queue::SyncQueue::new();
+        for from in [None, Some(String::new()), Some("  ".to_string())] {
+            let mut input = draft_input("A", "body");
+            input.from_address = from;
+            let (draft, _) = save(&pool, &queue, &input).await.unwrap();
+            assert_eq!(draft.from_address.as_deref(), Some("a@example.test"));
+        }
+    }
+
+    #[tokio::test]
+    async fn a_draft_whose_account_has_no_address_names_the_missing_sender() {
+        let pool = draft_test_pool().await;
+        let queue = crate::sync::queue::SyncQueue::new();
+        sqlx::query("UPDATE accounts SET email = '' WHERE id = 'A'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let mut input = draft_input("A", "body");
+        input.from_address = None;
+        let error = save(&pool, &queue, &input).await.unwrap_err();
+        assert!(matches!(error, super::DraftError::SenderAddressMissing));
+        assert_eq!(error.message_key(), "backend.errors.senderAddressMissing");
+        let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM messages")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(rows, 0);
     }
 
     #[tokio::test]
@@ -2548,6 +2604,31 @@ mod queued_send_tests {
             Some(chrono::Utc::now() + chrono::Duration::days(1)),
         )
         .unwrap()
+    }
+
+    /// The composer leaves `from_address` empty for the account's own address
+    /// (it only names an alias). A queued send still keeps its draft snapshot,
+    /// and that row needs a sender.
+    #[tokio::test]
+    async fn queued_send_from_the_primary_identity_keeps_a_sender_on_its_draft() {
+        for id in [None, Some("reply-draft")] {
+            let (pool, queue) = fixture().await;
+            let mut action = action(id);
+            action.payload["input"]["from_address"] = serde_json::Value::Null;
+            if id.is_none() {
+                action.payload["input"]["draft_id"] = serde_json::json!("draft-new");
+            }
+            enqueue_send_with_draft(&pool, &queue, &action)
+                .await
+                .unwrap();
+            let draft_id = id.unwrap_or("draft-new");
+            let from: String = sqlx::query_scalar("SELECT from_address FROM messages WHERE id = ?")
+                .bind(draft_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            assert_eq!(from, "a@example.test");
+        }
     }
 
     #[tokio::test]

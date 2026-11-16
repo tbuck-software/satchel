@@ -1,4 +1,4 @@
-.PHONY: nightly stable help check dev dev-android dev-ios daily install install-android install-all all _install-android-after-mac release import-daily-data render-fidelity
+.PHONY: nightly stable help check icons dev dev-android dev-ios daily install install-android install-all all _install-android-after-mac release import-daily-data render-fidelity
 
 help:
 	@printf '%s\n' \
@@ -15,10 +15,14 @@ help:
 		'  make dev          Run the desktop app with hot reload' \
 		'  make dev-android  Run the Android app with hot reload' \
 		'  make dev-ios      Run the iOS app with hot reload' \
-		'  make check    Run frontend and Rust tests'
+		'  make check    Run frontend and Rust tests' \
+		'  make icons    Render every app, tray, notification and web icon from public/branding'
 
 check:
 	pnpm run check
+
+icons:
+	pnpm run icons
 
 dev:
 	pnpm run tauri:dev

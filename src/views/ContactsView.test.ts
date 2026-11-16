@@ -8,6 +8,7 @@ const harness = vi.hoisted(() => ({
   route: { query: {} as Record<string, unknown> },
   push: vi.fn(),
   openSettings: vi.fn(),
+  openMailMerge: vi.fn(),
   addressBook: {
     contacts: [] as Array<{
       email: string;
@@ -50,6 +51,10 @@ vi.mock('@/stores/threads', () => ({
 
 vi.mock('@/stores/settings', () => ({
   useSettingsStore: () => harness.settings,
+}));
+
+vi.mock('@/stores/composer', () => ({
+  useComposerStore: () => ({ openMailMerge: harness.openMailMerge }),
 }));
 
 import ContactsView from './ContactsView.vue';
@@ -98,6 +103,19 @@ describe('ContactsView', () => {
     harness.threads.allContactSummaries = [];
     harness.threads.openContact.mockReset();
     harness.settings.pinnedContacts = [];
+    harness.openMailMerge.mockReset();
+  });
+
+  it('starts a mail merge to the contacts on screen', async () => {
+    harness.addressBook.contacts = [
+      { email: 'anna@example.com', display_name: 'Anna Meier' },
+      { email: 'ben@example.com', display_name: 'Ben' },
+    ];
+    const wrapper = render();
+    await wrapper.get('[data-testid="contacts-mail-merge"]').trigger('click');
+    expect(harness.openMailMerge).toHaveBeenCalledTimes(1);
+    const seed = harness.openMailMerge.mock.calls[0]![0] as { contacts: Array<{ email: string }> };
+    expect(seed.contacts.map((contact) => contact.email)).toEqual(['anna@example.com', 'ben@example.com']);
   });
 
   it('offers address-book setup from the header and empty state, and opens contact creation', async () => {
@@ -146,10 +164,56 @@ describe('ContactsView', () => {
       expect.stringContaining('Bob'),
       expect.stringContaining('carol@example.com'),
     ]);
-    expect(rows[0]?.text()).toContain('Project colleague');
+    expect(rows[0]?.attributes('title')).toContain('Project colleague');
     expect(rows[0]?.text()).not.toContain('Latest conversation');
     expect(rows[0]?.text()).toContain('2 conversations');
     expect(wrapper.find('[data-test="pane-header"]').attributes('data-count')).toBe('3');
+  });
+
+  it('keeps filenames and data URLs out of the directory', () => {
+    harness.addressBook.contacts = [
+      { email: 'signature@2x.png' },
+      { email: 'data:image/png;base64,abc@def.png' },
+      { email: 'not-an-address' },
+      { email: 'noreply@3example.test', display_name: '3RPMS' },
+      { email: '0123456789abcdef0123456789abcdef@group.calendar.google.com' },
+    ];
+    const wrapper = render();
+    expect(wrapper.findAll('.contact-row')).toHaveLength(2);
+    expect(wrapper.text()).not.toContain('signature@2x.png');
+    expect(wrapper.text()).toContain('group.calendar.google.com');
+    expect(wrapper.text()).toContain('3RPMS');
+  });
+
+  it('unescapes mail names and uses a person name over an empty service suffix', () => {
+    harness.addressBook.contacts = [
+      { email: 'alex@example.com', display_name: '(über Google Docs)' },
+      { email: 'list@example.com', display_name: String.raw`\\"Morgan, Alex\\"" (via Mailing List)` },
+    ];
+    harness.threads.allContactSummaries = [
+      { email: 'alex@example.com', name: 'Alex Morgan', threadCount: 2, previewText: '' },
+    ];
+    const wrapper = render();
+    expect(wrapper.findAll('.contact-row strong').map((row) => row.text())).toEqual([
+      'Alex Morgan', 'Morgan, Alex (via Mailing List)',
+    ]);
+    expect(wrapper.findAll('.section-heading__label').map((row) => row.text())).toEqual(['A', 'M']);
+  });
+
+  it('always reserves the same name and address lines and keeps context out of row height', () => {
+    harness.addressBook.contacts = [
+      { email: 'alice@example.com', display_name: 'Alice', notes: 'Design team' },
+      { email: 'plain@example.com' },
+    ];
+    harness.threads.allContactSummaries = [{ email: 'plain@example.com', name: 'plain@example.com', threadCount: 1, previewText: '' }];
+    const wrapper = render();
+    const rows = wrapper.findAll('.contact-row');
+    for (const row of rows) {
+      expect(row.findAll('.copy > *')).toHaveLength(2);
+      expect(row.get('.contact-email').text()).toContain('@example.com');
+    }
+    expect(rows[0]!.attributes('title')).toContain('Design team');
+    expect(rows[1]!.get('strong').text()).toBe('plain');
   });
 
   it('uses the route section to select only frequent contacts', () => {

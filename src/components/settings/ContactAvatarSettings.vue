@@ -220,7 +220,7 @@ async function clearAvatar(contact: BackendContact, locked: boolean) {
     <div v-if="showContacts" class="toolbar">
       <input
         v-model="query"
-        type="search"
+        type="search" autocorrect="off"
         :placeholder="$t('settings.contacts.searchPlaceholder')"
       />
       <AppButton

@@ -21,6 +21,9 @@ pub enum DraftError {
     QueuedDraftNotRestorable,
     #[error("backend.errors.recipientAddressInvalid")]
     InvalidRecipient { value: String },
+    /// Neither the draft nor its account names a sender address.
+    #[error("backend.errors.senderAddressMissing")]
+    SenderAddressMissing,
     #[error(transparent)]
     Signature(#[from] SignatureError),
     #[error(transparent)]
@@ -46,6 +49,7 @@ impl DraftError {
             Self::OutboxActionCannotBeDiscarded => "backend.errors.outboxActionCannotBeDiscarded",
             Self::QueuedDraftNotRestorable => "backend.errors.queuedDraftNotRestorable",
             Self::InvalidRecipient { .. } => "backend.errors.recipientAddressInvalid",
+            Self::SenderAddressMissing => "backend.errors.senderAddressMissing",
             Self::Signature(error) => match error {
                 SignatureError::NameEmpty => "backend.errors.signatureNameRequired",
                 SignatureError::NotFoundForAccount => "backend.errors.signatureNotFound",

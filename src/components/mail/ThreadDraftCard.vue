@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, useId } from 'vue';
 import type { Message } from '@/types/mail';
+import AccountAvatar from '@/components/common/AccountAvatar.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import CardButton from '@/components/ui/CardButton.vue';
@@ -25,12 +26,14 @@ const props = withDefaults(defineProps<{
   /** The identity it would go out as, when that is worth saying. */
   identity?: string;
   identityColor?: string | null;
+  identityAvatar?: string | null;
   /** A discard is already running. */
   busy?: boolean;
   keyboardFocused?: boolean;
 }>(), {
   identity: '',
   identityColor: null,
+  identityAvatar: null,
   busy: false,
   keyboardFocused: false,
 });
@@ -86,12 +89,7 @@ useToastClearance(cardRef);
         <span class="draft-card__meta">
           <span class="draft-card__recipient">{{ $t('thread.draft.to', { name: props.recipient }) }}</span>
           <span v-if="props.identity" class="draft-card__identity">
-            <span
-              v-if="props.identityColor"
-              class="draft-card__dot"
-              :style="{ background: props.identityColor }"
-              aria-hidden="true"
-            />
+            <AccountAvatar :name="props.identity" :color="props.identityColor" :avatar="props.identityAvatar" :size="16" />
             {{ $t('thread.reply.as', { identity: props.identity }) }}
           </span>
         </span>
@@ -205,12 +203,6 @@ useToastClearance(cardRef);
   align-items: center;
   gap: var(--space-1-5);
   flex-shrink: 0;
-}
-
-.draft-card__dot {
-  width: 7px;
-  height: 7px;
-  border-radius: var(--radius-full);
 }
 
 .draft-card__saved {

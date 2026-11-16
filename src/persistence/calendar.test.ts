@@ -69,4 +69,28 @@ describe('calendar persistence', () => {
       '["work","personal"]',
     );
   });
+
+  it('keeps working hours only when they make sense, else nine to five on weekdays', () => {
+    const storage = memoryStorage();
+    restoreProvider = setPersistenceStorageProvider(() => storage);
+
+    expect(calendarPersistence.workingHours.read()).toEqual({ startMinute: 540, endMinute: 1020, weekdays: [1, 2, 3, 4, 5] });
+
+    calendarPersistence.workingHours.write({ startMinute: 480, endMinute: 960, weekdays: [2, 4] });
+    expect(calendarPersistence.workingHours.read()).toEqual({ startMinute: 480, endMinute: 960, weekdays: [2, 4] });
+
+    storage.values.set('satchel:calendar-working-hours', JSON.stringify({ startMinute: 900, endMinute: 600, weekdays: [1] }));
+    expect(calendarPersistence.workingHours.read().startMinute).toBe(540);
+    storage.values.set('satchel:calendar-working-hours', JSON.stringify({ startMinute: 480, endMinute: 960, weekdays: [9, 0] }));
+    expect(calendarPersistence.workingHours.read().weekdays).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it('remembers the calendars that do not count for availability', () => {
+    const storage = memoryStorage();
+    restoreProvider = setPersistenceStorageProvider(() => storage);
+
+    calendarPersistence.availabilityExcludedKeys.write(['google:family@group.calendar.google.com']);
+    expect(storage.values.get('satchel:calendar-availability-excluded')).toBe('["google:family@group.calendar.google.com"]');
+    expect(calendarPersistence.availabilityExcludedKeys.read()).toEqual(['google:family@group.calendar.google.com']);
+  });
 });

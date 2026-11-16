@@ -50,6 +50,8 @@ const step = ref(1);
 const email = ref('');
 const password = ref('');
 const displayName = ref('');
+/** Satchel's own name for the account; `displayName` is the sender name. */
+const accountLabel = ref('');
 const username = ref('');
 const providerOverride = ref<Provider | null>(null);
 const chosenTheme = ref<'dark' | 'light'>(settings.theme);
@@ -252,6 +254,7 @@ function resetWizard(startStep: number) {
   email.value = '';
   password.value = '';
   displayName.value = '';
+  accountLabel.value = '';
   username.value = '';
   providerOverride.value = null;
   mxDetection.value = null;
@@ -343,6 +346,7 @@ async function addConnectedAccount(result: BackendAccountDiscovery) {
   const name = displayName.value.trim() || normalizedEmail.value.split('@')[0] || t('common.email');
   const account = await backendAddAccount({
     displayName: name,
+    label: accountLabel.value,
     email: normalizedEmail.value,
     provider: provider.value,
     config: result.config,
@@ -386,7 +390,9 @@ async function connectOAuth() {
   ];
   step.value = 2;
   const account = await backendAddAccount({
+    // The sign-in replaces this with the name on the Google or Microsoft profile.
     displayName: displayName.value.trim() || normalizedEmail.value.split('@')[0] || t('common.email'),
+    label: accountLabel.value,
     email: normalizedEmail.value,
     provider: selectedProvider,
   });
@@ -599,6 +605,7 @@ async function startConnection() {
     if (!hasTauri) {
       accounts.addAccount({
         displayName: displayName.value.trim(),
+        label: accountLabel.value,
         email: normalizedEmail.value,
         provider: provider.value,
       });
@@ -727,9 +734,15 @@ function finish() {
                   <AppButton v-if="provider !== 'imap'" @click="chooseProvider('imap')" variant="ghost" size="sm">IMAP</AppButton>
                   <AppButton v-if="provider !== 'pop3'" @click="chooseProvider('pop3')" variant="ghost" size="sm">POP3</AppButton>
                 </div>
+                <label v-if="validEmail && usesPassword" class="floating-field optional-field">
+                  <span>{{ $t('onboarding.account.senderLabel') }} <em>{{ $t('common.optional') }}</em></span>
+                  <input v-model="displayName" autocomplete="name" :placeholder="$t('onboarding.account.senderPlaceholder')" data-testid="onboarding-sender-name">
+                  <small>{{ $t('onboarding.account.senderHint') }}</small>
+                </label>
                 <label class="floating-field optional-field">
                   <span>{{ $t('onboarding.account.nameLabel') }} <em>{{ $t('common.optional') }}</em></span>
-                  <input v-model="displayName" autocomplete="name" :placeholder="$t('onboarding.account.namePlaceholder')">
+                  <input v-model="accountLabel" autocomplete="off" maxlength="120" :placeholder="$t('onboarding.account.namePlaceholder')" data-testid="onboarding-account-label">
+                  <small>{{ $t('onboarding.account.nameHint') }}</small>
                 </label>
 
                 <p v-if="errorMessage" class="inline-error" role="alert">{{ errorMessage }}</p>

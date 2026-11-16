@@ -10,14 +10,24 @@ use async_trait::async_trait;
 use satchel_core::drafts::execute_queued_draft_sync;
 use satchel_core::sync::{
     errors::SyncResult,
-    queue::{QueuedAction, ACTION_SYNC_DRAFT},
+    queue::{QueuedAction, SyncQueue, ACTION_SYNC_DRAFT},
     worker::{ActionExecutor, Outcome, QueueWorker},
 };
 use sqlx::SqlitePool;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 
+/// The queue the worker waits on, for code that enqueues without an
+/// `AppState` at hand (the rule run inside a sync). Before the worker starts,
+/// and in tests, a fresh queue: its rows are found by the worker's next poll.
+pub fn app_queue() -> SyncQueue {
+    APP_QUEUE.get().cloned().unwrap_or_default()
+}
+
+static APP_QUEUE: std::sync::OnceLock<SyncQueue> = std::sync::OnceLock::new();
+
 pub fn spawn_queue_worker(state: AppState, pool: SqlitePool, app: AppHandle) {
+    let _ = APP_QUEUE.set(state.queue.as_ref().clone());
     tauri::async_runtime::spawn(async move {
         satchel_core::sync::worker::retry_with_backoff(
             "queue recovery",
@@ -72,6 +82,7 @@ pub fn spawn_queue_worker(state: AppState, pool: SqlitePool, app: AppHandle) {
                         "failed_outbox": snapshot.failed_outbox,
                         "failed_sends": snapshot.failed_sends,
                         "failed_remote_mutations": snapshot.failed_remote_mutations,
+                        "sync_progress": snapshot.sync_progress,
                         "unread_count": unread,
                     }),
                 );
@@ -126,6 +137,14 @@ impl ActionExecutor for TauriExecutor {
             }
             ACTION_SYNC_DRAFT => {
                 execute_queued_draft_sync(&self.pool, &self.state.queue, action).await
+            }
+            satchel_core::sync::queue::ACTION_RULE_FORWARD => {
+                crate::sync::rule_forward::execute_rule_forward(
+                    &self.pool,
+                    &self.state.queue,
+                    action,
+                )
+                .await
             }
             other => Err(format!("unknown action_type `{other}`").into()),
         }

@@ -170,6 +170,9 @@ pub mod reason {
     pub const FILTER_ALREADY_READ: &str = "filter_already_read";
     pub const FILTER_MUTED_THREAD: &str = "filter_muted_thread";
     pub const FILTER_MUTED_SENDER: &str = "filter_muted_sender";
+    /// The local spam filter moved the message to Spam. A message it only
+    /// marked still notifies: a false positive must stay visible.
+    pub const FILTER_SPAM_MOVED: &str = "filter_spam_moved";
     /// Trigger-only (migration 0060); listed here so the pane's label set is
     /// complete.
     pub const FILTER_NO_DATE: &str = "filter_no_date";
@@ -358,9 +361,38 @@ pub async fn record_android_worker_outcomes(
 pub const MAIL_ACTION_TYPE: &str = "satchel.mail";
 /// Group key so a morning's mail stacks instead of filling the shade.
 pub const MAIL_GROUP: &str = "satchel.mail.incoming";
+/// Freedesktop notification servers read the body as markup (the summary is
+/// plain text), and the plugin passes it through unescaped.
+fn notification_body(text: &str) -> String {
+    if cfg!(any(
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    )) {
+        escape_body_markup(text)
+    } else {
+        text.to_string()
+    }
+}
+
+fn escape_body_markup(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            other => escaped.push(other),
+        }
+    }
+    escaped
+}
+
 pub fn show_notification(app: &AppHandle, title: &str, body: &str) {
     let title = decode_html_entities(title);
-    let body = decode_html_entities(body);
+    let body = notification_body(&decode_html_entities(body));
     if let Err(err) = app
         .notification()
         .builder()
@@ -460,6 +492,7 @@ pub async fn show_mail_notification(
             }
         };
 
+        let body = notification_body(&body);
         // The category the frontend registered its actions under, the thread id the
         // action needs to act on, and a group so the system stacks a morning's mail
         // instead of listing it. Ignored by backends that do not support them.
@@ -571,6 +604,14 @@ const DISMISSAL_RULES: &[DismissalRule<'static>] = &[
                                            INSTR(TRIM(m.from_address), '@') + 1)))
                        )
                       WHERE m.id = notification_outbox.message_id)",
+    },
+    DismissalRule {
+        code: reason::FILTER_SPAM_MOVED,
+        detail: "(SELECT printf('%.3f', v.score) FROM spam_verdicts v
+                  WHERE v.message_id = notification_outbox.message_id)",
+        predicate: "EXISTS (SELECT 1 FROM spam_verdicts v
+                            WHERE v.message_id = notification_outbox.message_id
+                              AND v.moved_at IS NOT NULL)",
     },
 ];
 
@@ -1182,6 +1223,20 @@ async fn set_setting(pool: &SqlitePool, key: &str, value: &str, now: &str) -> Re
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn notification_body_markup_is_escaped_after_entity_decoding() {
+        let decoded = super::decode_html_entities("&lt;a href=x&gt;Tom &amp; Jerry&lt;/a&gt;");
+        assert_eq!(
+            super::escape_body_markup(&decoded),
+            "&lt;a href=x&gt;Tom &amp; Jerry&lt;/a&gt;"
+        );
+        assert_eq!(super::escape_body_markup("Größe 5 € "), "Größe 5 € ");
+        #[cfg(target_os = "linux")]
+        assert_eq!(super::notification_body("<b>x</b>"), "&lt;b&gt;x&lt;/b&gt;");
+        #[cfg(target_os = "macos")]
+        assert_eq!(super::notification_body("<b>x</b>"), "<b>x</b>");
+    }
+
     use super::*;
     use satchel_core::db::blocked_senders::BlockedSenderRepository;
     use sqlx::sqlite::SqlitePoolOptions;
@@ -1656,10 +1711,18 @@ mod tests {
         )
         .await;
 
-        for id in ["read", "moved", "sent", "muted", "blocked", "gone", "kept"] {
+        for id in [
+            "read", "moved", "sent", "muted", "blocked", "spam", "marked", "gone", "kept",
+        ] {
             insert_message(&pool, id, &fresh()).await;
             assert_eq!(outbox(&pool, id).await.unwrap().0, "pending", "{id}");
         }
+        exec(
+            &pool,
+            "INSERT INTO spam_verdicts (message_id, score, verdict, moved_at, classified_at)
+             VALUES ('spam', 0.995, 'spam', '2026-01-01', ''), ('marked', 0.95, 'spam', NULL, '')",
+        )
+        .await;
         exec(&pool, "UPDATE messages SET is_read = 1 WHERE id = 'read'").await;
         exec(
             &pool,
@@ -1691,7 +1754,8 @@ mod tests {
                 .iter()
                 .map(|n| n.event_id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["kept"]
+            // Likely spam the filter only marked still notifies.
+            vec!["marked", "kept"]
         );
 
         assert_eq!(reason_of(&pool, "read").await, reason::FILTER_ALREADY_READ);
@@ -1702,6 +1766,7 @@ mod tests {
             reason_of(&pool, "blocked").await,
             reason::FILTER_MUTED_SENDER
         );
+        assert_eq!(reason_of(&pool, "spam").await, reason::FILTER_SPAM_MOVED);
         assert_eq!(reason_of(&pool, "gone").await, reason::FILTER_MESSAGE_GONE);
     }
 

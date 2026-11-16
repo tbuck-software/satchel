@@ -88,6 +88,16 @@ export async function backendSyncGoogleCalendar(
 }
 
 
+/** Mirror the Outlook calendars of accounts that granted calendar access. */
+export async function backendSyncOutlookCalendar(
+  accountId?: string,
+): Promise<BackendGoogleCalendarSyncSummary> {
+  return invoke<BackendGoogleCalendarSyncSummary>('sync_outlook_calendar', {
+    accountId: accountId ?? null,
+  });
+}
+
+
 export async function backendRespondToInvite(input: {
   inviteId: string;
   response: 'accepted' | 'declined' | 'tentative';

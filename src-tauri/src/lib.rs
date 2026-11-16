@@ -76,6 +76,8 @@ pub struct AppState {
     pub smime_unlock_sessions: Arc<Mutex<std::collections::HashMap<String, UnlockedSmimeSession>>>,
     pub pending_open_with: Arc<commands::open_with::PendingOpenWith>,
     pub write_grants: Arc<commands::write_grants::WriteGrants>,
+    pub read_grants: Arc<commands::read_grants::ReadGrants>,
+    pub viewer_files: Arc<commands::message_file::ViewerFiles>,
     pub shown_decrypted_parts: Arc<commands::attachments::ShownDecryptedParts>,
 }
 
@@ -100,6 +102,8 @@ impl AppState {
             smime_unlock_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
             pending_open_with: Arc::new(commands::open_with::PendingOpenWith::default()),
             write_grants: Arc::new(commands::write_grants::WriteGrants::default()),
+            read_grants: Arc::new(commands::read_grants::ReadGrants::default()),
+            viewer_files: Arc::new(commands::message_file::ViewerFiles::default()),
             shown_decrypted_parts: Arc::new(Default::default()),
         }
     }
@@ -195,6 +199,8 @@ pub fn run() {
             let plugin_runtime = PluginRuntime::default();
             let state = AppState::with_plugin_runtime(plugin_runtime);
             app.manage(state.clone());
+            // One sender sweep at a time: the scheduler's pass and a new rule's first run.
+            app.manage(satchel_core::mail_actions::sweep::SweepGate::default());
             // Name the directories plugins may be loaded from before anything
             // asks the runtime for one. Bundled resources come first so a copy
             // dropped into the writable profile cannot take over their id, and
@@ -340,6 +346,14 @@ pub fn run() {
                 }
             });
 
+            // Before the outbox worker: a mail merge job the last run left
+            // running comes back paused, and every paused job's waiting copy
+            // comes back to it, so the outbox cannot send one first. A few
+            // quick attempts here; if all fail, the runner keeps trying before
+            // its first tick.
+            let mail_merge_started_at = chrono::Utc::now();
+            let mail_merge_restart =
+                sync::mail_merge_runner::pause_at_startup(&pool, mail_merge_started_at);
             sync::queue_worker::spawn_queue_worker(
                 state.clone(),
                 pool.clone(),
@@ -355,8 +369,17 @@ pub fn run() {
             sync::maintenance::spawn_checkpoint_worker(checkpoint_pool.clone());
             sync::maintenance::spawn_maintenance_worker(pool.clone(), checkpoint_pool, app_handle.clone());
             sync::maintenance::spawn_snooze_worker(pool.clone(), app_handle.clone());
+            commands::server_rules::spawn_retry_worker(pool.clone());
             sync::maintenance::spawn_followup_worker(pool.clone(), app_handle.clone());
+            sync::maintenance::spawn_task_reminder_worker(pool.clone(), app_handle.clone());
             sync::maintenance::spawn_webhook_worker(pool.clone());
+            sync::mail_merge_runner::spawn_mail_merge_runner(
+                state.clone(),
+                pool.clone(),
+                app_handle.clone(),
+                mail_merge_started_at,
+                mail_merge_restart,
+            );
 
             // Bridge AppEvent -> Tauri events for the frontend.
             let event_app = app_handle.clone();
@@ -687,6 +710,8 @@ pub fn run() {
             commands::app_update::acknowledge_app_update_flush,
             commands::accounts::list_accounts,
             commands::accounts::get_account_visibility,
+            commands::accounts::list_account_quotas,
+            commands::accounts::list_local_only_workflow_accounts,
             commands::accounts::set_account_visibility,
             commands::accounts::add_account,
             commands::accounts::deactivate_account,
@@ -696,6 +721,7 @@ pub fn run() {
             commands::accounts::clear_account_oauth_error,
             commands::accounts::set_account_color,
             commands::accounts::set_account_avatar,
+            commands::accounts::set_account_names,
             commands::mailboxes::list_mailboxes,
             commands::folders::create_folder,
             commands::folders::rename_folder,
@@ -710,6 +736,7 @@ pub fn run() {
             commands::messages::load_thread_messages,
             commands::messages::get_message_source,
             commands::messages::eml_attachments::thread_eml_attachments,
+            commands::messages::eml_attachments::message_eml_attachments,
             commands::messages::search_message_hits,
             commands::server_search::server_search,
             commands::server_search::fetch_server_search_hit,
@@ -764,6 +791,7 @@ pub fn run() {
             commands::rules::delete_rule,
             commands::rules::run_rules_for_thread,
             commands::rules::run_rules_for_threads,
+            commands::rules::resume_rule_forwarding,
             commands::sources::get_source_capabilities,
             commands::sources::list_sources,
             commands::sources::create_source,
@@ -811,10 +839,25 @@ pub fn run() {
             commands::calendar::create_calendar_event,
             commands::calendar::delete_calendar_event,
             commands::calendar::sync_google_calendar,
+            commands::calendar::sync_outlook_calendar,
+            commands::availability::query_free_busy,
+            commands::availability::find_free_slots,
             commands::calendar::import_ics,
             commands::calendar::import_ics_path,
             commands::groupware::configure_groupware,
             commands::groupware::sync_groupware,
+            commands::tasks::list_task_lists,
+            commands::tasks::list_tasks,
+            commands::tasks::create_task,
+            commands::tasks::update_task,
+            commands::tasks::set_task_completed,
+            commands::tasks::delete_task,
+            commands::tasks::restore_task,
+            commands::tasks::undo_task_advance,
+            commands::tasks::create_task_list,
+            commands::tasks::rename_task_list,
+            commands::tasks::delete_task_list,
+            commands::tasks::sync_tasks,
             commands::outbox::list_outbox,
             commands::outbox::retry_outbox_action,
             commands::outbox::retry_failed_sync_actions,
@@ -827,6 +870,7 @@ pub fn run() {
             commands::tray::set_start_minimized,
             commands::write_grants::choose_save_path,
             commands::write_grants::choose_directory,
+            commands::read_grants::choose_open_file,
             commands::tray::tray_preferences,
             commands::tray::tray_snapshot,
             commands::tray::open_tray_thread,
@@ -834,16 +878,48 @@ pub fn run() {
             commands::tray::act_on_tray_thread,
             commands::thread_actions::set_thread_muted,
             commands::thread_actions::mark_threads_spam,
+            commands::thread_actions::mark_threads_not_spam,
+            commands::thread_actions::undo_not_spam,
+            commands::thread_actions::get_spam_filter_status,
+            commands::thread_actions::set_spam_filter_mode,
             commands::star::set_threads_starred,
             commands::blocked_senders::list_blocked_senders,
             commands::blocked_senders::block_sender,
             commands::blocked_senders::unblock_sender,
+            commands::mail_merge::parse_mail_merge_csv,
+            commands::mail_merge::preview_mail_merge,
+            commands::mail_merge::create_mail_merge_job,
+            commands::mail_merge::list_mail_merge_jobs,
+            commands::mail_merge::get_mail_merge_job,
+            commands::mail_merge::control_mail_merge_job,
+            commands::sender_sweep::list_cleanup_senders,
+            commands::sender_sweep::list_sender_sweep_targets,
+            commands::sender_sweep::sender_sweep_summary,
+            commands::sender_sweep::thread_sweep_sender,
+            commands::sender_sweep::list_sweep_rules,
+            commands::sender_sweep::upsert_sweep_rule,
+            commands::sender_sweep::delete_sweep_rule,
+            commands::translation::get_translation_settings,
+            commands::translation::save_translation_settings,
+            commands::translation::set_translation_api_key,
+            commands::translation::check_translation_engine,
+            commands::translation::list_translation_languages,
+            commands::translation::set_translation_consent,
+            commands::translation::message_translation_offer,
+            commands::translation::translate_message,
+            commands::translation::list_outbound_requests,
+            commands::translation::clear_outbound_requests,
+            commands::translation::outbound_request_text,
             commands::tls_exceptions::list_certificate_exceptions,
             commands::tls_exceptions::trust_expired_certificate,
             commands::tls_exceptions::revoke_certificate_exception,
             commands::smart_folders::list_smart_folders,
             commands::smart_folders::upsert_smart_folder,
             commands::smart_folders::delete_smart_folder,
+            commands::labs::list_labs_flags,
+            commands::labs::set_labs_flag,
+            commands::chats::get_chat_meta,
+            commands::chats::send_chat_message,
             commands::topics::list_topics,
             commands::topics::upsert_topic,
             commands::topics::delete_topic,
@@ -875,6 +951,11 @@ pub fn run() {
             commands::provider_features::create_provider_label,
             commands::vacation::get_vacation,
             commands::vacation::set_vacation,
+            commands::server_rules::get_server_rules_overview,
+            commands::server_rules::detect_server_rules,
+            commands::server_rules::set_server_rules_endpoint,
+            commands::server_rules::enable_server_rules,
+            commands::server_rules::disable_server_rules,
             commands::webhooks::list_webhooks,
             commands::webhooks::upsert_webhook,
             commands::webhooks::delete_webhook,
@@ -1118,6 +1199,7 @@ fn open_path_with_satchel(app: &tauri::AppHandle, path: &std::path::Path) {
             // Buffered as well as emitted: on a cold start this runs before any
             // webview exists, and the event would go nowhere.
             if let Some(state) = app.try_state::<AppState>() {
+                state.read_grants.grant_file(path);
                 state
                     .pending_open_with
                     .push(path.to_string_lossy().into_owned());

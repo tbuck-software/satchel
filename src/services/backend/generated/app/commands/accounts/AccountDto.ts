@@ -1,7 +1,14 @@
 // Generated from Rust. Run pnpm ipc:generate.
 export type AccountDto = {
     id: string;
+    /**
+     * The name on outgoing mail.
+     */
     display_name: string;
+    /**
+     * The account's name in Satchel's lists; `null` shows `display_name`.
+     */
+    label: string | null;
     email: string;
     provider: string;
     kind: string;

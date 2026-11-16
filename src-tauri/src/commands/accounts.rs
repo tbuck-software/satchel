@@ -18,7 +18,10 @@ use super::error::{CommandError, CommandResult};
 )]
 pub struct AccountDto {
     pub id: String,
+    /// The name on outgoing mail.
     pub display_name: String,
+    /// The account's name in Satchel's lists; `null` shows `display_name`.
+    pub label: Option<String>,
     pub email: String,
     pub provider: String,
     pub kind: String,
@@ -39,6 +42,7 @@ impl From<AccountSummary> for AccountDto {
         Self {
             id: account.id,
             display_name: account.display_name,
+            label: account.label,
             email: account.email,
             provider: account.provider,
             kind: account.kind,
@@ -59,7 +63,11 @@ impl From<AccountSummary> for AccountDto {
 #[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ipc-types", ts(export, export_to = "app/commands/accounts/", optional_fields = nullable))]
 pub struct NewAccount {
+    /// The sender name on outgoing mail.
     pub display_name: String,
+    /// Satchel's own name for the account, never sent.
+    #[serde(default)]
+    pub label: Option<String>,
     pub email: String,
     pub provider: String,
     pub config: Option<serde_json::Value>,
@@ -112,6 +120,20 @@ pub async fn set_account_color(
         .map_err(Into::into)
 }
 
+/// `label` is the name in Satchel's lists, `sender_name` the one on outgoing mail.
+#[tauri::command]
+pub async fn set_account_names(
+    pool: tauri::State<'_, SqlitePool>,
+    account_id: String,
+    label: Option<String>,
+    sender_name: String,
+) -> CommandResult<()> {
+    AccountRepository::new(pool.inner())
+        .set_names(&account_id, label.as_deref(), &sender_name)
+        .await
+        .map_err(Into::into)
+}
+
 /// `None` clears the picture and the account falls back to its initials.
 #[tauri::command]
 pub async fn set_account_avatar(
@@ -134,6 +156,7 @@ pub async fn add_account(
     let account = AccountRepository::new(pool.inner())
         .create_email(CreateEmailAccount {
             display_name: input.display_name,
+            label: input.label,
             email: input.email,
             provider: input.provider,
             config: input.config,
@@ -296,6 +319,7 @@ impl From<AccountError> for CommandError {
             }
             AccountError::ColorInvalid => Self::new("backend.errors.accountColorInvalid"),
             AccountError::AvatarInvalid => Self::new("backend.errors.accountAvatarInvalid"),
+            AccountError::NameInvalid => Self::new("backend.errors.accountNameInvalid"),
             AccountError::Persistence(error) => {
                 tracing::error!(error = ?error, "account persistence failed");
                 Self::new("backend.errors.accountPersistenceFailed")
@@ -381,6 +405,81 @@ mod tests {
         assert_eq!(error.key, "backend.errors.oauthConfigurationInvalid");
         assert!(!serde_json::to_string(&error).unwrap().contains(detail));
     }
+}
+
+/// The last quota an account's server reported. Storage is in bytes; a pair
+/// is `None` when the server sets no such limit. Only accounts with at least
+/// one limit are listed.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ipc-types",
+    ts(export, export_to = "app/commands/accounts/")
+)]
+pub struct AccountQuotaDto {
+    pub account_id: String,
+    pub storage_used_bytes: Option<i64>,
+    pub storage_limit_bytes: Option<i64>,
+    pub messages_used: Option<i64>,
+    pub messages_limit: Option<i64>,
+    /// RFC 3339; when the numbers were read.
+    pub fetched_at: Option<String>,
+}
+
+/// An account that keeps Done and Snooze on this device, and why:
+/// `no_custom_keywords` (the server keeps no keywords of its own),
+/// `gmail_imap` (Gmail over IMAP) or `store_refused` (the server refused the
+/// last write; tried again later).
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ipc-types",
+    ts(export, export_to = "app/commands/accounts/")
+)]
+pub struct LocalOnlyWorkflowAccountDto {
+    pub account_id: String,
+    pub reason: String,
+}
+
+/// Accounts whose mail server does not hold Done and Snooze right now, so
+/// they stay on this device. Shown as a note in the account's settings;
+/// every other account syncs them through the server.
+#[tauri::command]
+pub async fn list_local_only_workflow_accounts(
+    pool: tauri::State<'_, crate::db::ReadPool>,
+) -> CommandResult<Vec<LocalOnlyWorkflowAccountDto>> {
+    Ok(
+        satchel_core::sync::workflow_markers::list_local_only_accounts(pool.inner().as_ref())
+            .await
+            .map_err(CommandError::unexpected)?
+            .into_iter()
+            .map(|account| LocalOnlyWorkflowAccountDto {
+                account_id: account.account_id,
+                reason: account.reason,
+            })
+            .collect(),
+    )
+}
+
+#[tauri::command]
+pub async fn list_account_quotas(
+    pool: tauri::State<'_, crate::db::ReadPool>,
+) -> CommandResult<Vec<AccountQuotaDto>> {
+    let rows = satchel_core::db::account_quota::AccountQuotaRepository::new(pool.inner().as_ref())
+        .list_known()
+        .await
+        .map_err(CommandError::unexpected)?;
+    Ok(rows
+        .into_iter()
+        .map(|row| AccountQuotaDto {
+            account_id: row.account_id,
+            storage_used_bytes: row.storage_used_bytes,
+            storage_limit_bytes: row.storage_limit_bytes,
+            messages_used: row.messages_used,
+            messages_limit: row.messages_limit,
+            fetched_at: row.fetched_at,
+        })
+        .collect())
 }
 
 #[derive(Debug, Clone, Serialize)]

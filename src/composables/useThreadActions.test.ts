@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const trashMock = vi.fn();
 const spamMock = vi.fn();
+const notSpamMock = vi.fn();
+const undoNotSpamMock = vi.fn();
 const readMock = vi.fn();
 const moveMock = vi.fn();
 const undoTrashMock = vi.fn();
@@ -57,6 +59,7 @@ const threadState = {
   // Owns the optimistic removal and its rollback.
   trashThreads: (...args: unknown[]) => trashMock(...args),
   markThreadsSpam: (...args: unknown[]) => spamMock(...args),
+  markThreadsNotSpam: (...args: unknown[]) => notSpamMock(...args),
   setThreadsRead: (...args: unknown[]) => readMock(...args),
   // Owns the optimistic star and its rollback.
   setThreadsStarred: (...args: [string[], boolean]) => starMock(...args),
@@ -88,6 +91,7 @@ vi.mock('@/services/backend', () => ({
   backendBlockSender: (...args: unknown[]) => blockMock(...args),
   backendMoveThreadsToFolder: (...args: unknown[]) => moveMock(...args),
   backendUndoTrash: (...args: unknown[]) => undoTrashMock(...args),
+  backendUndoNotSpam: (...args: unknown[]) => undoNotSpamMock(...args),
   backendCommandsAvailable: () => true,
   backendSupportsNativeCommands: () => true,
 }));
@@ -130,6 +134,9 @@ vi.mock('@/composables/useToast', () => ({
     },
     info: (message: string, opts?: Record<string, unknown>) => {
       toasts.push({ message, tone: 'info', action: opts?.action as never });
+    },
+    warning: (message: string, opts?: Record<string, unknown>) => {
+      toasts.push({ message, tone: 'warning', action: opts?.action as never });
     },
     error: (message: string) => {
       toasts.push({ message, tone: 'error' });
@@ -550,6 +557,59 @@ describe('useThreadActions', () => {
     expect(toasts.at(-1)).toMatchObject({ tone: 'success', message: 'Moved to “Work”.' });
   });
 
+  it('reports a move a later batch stopped with its counts and reason', async () => {
+    threadState.threads = [seedThread(), seedThread({ id: 'thread-2' }), seedThread({ id: 'thread-3' })];
+    moveMock.mockResolvedValueOnce({
+      applied: ['thread-1'],
+      remaining: ['thread-2', 'thread-3'],
+      reason_key: 'backend.errors.mailMoveInterrupted',
+    });
+
+    await useThreadActions().moveToFolder(['thread-1', 'thread-2', 'thread-3'], 'folder-work', 'Work');
+
+    expect(loadThreadsMock).toHaveBeenCalledOnce();
+    expect(toasts.at(-1)).toMatchObject({
+      tone: 'warning',
+      message: 'Moved 1 of 3 to “Work”; the rest could not be moved. The move was interrupted before it finished. Try again.',
+    });
+  });
+
+  it('reloads both projections after a refused folder move', async () => {
+    moveMock.mockRejectedValueOnce(new Error('offline'));
+
+    await useThreadActions().moveToFolder(['thread-1'], 'folder-work', 'Work');
+
+    expect(loadThreadsMock).toHaveBeenCalledOnce();
+    expect(loadMailboxesMock).toHaveBeenCalledOnce();
+    expect(toasts.at(-1)?.tone).toBe('error');
+  });
+
+  it('files only what a stopped trash moved, and its Undo covers exactly that', async () => {
+    threadState.threads = [seedThread(), seedThread({ id: 'thread-2' }), seedThread({ id: 'thread-3' })];
+    trashMock.mockResolvedValueOnce({
+      undo_token: 'partial-receipt',
+      undo_thread_ids: ['thread-1'],
+      permanently_deleted: [],
+      stopped_early: {
+        applied: ['thread-1'],
+        remaining: ['thread-2', 'thread-3'],
+        reason_key: 'backend.errors.mailMovePending',
+      },
+    });
+
+    await useThreadActions().trash(['thread-1', 'thread-2', 'thread-3']);
+
+    expect(threadState.deselectThreads).toHaveBeenCalledWith(['thread-1']);
+    const toast = toasts.at(-1);
+    expect(toast?.tone).toBe('warning');
+    expect(toast?.message).toBe(
+      'Moved 1 of 3; the rest could not be moved. The server move is still being finalized. Try again shortly.',
+    );
+    expect(toast?.action?.label).toBe('Undo');
+    await toast!.action!.handler();
+    expect(undoTrashMock).toHaveBeenCalledWith('partial-receipt');
+  });
+
   it('blocks a sender before focusing and refreshing its originating threads', async () => {
     const events: string[] = [];
     blockMock.mockImplementationOnce(async (input: unknown) => {
@@ -603,6 +663,9 @@ describe('useThreadActions', () => {
     await actions.trash(['thread-1']);
 
     expect(toasts.at(-1)).toMatchObject({ tone: 'error', message: 'offline' });
+    // The lists show again what the backend holds.
+    expect(refreshHeadMock).toHaveBeenCalledOnce();
+    expect(loadMailboxesMock).toHaveBeenCalledOnce();
   });
 
   it('delegates pinning to the store instead of calling the backend itself', async () => {
@@ -657,6 +720,28 @@ describe('useThreadActions', () => {
     expect(toast).toMatchObject({ tone: 'success', message: 'Thread marked as spam' });
     await toast!.action!.handler();
     expect(undoTrashMock).toHaveBeenCalledWith('spam-receipt');
+    expect(refreshHeadMock).toHaveBeenCalled();
+  });
+
+  it('answers Not spam with a toast whose Undo hands the receipt back', async () => {
+    const receipt = {
+      thread_ids: ['thread-1'],
+      moved_thread_ids: ['thread-1'],
+      undo_token: 'not-spam:1',
+      move_receipts: ['move-1'],
+      restored_thread_ids: [],
+    };
+    notSpamMock.mockResolvedValueOnce(receipt);
+    undoNotSpamMock.mockResolvedValueOnce(undefined);
+
+    await useThreadActions().markNotSpam(['thread-1', 'thread-1']);
+
+    expect(notSpamMock).toHaveBeenCalledWith(['thread-1']);
+    const toast = toasts.at(-1);
+    expect(toast).toMatchObject({ tone: 'success', message: 'Thread moved back to the Inbox' });
+    expect(toast!.action).toBeDefined();
+    await toast!.action!.handler();
+    expect(undoNotSpamMock).toHaveBeenCalledWith(receipt);
     expect(refreshHeadMock).toHaveBeenCalled();
   });
 

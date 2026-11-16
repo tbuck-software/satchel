@@ -8,6 +8,7 @@
 use std::time::Duration;
 
 use satchel_core::db::followups::FollowUpRepository;
+use satchel_core::sync::queue::SyncQueue;
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Emitter, Manager};
 use tracing::{info, warn};
@@ -18,6 +19,9 @@ const RUN_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 const VACUUM_INTERVAL_HOURS: i64 = 24 * 7;
 const CLEANUP_INTERVAL_HOURS: i64 = 24;
+/// Google and Outlook contacts behind `known_senders`. Their avatar sync only
+/// runs when asked; a daily read keeps a new contact from waiting for that.
+const ADDRESS_BOOK_INTERVAL_HOURS: i64 = 24;
 
 pub fn spawn_maintenance_worker(pool: SqlitePool, checkpoint_pool: SqlitePool, app: AppHandle) {
     tauri::async_runtime::spawn(async move {
@@ -181,12 +185,16 @@ async fn run_data_repairs_at(
     }
 }
 
+/// The workflow scheduler: wakes due snoozes every minute and runs the
+/// recurring sender sweeps every [`SWEEP_EVERY_TICKS`] minutes.
 pub fn spawn_snooze_worker(pool: SqlitePool, app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(60));
+        let mut tick: u64 = 0;
         loop {
             interval.tick().await;
-            match wake_due_snoozes(&pool).await {
+            let queue = app.state::<crate::AppState>().queue.clone();
+            match wake_due_snoozes(&pool, &queue).await {
                 Ok(thread_ids) if !thread_ids.is_empty() => {
                     let _ = app.emit(
                         "snooze:released",
@@ -196,8 +204,45 @@ pub fn spawn_snooze_worker(pool: SqlitePool, app: AppHandle) {
                 Ok(_) => {}
                 Err(err) => warn!(target: "satchel::maintenance", "snooze wake failed: {err}"),
             }
+            // Off this loop: a long pass must not make snoozes wake late.
+            if sweep_due(tick) {
+                let (pool, app) = (pool.clone(), app.clone());
+                tauri::async_runtime::spawn(async move { run_sender_sweeps(&pool, &app).await });
+            }
+            tick = tick.wrapping_add(1);
         }
     });
+}
+
+/// Sweep rules run every quarter of an hour. The first run waits two minutes,
+/// so it does not compete with the startup sync for the write lock.
+const SWEEP_EVERY_TICKS: u64 = 15;
+const SWEEP_FIRST_TICK: u64 = 2;
+
+fn sweep_due(tick: u64) -> bool {
+    tick % SWEEP_EVERY_TICKS == SWEEP_FIRST_TICK
+}
+
+async fn run_sender_sweeps(pool: &SqlitePool, app: &AppHandle) {
+    let state = app.state::<crate::AppState>();
+    let gate = app.state::<satchel_core::mail_actions::sweep::SweepGate>();
+    // `None`: a rule's first run holds the gate; this pass comes again soon.
+    let Some(result) = gate.run_pass(pool, &state.queue, chrono::Utc::now()).await else {
+        return;
+    };
+    match result {
+        Ok(outcomes) => {
+            let swept: Vec<String> = outcomes
+                .into_iter()
+                .flat_map(|outcome| outcome.swept)
+                .collect();
+            if !swept.is_empty() {
+                info!(target: "satchel::maintenance", swept = swept.len(), "sender sweeps filed threads");
+            }
+            crate::commands::sender_sweep::emit_swept(app, swept);
+        }
+        Err(err) => warn!(target: "satchel::maintenance", "sender sweeps failed: {err}"),
+    }
 }
 
 pub fn spawn_followup_worker(pool: SqlitePool, app: AppHandle) {
@@ -234,6 +279,34 @@ pub fn spawn_followup_worker(pool: SqlitePool, app: AppHandle) {
     });
 }
 
+/// Task reminders, through the same notification path as follow-ups.
+pub fn spawn_task_reminder_worker(pool: SqlitePool, app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+            match satchel_core::tasks::TaskRepository::new(&pool)
+                .claim_due_reminders(&now)
+                .await
+            {
+                Ok(items) if !items.is_empty() => {
+                    let strings = crate::commands::ui_strings::current();
+                    for item in items {
+                        crate::commands::notifications::show_notification(
+                            &app,
+                            &strings.notification_task_due,
+                            &item.title,
+                        );
+                    }
+                }
+                Ok(_) => {}
+                Err(err) => warn!(target: "satchel::maintenance", "task reminders failed: {err}"),
+            }
+        }
+    });
+}
+
 pub fn spawn_webhook_worker(pool: SqlitePool) {
     tauri::async_runtime::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(15));
@@ -254,7 +327,7 @@ async fn run_once(
     #[cfg(any(target_os = "android", target_os = "ios"))]
     let _ = checkpoint_pool;
     if should_run("maintenance.last_cleanup_at", CLEANUP_INTERVAL_HOURS, pool).await {
-        let removed = trash_cleanup(pool).await?;
+        let removed = prune_then_clean_trash(pool).await?;
         if removed > 0 {
             info!(
                 target: "satchel::maintenance",
@@ -262,6 +335,16 @@ async fn run_once(
             );
         }
         purge_orphan_attachments(pool, app).await.ok();
+        match satchel_core::rules::prune_forward_records(pool, chrono::Utc::now()).await {
+            Ok(removed) if removed > 0 => info!(
+                target: "satchel::maintenance",
+                removed, "dropped aged rule forward records"
+            ),
+            Ok(_) => {}
+            Err(err) => {
+                warn!(target: "satchel::maintenance", %err, "rule forward records not pruned")
+            }
+        }
         // Topic links have no FK on item_id (polymorphic); sweep the ones
         // whose thread/message has been deleted meanwhile. The timeline
         // already hides them, this keeps the table from growing stale.
@@ -276,6 +359,18 @@ async fn run_once(
             Err(err) => info!(
                 target: "satchel::maintenance",
                 error = %err, "reply-thread merge skipped"
+            ),
+        }
+        // Finished mail merge jobs keep their message and list for 30 days.
+        match satchel_core::mail_merge::job::delete_expired_jobs(pool, chrono::Utc::now()).await {
+            Ok(removed) if removed > 0 => info!(
+                target: "satchel::maintenance",
+                removed, "removed finished mail merge jobs"
+            ),
+            Ok(_) => {}
+            Err(err) => info!(
+                target: "satchel::maintenance",
+                error = %err, "mail merge cleanup skipped"
             ),
         }
         match TopicRepository::new(pool).cleanup_orphaned_items().await {
@@ -301,6 +396,28 @@ async fn run_once(
             );
         }
         record_setting(pool, "maintenance.last_cleanup_at").await;
+    }
+
+    if should_run(
+        "maintenance.last_address_book_sync_at",
+        ADDRESS_BOOK_INTERVAL_HOURS,
+        pool,
+    )
+    .await
+    {
+        // Recorded either way: an account without network or permission waits
+        // a day instead of being asked on every pass.
+        record_setting(pool, "maintenance.last_address_book_sync_at").await;
+        match crate::commands::contacts::sync_provider_address_books(pool).await {
+            Ok(refreshed) => info!(
+                target: "satchel::maintenance",
+                refreshed, "refreshed provider address books"
+            ),
+            Err(err) => info!(
+                target: "satchel::maintenance",
+                error = %err, "address book refresh skipped"
+            ),
+        }
     }
 
     // A full SQLite VACUUM builds a second copy of the database. On Android a
@@ -383,7 +500,7 @@ fn webhook_client(timeout: Duration) -> Result<reqwest::Client, String> {
 /// replayed against a receiver that checks its age. Signed over the exact bytes
 /// that go on the wire, so signature and body cannot drift apart.
 fn webhook_signature(secret: &str, timestamp: i64, body: &str) -> String {
-    use hmac::Mac;
+    use hmac::{KeyInit, Mac};
     let mut mac = hmac::Hmac::<sha2::Sha256>::new_from_slice(secret.as_bytes())
         .expect("HMAC accepts a key of any length");
     mac.update(format!("{timestamp}.").as_bytes());
@@ -451,7 +568,42 @@ async fn deliver_due_webhooks_with(pool: &SqlitePool, timeout: Duration) -> Resu
     Ok(())
 }
 
-async fn wake_due_snoozes(pool: &SqlitePool) -> Result<Vec<String>, String> {
+/// The first steps of a cleanup pass. Pruning goes before the trash, whose
+/// failure ends the pass: what left the device is kept for 30 days
+/// (ADR 0016) even when the trash cannot be emptied, and a translation goes
+/// when no body backs it any more.
+async fn prune_then_clean_trash(pool: &SqlitePool) -> Result<u64, String> {
+    prune_translation_records(pool).await;
+    trash_cleanup(pool).await
+}
+
+async fn prune_translation_records(pool: &SqlitePool) {
+    let repo = satchel_core::db::translation::TranslationRepository::new(pool);
+    match repo.prune_request_log(chrono::Utc::now()).await {
+        Ok(removed) if removed > 0 => info!(
+            target: "satchel::maintenance",
+            removed, "pruned outbound request log"
+        ),
+        Ok(_) => {}
+        Err(err) => warn!(
+            target: "satchel::maintenance",
+            error = %err, "outbound request log pruning skipped"
+        ),
+    }
+    match repo.prune_unreachable_translations().await {
+        Ok(removed) if removed > 0 => info!(
+            target: "satchel::maintenance",
+            removed, "removed translations without a body"
+        ),
+        Ok(_) => {}
+        Err(err) => warn!(
+            target: "satchel::maintenance",
+            error = %err, "translation pruning skipped"
+        ),
+    }
+}
+
+async fn wake_due_snoozes(pool: &SqlitePool, queue: &SyncQueue) -> Result<Vec<String>, String> {
     let now = chrono::Utc::now().to_rfc3339();
     let mut tx = pool
         .begin_with("BEGIN IMMEDIATE")
@@ -485,9 +637,19 @@ async fn wake_due_snoozes(pool: &SqlitePool) -> Result<Vec<String>, String> {
         .execute(&mut *tx)
         .await
         .map_err(|err| err.to_string())?;
+        // Compare-and-clear: only this device's own snooze, and only while
+        // no other device replaced it. Every device already reads a passed
+        // wake time as Inbox, so the clear is for other clients' sake.
+        satchel_core::sync::workflow_markers::enqueue_wake_clear_in_transaction(
+            &mut tx, queue, thread_id,
+        )
+        .await?;
     }
 
     tx.commit().await.map_err(|err| err.to_string())?;
+    if !thread_ids.is_empty() {
+        queue.wake_worker();
+    }
     Ok(thread_ids)
 }
 
@@ -729,6 +891,12 @@ mod vacuum_tests {
     use super::vacuum_fits;
 
     #[test]
+    fn sender_sweeps_run_every_quarter_hour_after_a_short_delay() {
+        let due: Vec<u64> = (0..40).filter(|tick| super::sweep_due(*tick)).collect();
+        assert_eq!(due, [2, 17, 32]);
+    }
+
+    #[test]
     fn vacuum_needs_room_for_a_second_copy() {
         assert!(vacuum_fits(2_000, Some(2_000)));
         assert!(!vacuum_fits(2_000, Some(1_999)));
@@ -825,6 +993,36 @@ mod body_window_tests {
             .fetch_one(pool)
             .await
             .expect("row")
+    }
+
+    #[tokio::test]
+    async fn pruning_runs_even_when_the_trash_cleanup_fails() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::db::init(&pool).await.unwrap();
+        let old = (chrono::Utc::now() - chrono::Duration::days(31)).to_rfc3339();
+        sqlx::query(
+            "INSERT INTO outbound_request_log (created_at, feature, provider, units, unit, outcome)
+             VALUES (?, 'translation', 'deepl', 1, 'characters', 'ok')",
+        )
+        .bind(&old)
+        .execute(&pool)
+        .await
+        .unwrap();
+        // The trash pass reads `threads`; without it, it fails.
+        sqlx::query("ALTER TABLE threads RENAME TO threads_elsewhere")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(super::prune_then_clean_trash(&pool).await.is_err());
+        let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM outbound_request_log")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(left, 0, "the log was pruned before the trash pass failed");
     }
 
     #[tokio::test]
@@ -1255,7 +1453,11 @@ mod webhook_tests {
     #[test]
     fn the_signature_covers_the_timestamp_and_the_body() {
         let first = super::webhook_signature("shhh", 1_700_000_000, "{\"a\":1}");
-        assert_eq!(first.len(), 64, "hex-encoded SHA-256");
+        // Receivers verify this exact text; the value comes from Python's hmac.
+        assert_eq!(
+            first,
+            "7b2ecedda8a16dee0c580efc4c8b36bda693b90ed68c32f346789c16faacf7bc"
+        );
         assert_eq!(
             first,
             super::webhook_signature("shhh", 1_700_000_000, "{\"a\":1}")

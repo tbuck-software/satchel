@@ -6,6 +6,7 @@ import {
   backendOpenMessageFileInWindow,
   backendToggleAttachmentQuickLook,
 } from '@/services/backend';
+import { safeAttachmentFilename } from '@/utils/attachmentFilename';
 import { saveAttachmentWithDialog } from '@/utils/saveAttachment';
 import { attachmentBytes } from '@/utils/attachmentBytes';
 import { backendErrorKey, backendErrorStringParam } from '@/utils/backendErrors';
@@ -61,6 +62,7 @@ export function useAttachmentActions() {
   const EXECUTABLE_REFUSALS = new Set([
     'backend.errors.attachmentExecutableNotConfirmed',
     'backend.errors.attachmentExecutableDisguisedNotConfirmed',
+    'backend.errors.attachmentTypeNotConfirmed',
   ]);
 
   async function openAttachmentDefault(attachmentId: string): Promise<void> {
@@ -73,11 +75,17 @@ export function useAttachmentActions() {
       const filename = backendErrorStringParam(error, 'filename') ?? '';
       const extension = backendErrorStringParam(error, 'extension') ?? '';
       const disguised = key.endsWith('DisguisedNotConfirmed');
-      const confirmed = await ask({
-        title: t('mail.attachment.executableTitle'),
-        body: disguised
+      const unknown = key === 'backend.errors.attachmentTypeNotConfirmed';
+      const body = unknown
+        ? extension
+          ? t('mail.attachment.unknownTypeBody', { extension })
+          : t('mail.attachment.unknownTypeNoExtensionBody')
+        : disguised
           ? t('mail.attachment.executableDisguisedBody', { extension })
-          : t('mail.attachment.executableBody', { extension }),
+          : t('mail.attachment.executableBody', { extension });
+      const confirmed = await ask({
+        title: unknown ? t('mail.attachment.unknownTypeTitle') : t('mail.attachment.executableTitle'),
+        body,
         detail: filename,
         confirmLabel: t('mail.attachment.executableConfirm'),
         tone: 'danger',
@@ -129,7 +137,7 @@ export function useAttachmentActions() {
 
   /** Append " (2)", " (3)", … so several parts with the same name survive. */
   function uniqueFilename(name: string, taken: Set<string>, fallbackFilename: string): string {
-    const safe = name.replace(/[/\\:]/g, '_').trim() || fallbackFilename;
+    const safe = safeAttachmentFilename(name, fallbackFilename);
     if (!taken.has(safe)) {
       taken.add(safe);
       return safe;

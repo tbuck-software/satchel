@@ -17,6 +17,15 @@ describe('mock contacts', () => {
     expect(await sendCommand('search_contacts', { query: '' })).toEqual([]);
   });
 
+  it('rejects inline images and URI values as contact addresses', async () => {
+    const { sendCommand } = await import('./mock');
+    for (const email of ['logo@2x.png', 'data:image/png;base64,abc@def.png']) {
+      await expect(sendCommand('upsert_contact', { input: {
+        id: null, email, display_name: null, notes: null, avatar_url: null,
+      } })).rejects.toThrow('backend.errors.contactEmailInvalid');
+    }
+  });
+
   it('persists profile creation and deletion through subsequent queries', async () => {
     const { sendCommand } = await import('./mock');
     const saved = await sendCommand<BackendContact>('upsert_contact', { input: {

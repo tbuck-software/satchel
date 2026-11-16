@@ -1,0 +1,16 @@
+{
+  "en": {
+    "composeDrop": {
+      "addToTo": "Drop to add to To",
+      "attach": "Attach to draft",
+      "add": "Add to draft"
+    }
+  },
+  "de": {
+    "composeDrop": {
+      "addToTo": "Loslassen, um unter „An“ hinzuzufügen",
+      "attach": "An Entwurf anhängen",
+      "add": "Zum Entwurf hinzufügen"
+    }
+  }
+}

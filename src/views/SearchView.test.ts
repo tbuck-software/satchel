@@ -128,6 +128,7 @@ function result(messageId: string, threadId: string): SearchResult {
     fromAddress: 'sender@example.com',
     date: '2026-08-30T10:00:00Z',
     isRead: true,
+    isDraft: false,
     location: '',
   };
 }

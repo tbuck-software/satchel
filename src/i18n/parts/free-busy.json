@@ -1,0 +1,112 @@
+{
+  "en": {
+    "availability": {
+      "strip": {
+        "title": "Availability",
+        "previousDay": "Previous day",
+        "nextDay": "Next day",
+        "you": "You",
+        "loading": "Loading availability…",
+        "loadFailed": "Availability could not be loaded.",
+        "conflicts": "{count} person is busy at {time}. | {count} people are busy at {time}.",
+        "allFreeAt": "Everyone known is free at {time}.",
+        "unknown": "Availability unknown",
+        "busyThen": "Busy then",
+        "freeThen": "Free then",
+        "freeAllDay": "Free all day",
+        "busyTimes": "Busy {times}",
+        "nextFree": "Next time everyone is free",
+        "searching": "Looking…",
+        "noneFree": "No time when everyone is free in the next {count} working days.",
+        "searchFailed": "Free time could not be found: {error}",
+        "notCounted": "Not counted, their availability is unknown: {people}",
+        "unknownHint": "Striped rows: their calendar does not share free/busy with this account."
+      },
+      "insert": {
+        "button": "Insert my availability",
+        "title": "Insert my availability",
+        "duration": "Meeting length",
+        "range": "Within the next",
+        "minutesShort": "{count} min",
+        "hoursShort": "{count} h",
+        "workingDays": "{count} working day | {count} working days",
+        "hoursHint": "Working hours: {hours}. Change them under Settings → Calendar.",
+        "loading": "Finding free time…",
+        "none": "No free time within working hours in the next working day. | No free time within working hours in the next {count} working days.",
+        "failed": "Free time could not be found: {error}",
+        "insert": "Insert",
+        "insertFailed": "The availability could not be inserted. Click into the message and try again."
+      },
+      "text": {
+        "intro": "I'm free for {duration} at these times ({zone}):",
+        "minutes": "{count} minute | {count} minutes",
+        "hours": "{count} hour | {count} hours",
+        "day": "{day}: {times}"
+      },
+      "settings": {
+        "title": "Availability",
+        "description": "Your working hours and the calendars that make you busy. “Insert my availability” in the composer and “Next time everyone is free” in the event editor use them.",
+        "workStart": "Working day starts",
+        "workEnd": "Working day ends",
+        "workDays": "Working days",
+        "calendars": "Calendars that make you busy",
+        "invalidHours": "The working day has to end after it starts."
+      }
+    }
+  },
+  "de": {
+    "availability": {
+      "strip": {
+        "title": "Verfügbarkeit",
+        "previousDay": "Vorheriger Tag",
+        "nextDay": "Nächster Tag",
+        "you": "Du",
+        "loading": "Verfügbarkeit wird geladen …",
+        "loadFailed": "Die Verfügbarkeit konnte nicht geladen werden.",
+        "conflicts": "{count} Person ist um {time} belegt. | {count} Personen sind um {time} belegt.",
+        "allFreeAt": "Alle Bekannten sind um {time} frei.",
+        "unknown": "Verfügbarkeit unbekannt",
+        "busyThen": "Dann belegt",
+        "freeThen": "Dann frei",
+        "freeAllDay": "Den ganzen Tag frei",
+        "busyTimes": "Belegt {times}",
+        "nextFree": "Nächste Zeit, zu der alle frei sind",
+        "searching": "Wird gesucht …",
+        "noneFree": "In den nächsten {count} Arbeitstagen sind nie alle zugleich frei.",
+        "searchFailed": "Freie Zeit konnte nicht gefunden werden: {error}",
+        "notCounted": "Nicht berücksichtigt, Verfügbarkeit unbekannt: {people}",
+        "unknownHint": "Gestreifte Zeilen: Deren Kalender teilt mit diesem Konto keine Frei/Belegt-Zeiten."
+      },
+      "insert": {
+        "button": "Meine Verfügbarkeit einfügen",
+        "title": "Meine Verfügbarkeit einfügen",
+        "duration": "Termindauer",
+        "range": "Innerhalb der nächsten",
+        "minutesShort": "{count} Min.",
+        "hoursShort": "{count} Std.",
+        "workingDays": "{count} Arbeitstag | {count} Arbeitstage",
+        "hoursHint": "Arbeitszeiten: {hours}. Änderbar unter Einstellungen → Kalender.",
+        "loading": "Freie Zeit wird gesucht …",
+        "none": "Am nächsten Arbeitstag gibt es in der Arbeitszeit keine freie Zeit. | In den nächsten {count} Arbeitstagen gibt es in der Arbeitszeit keine freie Zeit.",
+        "failed": "Freie Zeit konnte nicht gefunden werden: {error}",
+        "insert": "Einfügen",
+        "insertFailed": "Die Verfügbarkeit konnte nicht eingefügt werden. Klicke in die Nachricht und versuche es erneut."
+      },
+      "text": {
+        "intro": "Ich habe zu diesen Zeiten {duration} Zeit ({zone}):",
+        "minutes": "{count} Minute | {count} Minuten",
+        "hours": "{count} Stunde | {count} Stunden",
+        "day": "{day}: {times}"
+      },
+      "settings": {
+        "title": "Verfügbarkeit",
+        "description": "Deine Arbeitszeiten und die Kalender, die dich belegt machen. „Meine Verfügbarkeit einfügen“ im Verfassen-Fenster und „Nächste Zeit, zu der alle frei sind“ im Termineditor richten sich danach.",
+        "workStart": "Arbeitstag beginnt",
+        "workEnd": "Arbeitstag endet",
+        "workDays": "Arbeitstage",
+        "calendars": "Kalender, die dich belegt machen",
+        "invalidHours": "Der Arbeitstag muss nach seinem Beginn enden."
+      }
+    }
+  }
+}

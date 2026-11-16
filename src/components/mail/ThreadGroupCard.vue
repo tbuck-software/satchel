@@ -11,7 +11,7 @@ import ThreadListQuickActions from './ThreadListQuickActions.vue';
 import { useRowSwipe } from '@/composables/useRowSwipe';
 import { useThreadActions } from '@/composables/useThreadActions';
 import { formatListTime } from '@/utils/listTime';
-import { startThreadDrag } from '@/utils/threadDrag';
+import { startThreadDrag } from '@/utils/appDrag';
 
 const props = defineProps<{
   group: SimilarThreadGroup;

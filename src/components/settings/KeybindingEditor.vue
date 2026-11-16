@@ -99,7 +99,7 @@ function displayStrokes(action: string): string[] {
 
     <label class="search-box">
       <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.7"/><path d="m10.7 10.7 3 3"/></svg>
-      <input v-model="filter" type="search" :placeholder="$t('settings.shortcuts.searchPlaceholder')" />
+      <input v-model="filter" type="search" autocorrect="off" :placeholder="$t('settings.shortcuts.searchPlaceholder')" />
       <kbd>/</kbd>
     </label>
 

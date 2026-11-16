@@ -3,6 +3,7 @@ import { useRouter } from 'vue-router';
 import { useThreadsStore } from '@/stores/threads';
 import { useAccountsStore } from '@/stores/accounts';
 import { useComposerStore } from '@/stores/composer';
+import { openDraftTarget } from '@/composables/openDraftTarget';
 import { useThreadReply } from '@/composables/useThreadReply';
 import { useSettingsStore } from '@/stores/settings';
 import { useTopicsStore } from '@/stores/topics';
@@ -10,6 +11,8 @@ import { useThreadActions } from '@/composables/useThreadActions';
 import { useMessageLinks } from '@/composables/useMessageLinks';
 import { useShortcutHints, type ShortcutHint } from '@/composables/useShortcutHints';
 import { activeThreadReaderCommands } from '@/composables/useThreadReaderCommands';
+import { useSenderSweep } from '@/composables/useSenderSweep';
+import { useTaskEditor } from '@/composables/useTaskEditor';
 import { listKeyboardTargets } from '@/composables/useListKeyboardNavigation';
 import { useUndo } from '@/composables/useUndo';
 import { useToast } from '@/composables/useToast';
@@ -25,6 +28,7 @@ import { viewKeywords } from '@/config/keybindings';
 import { MAILBOX_SECTIONS } from '@/config/mailboxSections';
 import { useMailboxesStore } from '@/stores/mailboxes';
 import { openView, showMailList } from '@/router/mailViews';
+import { offersNotSpam } from '@/utils/threadList';
 
 
 /** The glyph each view wears in the sidebar, by route or section id. */
@@ -39,6 +43,7 @@ const VIEW_ICONS: Partial<Record<string, CommandIconName>> = {
   'new-senders': 'account',
   calendar: 'calendar',
   contacts: 'account',
+  tasks: 'task',
   trash: 'trash',
   spam: 'spam',
   notifications: 'envelope',
@@ -79,6 +84,8 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
   const ui = useUiStore();
   const { hint } = useShortcutHints();
   const undo = useUndo();
+  const senderSweep = useSenderSweep();
+  const taskEditor = useTaskEditor();
 
   // A list with its own targets (search page, topic, sender review) is what
   // the palette acts on, like the keys; otherwise the store's selection.
@@ -96,11 +103,60 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
     return listKeyboardTargets()?.[0] ?? threads.activeThreadId;
   }
 
+  /** The targets Not spam applies to: marked by the filter, or in Spam. */
+  function notSpamTargets(): string[] {
+    return targetIds().filter((id) => {
+      const thread = threads.find(id);
+      return thread ? offersNotSpam(thread, threads.mailboxFilter) : false;
+    });
+  }
+
+  /** Clean up mail from the sender who started the current thread. */
+  function sweepCommand(): OmniCommand[] {
+    const id = currentId();
+    if (!id) return [];
+    return [{
+      id: 'thread:sweep-sender',
+      icon: 'sweep',
+      title: t('commands.sweepSender'),
+      context: 'mail',
+      shortcut: hint('sweepSender'),
+      keywords: t('shortcuts.actions.sweepSender.keywords'),
+      run: () => senderSweep.openForThread(id),
+    }];
+  }
+
+  /**
+   * With a draft open in this window, the selected mail goes onto it as an
+   * `.eml` each: what dragging the rows onto the composer does.
+   */
+  function draftCommands(): OmniCommand[] {
+    const target = openDraftTarget.value;
+    const ids = targetIds();
+    if (!target || ids.length === 0) return [];
+    return [{
+      id: 'draft:attach-mail',
+      icon: 'attach',
+      title: t('composeDrop.attach'),
+      context: 'mail',
+      run: () => target.attach({ kind: 'threads', ids }),
+    }];
+  }
+
   /** Reader-only actions, offered while the reader shows the thread the palette acts on. */
   function readerCommands(): OmniCommand[] {
     const reader = activeThreadReaderCommands();
     if (!reader?.threadId || reader.threadId !== currentId()) return [];
     return [
+      ...(reader.translationAvailable ? [{
+        id: 'thread:translate',
+        icon: 'translate' as const,
+        title: t('commands.translateMessage'),
+        context: 'mail' as const,
+        shortcut: hint('translateMessage'),
+        keywords: t('shortcuts.actions.translateMessage.keywords'),
+        run: () => reader.toggleTranslation(),
+      }] : []),
       {
         id: 'thread:block-address',
         icon: 'block',
@@ -270,6 +326,14 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       keywords: t('commands.keywords.compose'),
       run: () => composer.openNew(),
     },
+    {
+      id: 'compose:mail-merge',
+      icon: 'merge',
+      title: t('mailMerge.command'),
+      context: 'app',
+      keywords: t('mailMerge.commandKeywords'),
+      run: () => composer.openMailMerge(),
+    },
     ...(targetIds().length > 0 ? [
       {
         id: 'thread:reply',
@@ -422,8 +486,44 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
         keywords: t('commands.keywords.spam'),
         run: () => void threadActions.markSpam(targetIds()),
       },
+      ...(notSpamTargets().length > 0 ? [{
+        id: 'thread:not-spam',
+        icon: 'inbox' as const,
+        title: t('thread.actions.notSpam'),
+        context: 'mail' as const,
+        shortcut: hint('markNotSpam'),
+        keywords: t('commands.keywords.notSpam'),
+        run: () => void threadActions.markNotSpam(notSpamTargets()),
+      }] : []),
+      ...sweepCommand(),
+      ...(currentId() ? [{
+        id: 'thread:add-task',
+        icon: 'task' as const,
+        title: t('commands.addTask'),
+        context: 'mail' as const,
+        shortcut: hint('createTask'),
+        keywords: t('shortcuts.actions.createTask.keywords'),
+        run: () => taskEditor.openForThread(currentId(), threads.find(currentId())?.subject),
+      }] : []),
+      ...draftCommands(),
       ...readerCommands(),
     ] : []),
+    {
+      id: 'task:new',
+      icon: 'task',
+      title: t('commands.newTask'),
+      context: 'app',
+      keywords: t('commands.keywords.newTask'),
+      run: () => taskEditor.openNew(),
+    },
+    {
+      id: 'view:cleanup',
+      icon: 'sweep',
+      title: t('commands.openCleanup'),
+      context: 'navigation',
+      keywords: t('commands.keywords.cleanup'),
+      run: () => router.push({ name: 'cleanup' }),
+    },
     ...(undo.entries.value.length > 0 ? [{
       id: 'undo:latest',
       icon: 'undo' as const,

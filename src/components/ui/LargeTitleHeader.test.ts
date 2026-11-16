@@ -28,4 +28,15 @@ describe('LargeTitleHeader', () => {
 
     expect(wrapper.find('.large-title__subtitle').exists()).toBe(false);
   });
+
+  it('puts the status beside the subtitle, on its line', () => {
+    const wrapper = mount(LargeTitleHeader, {
+      props: { title: 'Inbox', subtitle: 'tom@satchel.dev', switchLabel: 'Inbox, switch mailbox' },
+      slots: { status: '<span class="probe">Offline</span>' },
+    });
+
+    const meta = wrapper.get('.large-title__meta');
+    expect(meta.get('.large-title__subtitle').text()).toBe('tom@satchel.dev');
+    expect(meta.get('.probe').text()).toBe('Offline');
+  });
 });

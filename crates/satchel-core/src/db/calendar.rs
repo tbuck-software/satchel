@@ -15,7 +15,8 @@ const INVITE_SELECT: &str =
 
 const EVENT_SELECT: &str =
     "SELECT id, account_id, uid, title, description, location, starts_at, ends_at,
-            all_day, attendees_json, source, collection_href, created_at, updated_at
+            all_day, attendees_json, source, collection_href, read_only, recurrence_instance,
+            rich_description, created_at, updated_at
      FROM calendar_events";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, FromRow)]
@@ -62,6 +63,12 @@ pub struct CalendarEventRecord {
     pub attendees_json: String,
     pub source: String,
     pub collection_href: Option<String>,
+    /// 1 when the provider does not let this account change the event.
+    pub read_only: i64,
+    /// 1 for one occurrence of a recurring series.
+    pub recurrence_instance: i64,
+    /// 1 when the description is formatted text the editor cannot keep.
+    pub rich_description: i64,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -83,6 +90,7 @@ pub struct CalendarEventSyncState {
     pub source: String,
     pub remote_href: Option<String>,
     pub remote_etag: Option<String>,
+    pub read_only: i64,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -111,6 +119,19 @@ pub struct CalendarEventWrite<'a> {
     pub remote_etag: Option<&'a str>,
     pub collection_href: Option<&'a str>,
     pub raw_ics: Option<&'a str>,
+    pub flags: EventFlags,
+}
+
+/// What a provider says about an event beyond its fields. Local, CalDAV and
+/// Google rows keep the defaults, apart from `transparent`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EventFlags {
+    pub read_only: bool,
+    pub recurrence_instance: bool,
+    pub rich_description: bool,
+    /// The event leaves its time free (TRANSP:TRANSPARENT, Google's
+    /// `transparency`, Graph's `showAs: free`). Free/busy skips it.
+    pub transparent: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -131,6 +152,47 @@ pub struct GoogleCalendarEvent<'a> {
     pub all_day: bool,
     pub attendees_json: &'a str,
     pub calendar_id: &'a str,
+    /// Google's `transparency: transparent`, or an invitation the account declined.
+    pub transparent: bool,
+}
+
+/// One event of an Outlook calendar as Graph reported it.
+#[derive(Debug, Clone)]
+pub struct OutlookCalendarEvent<'a> {
+    pub id: &'a str,
+    /// The Graph event id; edits and deletions address the event by it.
+    pub remote_id: &'a str,
+    /// Graph's `changeKey`, compared before every write.
+    pub change_key: Option<&'a str>,
+    pub flags: EventFlags,
+    pub uid: &'a str,
+    pub title: &'a str,
+    pub description: Option<&'a str>,
+    pub location: Option<&'a str>,
+    pub starts_at: &'a str,
+    pub ends_at: &'a str,
+    pub all_day: bool,
+    pub attendees_json: &'a str,
+}
+
+/// What one delta pass of an Outlook calendar changed.
+#[derive(Debug, Clone)]
+pub struct OutlookCalendarDelta<'a> {
+    pub calendar_id: &'a str,
+    pub calendar_name: &'a str,
+    pub changed: &'a [OutlookCalendarEvent<'a>],
+    /// Graph event ids the pass reported deleted or cancelled.
+    pub removed: &'a [&'a str],
+    /// A pass from scratch lists every event; anything else is gone.
+    pub complete: bool,
+    /// Where the next pass resumes; `None` starts it from scratch.
+    pub cursor: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, FromRow)]
+pub struct CalendarSourceCursor {
+    pub remote_id: String,
+    pub sync_cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
@@ -269,11 +331,11 @@ impl<'a> CalendarRepository<'a> {
     pub async fn upsert_invite(
         &self,
         account_id: &str,
-        message_id: Option<&str>,
+        origin: InviteOrigin<'_>,
         invite: &ParsedInvite,
     ) -> Result<CalendarInviteRecord, CalendarError> {
         let mut connection = self.pool.acquire().await?;
-        Self::upsert_invite_on_connection(&mut connection, account_id, message_id, invite).await?;
+        Self::upsert_invite_on_connection(&mut connection, account_id, origin, invite).await?;
         drop(connection);
         self.find_invite(account_id, &invite.uid, invite.recurrence_id.as_deref())
             .await
@@ -284,25 +346,55 @@ impl<'a> CalendarRepository<'a> {
     /// Every ingest path ends here, so this is where an answer to an
     /// invitation (`METHOD:REPLY` and its kin) is dropped: it is not an
     /// invitation, and under the same UID it would overwrite the real one.
+    /// An invite that may not update the stored one (see [`may_update_invite`])
+    /// is dropped too, leaving the stored row and its message untouched.
     pub async fn upsert_invite_on_connection(
         connection: &mut sqlx::SqliteConnection,
         account_id: &str,
-        message_id: Option<&str>,
+        origin: InviteOrigin<'_>,
         invite: &ParsedInvite,
     ) -> Result<(), CalendarError> {
-        if !invite.is_invitation() {
+        if invite.uid.trim().is_empty() || !invite.is_invitation() {
             return Ok(());
         }
         let now = chrono::Utc::now().to_rfc3339();
         let recurrence_id = invite.recurrence_id.as_deref().unwrap_or("");
+        let message_id = origin.message_id();
+        let sender: Option<String> = match message_id {
+            Some(message_id) => {
+                sqlx::query_scalar("SELECT from_address FROM messages WHERE id = ?")
+                    .bind(message_id)
+                    .fetch_optional(&mut *connection)
+                    .await?
+            }
+            None => None,
+        };
+        let stored = sqlx::query_as::<_, StoredInviteAuthority>(
+            "SELECT ci.message_id, ci.organizer_email, ci.sequence,
+                    COALESCE(ci.source_sender, m.from_address) AS source_sender
+             FROM calendar_invites ci
+             LEFT JOIN messages m ON m.id = ci.message_id
+             WHERE ci.account_id = ? AND ci.uid = ? AND ci.recurrence_id = ?",
+        )
+        .bind(account_id)
+        .bind(&invite.uid)
+        .bind(recurrence_id)
+        .fetch_optional(&mut *connection)
+        .await?;
+        if let Some(stored) = &stored {
+            if !may_update_invite(stored, origin, sender.as_deref(), invite) {
+                tracing::debug!("calendar invite update from a different sender ignored");
+                return Ok(());
+            }
+        }
         let id = invite_id(account_id, &invite.uid, recurrence_id);
         sqlx::query(
             "INSERT INTO calendar_invites
                 (id, message_id, account_id, uid, organizer_email, organizer_name, summary,
                  description, location, starts_at, ends_at, all_day, rsvp_status, raw_ics,
                  sequence, method, cancelled, recurrence_id, recurring, recurrence_unbounded,
-                 created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'needs-action', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 source_sender, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'needs-action', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(account_id, uid, recurrence_id) DO UPDATE SET
                 message_id = excluded.message_id,
                 organizer_email = excluded.organizer_email,
@@ -344,6 +436,7 @@ impl<'a> CalendarRepository<'a> {
         } else {
             0_i64
         })
+        .bind(sender.as_deref().map(normalize_email))
         .bind(&now)
         .bind(&now)
         .execute(connection)
@@ -401,7 +494,7 @@ impl<'a> CalendarRepository<'a> {
         id: &str,
     ) -> Result<Option<CalendarEventSyncState>, CalendarError> {
         let state = sqlx::query_as::<_, CalendarEventSyncState>(
-            "SELECT account_id, uid, source, remote_href, remote_etag
+            "SELECT account_id, uid, source, remote_href, remote_etag, read_only
              FROM calendar_events WHERE id = ? LIMIT 1",
         )
         .bind(id)
@@ -418,7 +511,7 @@ impl<'a> CalendarRepository<'a> {
         id: &str,
     ) -> Result<Option<CalendarEventSyncState>, CalendarError> {
         sqlx::query_as::<_, CalendarEventSyncState>(
-            "SELECT account_id, uid, source, remote_href, remote_etag
+            "SELECT account_id, uid, source, remote_href, remote_etag, read_only
              FROM calendar_events WHERE id = ? LIMIT 1",
         )
         .bind(id)
@@ -465,8 +558,9 @@ impl<'a> CalendarRepository<'a> {
             "INSERT INTO calendar_events
                 (id, account_id, uid, title, description, location, starts_at, ends_at, all_day,
                  attendees_json, source, remote_href, remote_etag, collection_href, raw_ics,
-                 created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 read_only, recurrence_instance, rich_description, transparent, created_at,
+                 updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                 uid = excluded.uid,
                 title = excluded.title,
@@ -481,16 +575,24 @@ impl<'a> CalendarRepository<'a> {
                 remote_etag = excluded.remote_etag,
                 collection_href = excluded.collection_href,
                 raw_ics = excluded.raw_ics,
+                read_only = excluded.read_only,
+                recurrence_instance = excluded.recurrence_instance,
+                rich_description = excluded.rich_description,
+                transparent = excluded.transparent,
                 updated_at = CASE WHEN
                     (calendar_events.uid, calendar_events.title, calendar_events.description,
                      calendar_events.location, calendar_events.starts_at, calendar_events.ends_at,
                      calendar_events.all_day, calendar_events.attendees_json, calendar_events.source,
                      calendar_events.remote_href, calendar_events.remote_etag,
-                     calendar_events.collection_href, calendar_events.raw_ics)
+                     calendar_events.collection_href, calendar_events.raw_ics,
+                     calendar_events.read_only, calendar_events.recurrence_instance,
+                     calendar_events.rich_description, calendar_events.transparent)
                     IS (excluded.uid, excluded.title, excluded.description, excluded.location,
                         excluded.starts_at, excluded.ends_at, excluded.all_day,
                         excluded.attendees_json, excluded.source, excluded.remote_href,
-                        excluded.remote_etag, excluded.collection_href, excluded.raw_ics)
+                        excluded.remote_etag, excluded.collection_href, excluded.raw_ics,
+                        excluded.read_only, excluded.recurrence_instance,
+                        excluded.rich_description, excluded.transparent)
                     THEN calendar_events.updated_at ELSE excluded.updated_at END
              WHERE calendar_events.account_id = excluded.account_id",
         )
@@ -509,6 +611,10 @@ impl<'a> CalendarRepository<'a> {
         .bind(event.remote_etag)
         .bind(event.collection_href)
         .bind(event.raw_ics)
+        .bind(i64::from(event.flags.read_only))
+        .bind(i64::from(event.flags.recurrence_instance))
+        .bind(i64::from(event.flags.rich_description))
+        .bind(i64::from(event.flags.transparent))
         .bind(&now)
         .bind(&now)
         .execute(&mut *connection)
@@ -605,8 +711,9 @@ impl<'a> CalendarRepository<'a> {
             sqlx::query(
                 "INSERT INTO calendar_events
                     (id, account_id, uid, title, description, location, starts_at, ends_at,
-                     all_day, attendees_json, source, collection_href, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'google', ?, ?, ?)",
+                     all_day, attendees_json, source, collection_href, transparent, created_at,
+                     updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'google', ?, ?, ?, ?)",
             )
             .bind(event.id)
             .bind(account_id)
@@ -619,6 +726,7 @@ impl<'a> CalendarRepository<'a> {
             .bind(if event.all_day { 1_i64 } else { 0_i64 })
             .bind(event.attendees_json)
             .bind(event.calendar_id)
+            .bind(i64::from(event.transparent))
             .bind(&now)
             .bind(&now)
             .execute(&mut *transaction)
@@ -626,6 +734,170 @@ impl<'a> CalendarRepository<'a> {
         }
         transaction.commit().await?;
         Ok(())
+    }
+
+    /// Resume points of the account's mirrored Outlook calendars.
+    pub async fn outlook_cursors(
+        &self,
+        account_id: &str,
+    ) -> Result<Vec<CalendarSourceCursor>, CalendarError> {
+        sqlx::query_as::<_, CalendarSourceCursor>(
+            "SELECT remote_id, sync_cursor FROM calendar_sources
+             WHERE account_id = ? AND source = 'outlook'",
+        )
+        .bind(account_id)
+        .fetch_all(self.pool)
+        .await
+        .map_err(Into::into)
+    }
+
+    /// Apply one delta pass of one Outlook calendar together with its new
+    /// cursor, so a pass is either recorded whole or resumed whole.
+    pub async fn apply_outlook_delta(
+        &self,
+        account_id: &str,
+        delta: OutlookCalendarDelta<'_>,
+    ) -> Result<(), CalendarError> {
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let now = chrono::Utc::now().to_rfc3339();
+        // An incremental pass started from a stored cursor. If that cursor is
+        // gone now, something asked for a fresh listing while the pass ran
+        // (the `outlook_calendar_resync` repair); saving the pass's new link
+        // would quietly undo that, so the next pass starts over instead.
+        let cursor = if delta.complete {
+            delta.cursor
+        } else {
+            let stored: Option<Option<String>> = sqlx::query_scalar(
+                "SELECT sync_cursor FROM calendar_sources
+                 WHERE account_id = ? AND source = 'outlook' AND remote_id = ?",
+            )
+            .bind(account_id)
+            .bind(delta.calendar_id)
+            .fetch_optional(&mut *transaction)
+            .await?;
+            match stored {
+                Some(None) => None,
+                _ => delta.cursor,
+            }
+        };
+        sqlx::query(
+            "INSERT INTO calendar_sources (account_id, source, remote_id, name, updated_at, sync_cursor)
+             VALUES (?, 'outlook', ?, ?, ?, ?)
+             ON CONFLICT(account_id, source, remote_id) DO UPDATE SET
+                name = excluded.name,
+                updated_at = excluded.updated_at,
+                sync_cursor = excluded.sync_cursor",
+        )
+        .bind(account_id)
+        .bind(delta.calendar_id)
+        .bind(delta.calendar_name)
+        .bind(&now)
+        .bind(cursor)
+        .execute(&mut *transaction)
+        .await?;
+        for removed in delta.removed {
+            sqlx::query(
+                "DELETE FROM calendar_events
+                 WHERE account_id = ? AND source = 'outlook' AND collection_href = ? AND remote_href = ?",
+            )
+            .bind(account_id)
+            .bind(delta.calendar_id)
+            .bind(removed)
+            .execute(&mut *transaction)
+            .await?;
+        }
+        if delta.complete {
+            let mirrored: Vec<String> = sqlx::query_scalar(
+                "SELECT remote_href FROM calendar_events
+                 WHERE account_id = ? AND source = 'outlook' AND collection_href = ?",
+            )
+            .bind(account_id)
+            .bind(delta.calendar_id)
+            .fetch_all(&mut *transaction)
+            .await?;
+            let listed = delta
+                .changed
+                .iter()
+                .map(|event| event.remote_id)
+                .collect::<std::collections::HashSet<_>>();
+            for stale in mirrored.iter().filter(|id| !listed.contains(id.as_str())) {
+                sqlx::query(
+                    "DELETE FROM calendar_events
+                     WHERE account_id = ? AND source = 'outlook' AND collection_href = ? AND remote_href = ?",
+                )
+                .bind(account_id)
+                .bind(delta.calendar_id)
+                .bind(stale)
+                .execute(&mut *transaction)
+                .await?;
+            }
+        }
+        for event in delta.changed {
+            Self::write_event(
+                &mut transaction,
+                outlook_event_write(account_id, delta.calendar_id, event),
+            )
+            .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    /// Store an event Graph just returned for a write, outside any sync pass.
+    pub async fn upsert_outlook_event(
+        &self,
+        account_id: &str,
+        calendar_id: &str,
+        event: &OutlookCalendarEvent<'_>,
+    ) -> Result<CalendarEventRecord, CalendarError> {
+        self.upsert_event(outlook_event_write(account_id, calendar_id, event))
+            .await
+    }
+
+    /// Drop Outlook calendars the account no longer lists, with their events.
+    pub async fn retain_outlook_calendars(
+        &self,
+        account_id: &str,
+        listed: &[&str],
+    ) -> Result<(), CalendarError> {
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let mirrored: Vec<String> = sqlx::query_scalar(
+            "SELECT remote_id FROM calendar_sources WHERE account_id = ? AND source = 'outlook'",
+        )
+        .bind(account_id)
+        .fetch_all(&mut *transaction)
+        .await?;
+        for gone in mirrored.iter().filter(|id| !listed.contains(&id.as_str())) {
+            sqlx::query(
+                "DELETE FROM calendar_events
+                 WHERE account_id = ? AND source = 'outlook' AND collection_href = ?",
+            )
+            .bind(account_id)
+            .bind(gone)
+            .execute(&mut *transaction)
+            .await?;
+            sqlx::query(
+                "DELETE FROM calendar_sources
+                 WHERE account_id = ? AND source = 'outlook' AND remote_id = ?",
+            )
+            .bind(account_id)
+            .bind(gone)
+            .execute(&mut *transaction)
+            .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    pub async fn count_events(&self, account_id: &str, source: &str) -> Result<i64, CalendarError> {
+        sqlx::query_scalar(
+            "SELECT COUNT(*) FROM calendar_events WHERE account_id = ? AND source = ?",
+        )
+        .bind(account_id)
+        .bind(source)
+        .fetch_one(self.pool)
+        .await
+        .map_err(Into::into)
     }
 
     pub async fn upsert_caldav_event(
@@ -646,11 +918,16 @@ impl<'a> CalendarRepository<'a> {
         let id = stable_id("dav-event", &format!("{account_id}|{remote_href}"));
         let attendees_json = serde_json::to_string(&parse_ics_attendees(raw_ics))
             .unwrap_or_else(|_| "[]".to_string());
+        // A meeting this account declined stays on the calendar but takes no time.
+        let own = crate::calendar::availability::account_addresses(self.pool, account_id).await?;
+        let transparent = crate::calendar::availability::ics_transparent(raw_ics)
+            || crate::calendar::availability::ics_declined_by(raw_ics, &own);
         self.upsert_event(CalendarEventWrite {
             id: &id,
             account_id,
             uid: &event.uid,
-            title: event.summary.as_deref().unwrap_or("(ohne Titel)"),
+            // An empty title is the frontend's to name in the viewer's language.
+            title: event.summary.as_deref().unwrap_or_default(),
             description: event.description.as_deref(),
             location: event.location.as_deref(),
             starts_at,
@@ -662,6 +939,10 @@ impl<'a> CalendarRepository<'a> {
             remote_etag: etag,
             collection_href: Some(collection_href),
             raw_ics: Some(raw_ics),
+            flags: EventFlags {
+                transparent,
+                ..EventFlags::default()
+            },
         })
         .await?;
         Ok(true)
@@ -706,12 +987,108 @@ impl<'a> CalendarRepository<'a> {
     }
 }
 
+/// Where a parsed invite came from, which decides whether it may change an
+/// invite already stored under the same UID.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InviteOrigin<'a> {
+    /// A file the user imported themselves.
+    Import,
+    /// A `text/calendar` part or `.ics` attachment of this message.
+    MailPart(&'a str),
+    /// A VCALENDAR block found in this message's text or HTML body.
+    MailBody(&'a str),
+}
+
+impl<'a> InviteOrigin<'a> {
+    fn message_id(self) -> Option<&'a str> {
+        match self {
+            Self::Import => None,
+            Self::MailPart(id) | Self::MailBody(id) => Some(id),
+        }
+    }
+}
+
+#[derive(Debug, FromRow)]
+struct StoredInviteAuthority {
+    message_id: Option<String>,
+    organizer_email: Option<String>,
+    sequence: Option<i64>,
+    source_sender: Option<String>,
+}
+
+/// An update (cancellation included) from another mail needs a calendar part,
+/// the same organizer, a sender that is the organizer or the stored invite's
+/// sender, and a SEQUENCE no lower than the stored one.
+fn may_update_invite(
+    stored: &StoredInviteAuthority,
+    origin: InviteOrigin<'_>,
+    sender: Option<&str>,
+    invite: &ParsedInvite,
+) -> bool {
+    let message_id = match origin {
+        InviteOrigin::Import => return true,
+        InviteOrigin::MailPart(id) | InviteOrigin::MailBody(id) => id,
+    };
+    if stored.message_id.as_deref() == Some(message_id) {
+        return true;
+    }
+    if matches!(origin, InviteOrigin::MailBody(_)) {
+        return false;
+    }
+    let organizer = stored.organizer_email.as_deref().map(normalize_email);
+    if organizer != invite.organizer_email.as_deref().map(normalize_email) {
+        return false;
+    }
+    let Some(sender) = sender.map(normalize_email).filter(|s| !s.is_empty()) else {
+        return false;
+    };
+    let source = stored.source_sender.as_deref().map(normalize_email);
+    let authorized =
+        organizer.as_deref() == Some(sender.as_str()) || source.as_deref() == Some(sender.as_str());
+    authorized && invite.sequence.unwrap_or(0) >= stored.sequence.unwrap_or(0)
+}
+
+fn normalize_email(value: &str) -> String {
+    let value = value.trim();
+    let value = match value.get(..7) {
+        Some(scheme) if scheme.eq_ignore_ascii_case("mailto:") => &value[7..],
+        _ => value,
+    };
+    value.trim().to_ascii_lowercase()
+}
+
 fn invite_id(account_id: &str, uid: &str, recurrence_id: &str) -> String {
     crate::sync::provider_identity::provider_local_id(
         "inv",
         "calendar",
         &[account_id, uid, recurrence_id],
     )
+}
+
+/// The generic write of an Outlook event in `calendar_id`.
+pub fn outlook_event_write<'a>(
+    account_id: &'a str,
+    calendar_id: &'a str,
+    event: &OutlookCalendarEvent<'a>,
+) -> CalendarEventWrite<'a> {
+    CalendarEventWrite {
+        id: event.id,
+        account_id,
+        uid: event.uid,
+        title: event.title,
+        description: event.description,
+        location: event.location,
+        starts_at: event.starts_at,
+        ends_at: event.ends_at,
+        all_day: event.all_day,
+        attendees_json: event.attendees_json,
+        source: "outlook",
+        remote_href: Some(event.remote_id),
+        remote_etag: event.change_key,
+        collection_href: Some(calendar_id),
+        raw_ics: None,
+        flags: event.flags,
+    }
 }
 
 fn stable_id(prefix: &str, value: &str) -> String {
@@ -807,6 +1184,7 @@ mod tests {
             remote_etag: None,
             collection_href: None,
             raw_ics: None,
+            flags: EventFlags::default(),
         }
     }
 
@@ -856,6 +1234,196 @@ mod tests {
         );
     }
 
+    async fn mail_from(pool: &SqlitePool, id: &str, from: &str) {
+        sqlx::query(
+            "INSERT OR IGNORE INTO folders (id, account_id, name, full_path, remote_id, folder_type, created_at, updated_at)
+             VALUES ('inbox', 'account', 'Inbox', 'INBOX', 'INBOX', 'inbox', '', '')",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO messages (id, account_id, folder_id, remote_id, from_address, to_addresses, date, created_at, updated_at)
+             VALUES (?, 'account', 'inbox', ?, ?, '[]', '', '', '')",
+        )
+        .bind(id)
+        .bind(id)
+        .bind(from)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    /// The invite stored from `m-original`, sent by `from`.
+    async fn stored_invite(from: &str) -> SqlitePool {
+        let pool = pool().await;
+        account(&pool, "account", "2026-01-01").await;
+        mail_from(&pool, "m-original", from).await;
+        let request = crate::email::calendar::parse_invite(REQUEST).unwrap();
+        CalendarRepository::new(&pool)
+            .upsert_invite("account", InviteOrigin::MailPart("m-original"), &request)
+            .await
+            .unwrap();
+        pool
+    }
+
+    async fn deliver(
+        pool: &SqlitePool,
+        origin: InviteOrigin<'_>,
+        ics: &str,
+    ) -> CalendarInviteRecord {
+        let invite = crate::email::calendar::parse_invite(ics).unwrap();
+        CalendarRepository::new(pool)
+            .upsert_invite("account", origin, &invite)
+            .await
+            .unwrap()
+    }
+
+    fn revised(sequence: u32) -> String {
+        REQUEST
+            .replace("SUMMARY:Planning", "SUMMARY:Moved planning")
+            .replace("SEQUENCE:1", &format!("SEQUENCE:{sequence}"))
+    }
+
+    #[tokio::test]
+    async fn the_organizer_can_update_an_invite() {
+        let pool = stored_invite("alice@example.test").await;
+        mail_from(&pool, "m-update", "Alice@Example.test").await;
+
+        let row = deliver(&pool, InviteOrigin::MailPart("m-update"), &revised(2)).await;
+
+        assert_eq!(row.summary.as_deref(), Some("Moved planning"));
+        assert_eq!(row.message_id.as_deref(), Some("m-update"));
+    }
+
+    #[tokio::test]
+    async fn the_sender_of_the_original_invite_can_update_it() {
+        // Calendar services send on the organizer's behalf from their own address.
+        let pool = stored_invite("calendar-notification@service.example").await;
+        mail_from(&pool, "m-update", "calendar-notification@service.example").await;
+        sqlx::query("DELETE FROM messages WHERE id = 'm-original'")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let row = deliver(&pool, InviteOrigin::MailPart("m-update"), &revised(2)).await;
+
+        assert_eq!(row.summary.as_deref(), Some("Moved planning"));
+    }
+
+    #[tokio::test]
+    async fn an_invite_from_a_different_sender_leaves_the_stored_one_alone() {
+        let pool = stored_invite("alice@example.test").await;
+        mail_from(&pool, "m-foreign", "mallory@other.example").await;
+
+        let row = deliver(&pool, InviteOrigin::MailPart("m-foreign"), &revised(5)).await;
+
+        assert_eq!(row.summary.as_deref(), Some("Planning"));
+        assert_eq!(row.message_id.as_deref(), Some("m-original"));
+    }
+
+    #[tokio::test]
+    async fn an_invite_naming_a_different_organizer_leaves_the_stored_one_alone() {
+        let pool = stored_invite("alice@example.test").await;
+        mail_from(&pool, "m-foreign", "mallory@other.example").await;
+        let ics = revised(5).replace("mailto:alice@example.test", "mailto:mallory@other.example");
+
+        let row = deliver(&pool, InviteOrigin::MailPart("m-foreign"), &ics).await;
+
+        assert_eq!(row.summary.as_deref(), Some("Planning"));
+        assert_eq!(row.organizer_email.as_deref(), Some("alice@example.test"));
+        assert_eq!(row.message_id.as_deref(), Some("m-original"));
+    }
+
+    #[tokio::test]
+    async fn a_lower_sequence_does_not_replace_a_newer_invite() {
+        let pool = stored_invite("alice@example.test").await;
+        mail_from(&pool, "m-update", "alice@example.test").await;
+        mail_from(&pool, "m-stale", "alice@example.test").await;
+        deliver(&pool, InviteOrigin::MailPart("m-update"), &revised(3)).await;
+
+        let row = deliver(
+            &pool,
+            InviteOrigin::MailPart("m-stale"),
+            &REQUEST.replace("SUMMARY:Planning", "SUMMARY:Stale"),
+        )
+        .await;
+
+        assert_eq!(row.summary.as_deref(), Some("Moved planning"));
+        assert_eq!(row.message_id.as_deref(), Some("m-update"));
+    }
+
+    #[tokio::test]
+    async fn a_cancellation_from_a_different_sender_is_ignored() {
+        let pool = stored_invite("alice@example.test").await;
+        mail_from(&pool, "m-foreign", "mallory@other.example").await;
+
+        let row = deliver(&pool, InviteOrigin::MailPart("m-foreign"), CANCEL).await;
+
+        assert_eq!(row.cancelled, 0);
+        assert_eq!(row.message_id.as_deref(), Some("m-original"));
+    }
+
+    #[tokio::test]
+    async fn the_organizer_can_cancel_an_invite() {
+        let pool = stored_invite("alice@example.test").await;
+        mail_from(&pool, "m-cancel", "alice@example.test").await;
+
+        let row = deliver(&pool, InviteOrigin::MailPart("m-cancel"), CANCEL).await;
+
+        assert_eq!(row.cancelled, 1);
+    }
+
+    #[tokio::test]
+    async fn an_invite_found_in_a_mail_body_cannot_update_a_stored_one() {
+        let pool = stored_invite("alice@example.test").await;
+        mail_from(&pool, "m-body", "alice@example.test").await;
+
+        let row = deliver(&pool, InviteOrigin::MailBody("m-body"), &revised(2)).await;
+        assert_eq!(row.summary.as_deref(), Some("Planning"));
+        assert_eq!(row.message_id.as_deref(), Some("m-original"));
+
+        // It may still create an invite nobody has stored yet.
+        let other = revised(1).replace("UID:event@example.test", "UID:other@example.test");
+        let created = deliver(&pool, InviteOrigin::MailBody("m-body"), &other).await;
+        assert_eq!(created.message_id.as_deref(), Some("m-body"));
+    }
+
+    #[tokio::test]
+    async fn the_same_mail_can_store_its_invite_again() {
+        let pool = stored_invite("calendar@service.example").await;
+
+        let row = deliver(&pool, InviteOrigin::MailPart("m-original"), REQUEST).await;
+
+        assert_eq!(row.message_id.as_deref(), Some("m-original"));
+    }
+
+    #[tokio::test]
+    async fn an_invite_without_a_uid_is_not_stored() {
+        let pool = pool().await;
+        account(&pool, "account", "2026-01-01").await;
+        let mut invite = crate::email::calendar::parse_invite(REQUEST).unwrap();
+        invite.uid = "  ".into();
+        CalendarRepository::upsert_invite_on_connection(
+            &mut pool.acquire().await.unwrap(),
+            "account",
+            InviteOrigin::Import,
+            &invite,
+        )
+        .await
+        .unwrap();
+
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM calendar_invites")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+        assert!(crate::email::calendar::parse_invite(
+            &REQUEST.replace("UID:event@example.test", "UID: ")
+        )
+        .is_none());
+    }
+
     #[tokio::test]
     async fn invitation_identity_preserves_a_legacy_id_and_rsvp_on_reimport() {
         let pool = pool().await;
@@ -866,7 +1434,7 @@ mod tests {
         let revised = REQUEST.replace("SUMMARY:Planning", "SUMMARY:Revised planning");
         let request = crate::email::calendar::parse_invite(&revised).unwrap();
         let updated = repository
-            .upsert_invite("account", None, &request)
+            .upsert_invite("account", InviteOrigin::Import, &request)
             .await
             .unwrap();
         assert_eq!(updated.id, "inv-legacy-event");
@@ -897,7 +1465,7 @@ mod tests {
             let request = crate::email::calendar::parse_invite(&raw).unwrap();
             assert_eq!(request.uid, uid);
             let invitation = repository
-                .upsert_invite("account", None, &request)
+                .upsert_invite("account", InviteOrigin::Import, &request)
                 .await
                 .unwrap();
             ids.push(invitation.id);
@@ -936,7 +1504,7 @@ mod tests {
         let repository = CalendarRepository::new(&pool);
         let request = crate::email::calendar::parse_invite(REQUEST).unwrap();
         let stored = repository
-            .upsert_invite("account", None, &request)
+            .upsert_invite("account", InviteOrigin::Import, &request)
             .await
             .unwrap();
 
@@ -947,7 +1515,7 @@ mod tests {
             .replace("SUMMARY:Planning\r\n", "");
         let reply = crate::email::calendar::parse_invite(&reply).unwrap();
         repository
-            .upsert_invite("account", None, &reply)
+            .upsert_invite("account", InviteOrigin::Import, &reply)
             .await
             .unwrap();
         let kept = repository.get_invite(&stored.id).await.unwrap();
@@ -998,7 +1566,7 @@ mod tests {
         let repository = CalendarRepository::new(&pool);
         let request = crate::email::calendar::parse_invite(REQUEST).unwrap();
         let first = repository
-            .upsert_invite("account", None, &request)
+            .upsert_invite("account", InviteOrigin::Import, &request)
             .await
             .unwrap();
         repository
@@ -1006,7 +1574,7 @@ mod tests {
             .await
             .unwrap();
         repository
-            .upsert_invite("account", None, &request)
+            .upsert_invite("account", InviteOrigin::Import, &request)
             .await
             .unwrap();
         assert_eq!(
@@ -1016,11 +1584,11 @@ mod tests {
 
         let cancel = crate::email::calendar::parse_invite(CANCEL).unwrap();
         repository
-            .upsert_invite("account", None, &cancel)
+            .upsert_invite("account", InviteOrigin::Import, &cancel)
             .await
             .unwrap();
         repository
-            .upsert_invite("account", None, &request)
+            .upsert_invite("account", InviteOrigin::Import, &request)
             .await
             .unwrap();
         assert_eq!(repository.get_invite(&first.id).await.unwrap().cancelled, 1);
@@ -1029,7 +1597,7 @@ mod tests {
             REQUEST.replace("SEQUENCE:1", "RECURRENCE-ID:20260917T100000Z\r\nSEQUENCE:1");
         let recurring = crate::email::calendar::parse_invite(&recurring).unwrap();
         let occurrence = repository
-            .upsert_invite("account", None, &recurring)
+            .upsert_invite("account", InviteOrigin::Import, &recurring)
             .await
             .unwrap();
         assert_ne!(occurrence.id, first.id);
@@ -1102,6 +1670,7 @@ mod tests {
                     all_day: false,
                     attendees_json: "[]",
                     calendar_id: "old",
+                    transparent: false,
                 }],
             )
             .await
@@ -1122,6 +1691,140 @@ mod tests {
             repository.list_events(Some("account")).await.unwrap()[0].id,
             "old-event"
         );
+    }
+
+    #[tokio::test]
+    async fn an_incremental_pass_does_not_restore_a_cursor_cleared_meanwhile() {
+        let pool = pool().await;
+        account(&pool, "account", "2026-01-01").await;
+        let repository = CalendarRepository::new(&pool);
+        let delta = |cursor: &'static str, complete: bool| OutlookCalendarDelta {
+            calendar_id: "cal",
+            calendar_name: "Calendar",
+            changed: &[],
+            removed: &[],
+            complete,
+            cursor: Some(cursor),
+        };
+        let stored = || async {
+            sqlx::query_scalar::<_, Option<String>>(
+                "SELECT sync_cursor FROM calendar_sources WHERE remote_id = 'cal'",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        };
+        repository
+            .apply_outlook_delta("account", delta("first", true))
+            .await
+            .unwrap();
+        repository
+            .apply_outlook_delta("account", delta("second", false))
+            .await
+            .unwrap();
+        assert_eq!(stored().await.as_deref(), Some("second"));
+
+        // The resync repair clears the cursor while an incremental pass runs.
+        sqlx::query("UPDATE calendar_sources SET sync_cursor = NULL WHERE source = 'outlook'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        repository
+            .apply_outlook_delta("account", delta("third", false))
+            .await
+            .unwrap();
+        assert_eq!(
+            stored().await,
+            None,
+            "the next pass must list the calendar whole"
+        );
+        // That full pass stores its cursor again.
+        repository
+            .apply_outlook_delta("account", delta("fourth", true))
+            .await
+            .unwrap();
+        assert_eq!(stored().await.as_deref(), Some("fourth"));
+    }
+
+    #[tokio::test]
+    async fn a_series_takes_its_free_or_declined_flag_from_its_main_event() {
+        let pool = pool().await;
+        account(&pool, "account", "2026-01-01").await;
+        let repository = CalendarRepository::new(&pool);
+        // Overrides first: one cancelled, one the account declined. The
+        // series itself is an ordinary busy meeting.
+        let series = |main_extra: &str| {
+            format!(
+                "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n\
+                 BEGIN:VEVENT\r\nUID:s@example.test\r\nRECURRENCE-ID:20260911T100000Z\r\n\
+                 DTSTART:20260911T100000Z\r\nDTEND:20260911T110000Z\r\nSTATUS:CANCELLED\r\nEND:VEVENT\r\n\
+                 BEGIN:VEVENT\r\nUID:s@example.test\r\nRECURRENCE-ID:20260912T100000Z\r\n\
+                 DTSTART:20260912T100000Z\r\nDTEND:20260912T110000Z\r\n\
+                 ATTENDEE;PARTSTAT=DECLINED:mailto:account@example.test\r\nEND:VEVENT\r\n\
+                 BEGIN:VEVENT\r\nUID:s@example.test\r\nSUMMARY:Daily\r\n\
+                 DTSTART:20260910T100000Z\r\nDTEND:20260910T110000Z\r\nRRULE:FREQ=DAILY\r\n\
+                 {main_extra}END:VEVENT\r\nEND:VCALENDAR\r\n"
+            )
+        };
+        let transparent = || async {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT transparent FROM calendar_events WHERE source = 'caldav'",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        };
+        repository
+            .upsert_caldav_event("account", "/cal/", "/cal/s.ics", Some("1"), &series(""))
+            .await
+            .unwrap();
+        assert_eq!(transparent().await, 0);
+        repository
+            .upsert_caldav_event(
+                "account",
+                "/cal/",
+                "/cal/s.ics",
+                Some("2"),
+                &series(
+                    "ATTENDEE;CN=\"Me: Account\";PARTSTAT=DECLINED:mailto:account@example.test\r\n",
+                ),
+            )
+            .await
+            .unwrap();
+        assert_eq!(transparent().await, 1);
+    }
+
+    /// A task in a mixed collection (Nextcloud, Fastmail) is a task, not an
+    /// event: it is neither mirrored as one nor makes anyone busy.
+    #[tokio::test]
+    async fn a_vtodo_resource_is_no_calendar_event_and_takes_no_time() {
+        let pool = pool().await;
+        account(&pool, "account", "2026-01-01").await;
+        let repository = CalendarRepository::new(&pool);
+        let task = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\nUID:task@example.test\r\n\
+                    SUMMARY:File the report\r\nDTSTART:20261109T090000Z\r\nDUE:20261109T170000Z\r\n\
+                    END:VTODO\r\nEND:VCALENDAR\r\n";
+        assert!(!repository
+            .upsert_caldav_event("account", "/cal/", "/cal/task.ics", Some("1"), task)
+            .await
+            .unwrap());
+        let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM calendar_events")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(rows, 0);
+        let at = |text: &str| chrono::DateTime::parse_from_rfc3339(text).unwrap().to_utc();
+        let busy = crate::calendar::availability::own_busy(
+            &pool,
+            at("2026-11-09T00:00:00Z"),
+            at("2026-11-10T00:00:00Z"),
+            chrono_tz::UTC,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(busy.is_empty());
     }
 
     #[tokio::test]
@@ -1173,7 +1876,7 @@ mod tests {
         let repository = CalendarRepository::new(&pool);
         let request = crate::email::calendar::parse_invite(REQUEST).unwrap();
         let invite = repository
-            .upsert_invite("account", None, &request)
+            .upsert_invite("account", InviteOrigin::Import, &request)
             .await
             .unwrap();
         assert_eq!(

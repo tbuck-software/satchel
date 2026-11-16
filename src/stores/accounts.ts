@@ -14,6 +14,7 @@ import {
   backendPollOauthFlow,
   backendSetAccountAvatar,
   backendSetAccountColor,
+  backendSetAccountNames,
   backendStartOauthFlow,
   translateBackendError,
   type SourceCapabilities,
@@ -170,12 +171,16 @@ export const useAccountsStore = defineStore('accounts', () => {
     }
   }
 
-  function addAccount(input: { displayName: string; email: string; provider: Account['provider'] }): Account {
+  function addAccount(input: { displayName: string; label?: string; email: string; provider: Account['provider'] }): Account {
     const id = `acc-${Date.now().toString(36)}`;
     const colorIndex = accounts.value.length % ACCOUNT_COLORS.length;
+    const senderName = input.displayName || input.email.split('@')[0]!;
+    const label = input.label?.trim() || null;
     const account: Account = {
       id,
-      displayName: input.displayName || input.email.split('@')[0]!,
+      displayName: label || senderName,
+      label,
+      senderName,
       email: input.email,
       provider: input.provider,
       kind: 'email',
@@ -218,7 +223,9 @@ export const useAccountsStore = defineStore('accounts', () => {
       if (nextCapabilities) capabilities.value = nextCapabilities;
       accounts.value = rows.map((row) => ({
         id: row.id,
-        displayName: row.display_name,
+        displayName: row.label?.trim() || row.display_name?.trim() || row.email,
+        label: row.label ?? null,
+        senderName: row.display_name,
         email: row.email,
         provider: normalizeProvider(row.provider),
         kind: row.kind ?? 'email',
@@ -298,29 +305,41 @@ export const useAccountsStore = defineStore('accounts', () => {
    * Change how an account looks: shown at once, written behind it, put back
    * with a toast if the backend refuses.
    */
-  async function updateAppearance(accountId: string, change: { color: string } | { avatar: string | null }) {
+  /** Change an account in place; the backend call decides, a refusal rolls back with a toast. */
+  async function updateAccount(accountId: string, change: Partial<Account>, send: () => Promise<unknown>, failed: string) {
     const index = accounts.value.findIndex((account) => account.id === accountId);
     const before = accounts.value[index];
     if (!before) return false;
     accounts.value[index] = { ...before, ...change };
     try {
-      if ('color' in change) await backendSetAccountColor(accountId, change.color);
-      else await backendSetAccountAvatar(accountId, change.avatar);
+      await send();
       return true;
     } catch (error) {
       const current = accounts.value.findIndex((account) => account.id === accountId);
       if (current >= 0) accounts.value[current] = before;
-      toast.error(translateBackendError(error) || t('accountAppearance.saveFailed'));
+      toast.error(translateBackendError(error) || failed);
       return false;
     }
   }
 
   function setColor(accountId: string, color: string) {
-    return updateAppearance(accountId, { color });
+    return updateAccount(accountId, { color }, () => backendSetAccountColor(accountId, color), t('accountAppearance.saveFailed'));
   }
 
   function setAvatar(accountId: string, avatar: string | null) {
-    return updateAppearance(accountId, { avatar });
+    return updateAccount(accountId, { avatar }, () => backendSetAccountAvatar(accountId, avatar), t('accountAppearance.saveFailed'));
+  }
+
+  function setNames(accountId: string, label: string | null, senderName: string) {
+    const cleanLabel = label?.trim() || null;
+    const cleanSender = senderName.trim();
+    const email = accounts.value.find((account) => account.id === accountId)?.email ?? '';
+    return updateAccount(
+      accountId,
+      { label: cleanLabel, senderName: cleanSender, displayName: cleanLabel || cleanSender || email },
+      () => backendSetAccountNames(accountId, cleanLabel, cleanSender),
+      t('settings.accounts.names.saveFailed'),
+    );
   }
 
   async function clearAuthError(accountId: string) {
@@ -366,5 +385,6 @@ export const useAccountsStore = defineStore('accounts', () => {
     clearAuthError,
     setColor,
     setAvatar,
+    setNames,
   };
 });

@@ -1,4 +1,8 @@
 import type { TrashReceipt } from './generated/core/mail_actions/TrashReceipt';
+import type { StoppedEarly } from './generated/core/mail_actions/StoppedEarly';
+import type { NotSpamReceipt } from './generated/core/mail_actions/NotSpamReceipt';
+import type { SpamFilterMode } from './generated/core/spam/SpamFilterMode';
+import type { SpamFilterStatus } from './generated/core/spam/SpamFilterStatus';
 import type { ProjectedWireFields, RefinedWireFields } from './wireTypes';
 import type { ThreadDto as WireThreadDto } from './generated/app/commands/threads/ThreadDto';
 import type { ThreadCursor as WireThreadCursor } from './generated/app/commands/threads/ThreadCursor';
@@ -12,7 +16,7 @@ import { invoke } from './core';
 import type { ThreadSmartBucket } from '@/types/mail';
 import type { BatchTransitionInput, BatchTransitionResult } from './misc';
 
-export type BackendThread = RefinedWireFields<OptionalWireFields<WireThreadDto, 'sort_date' | 'has_draft' | 'draft_snippet' | 'board_position' | 'tags' | 'assignee' | 'shared_with' | 'sent_participants' | 'category' | 'smart_bucket' | 'is_muted' | 'is_starred' | 'snooze_until' | 'workflow_changed_at' | 'sender_known' | 'has_invite' | 'invite_status' | 'invite_cancelled'>, { smart_bucket?: ThreadSmartBucket }>;
+export type BackendThread = RefinedWireFields<OptionalWireFields<WireThreadDto, 'sort_date' | 'has_draft' | 'draft_snippet' | 'board_position' | 'tags' | 'assignee' | 'shared_with' | 'sent_participants' | 'category' | 'smart_bucket' | 'is_muted' | 'is_starred' | 'snooze_until' | 'workflow_changed_at' | 'sender_known' | 'has_invite' | 'invite_status' | 'invite_cancelled' | 'likely_spam' | 'spam_moved'>, { smart_bucket?: ThreadSmartBucket }>;
 
 
 export type BackendThreadCursor = WireThreadCursor;
@@ -70,7 +74,8 @@ export async function backendResolveMessageLink(messageId: string): Promise<stri
 export type BackendRule = ProjectedWireFields<OptionalWireFields<WireRuleDto, 'description'>, { trigger_config: Record<string, unknown> }>;
 
 
-export type BackendRuleInput = Omit<BackendRule, 'id'> & { id?: string | null };
+/** What a save sends; the pause and the skip count are the backend's. */
+export type BackendRuleInput = Omit<BackendRule, 'id' | 'forward_paused_at' | 'server_forward_skips'> & { id?: string | null };
 
 
 export async function backendListRules(): Promise<BackendRule[]> {
@@ -80,6 +85,12 @@ export async function backendListRules(): Promise<BackendRule[]> {
 
 export async function backendUpsertRule(input: BackendRuleInput): Promise<BackendRule> {
   return invoke<BackendRule>('upsert_rule', { input });
+}
+
+
+/** Turn a rule's paused forward back on; saving the rule does not. */
+export async function backendResumeRuleForwarding(ruleId: string): Promise<void> {
+  return invoke<void>('resume_rule_forwarding', { ruleId });
 }
 
 
@@ -116,6 +127,8 @@ export async function backendUpdateThreadOrganization(input: {
 
 
 export type BackendTrashReceipt = TrashReceipt;
+/** A bulk move a later batch stopped: what moved, what stayed, why. */
+export type BackendStoppedEarly = StoppedEarly;
 
 export async function backendUndoTrash(receiptId: string): Promise<void> {
   return invoke<void>('undo_trash', { receiptId });
@@ -164,6 +177,33 @@ export async function backendSetThreadMuted(threadId: string, muted: boolean): P
 /** Spam returns the same receipt as trash; `backendUndoTrash` reverses either. */
 export async function backendMarkThreadsSpam(threadIds: string[]): Promise<BackendTrashReceipt> {
   return invoke<BackendTrashReceipt>('mark_threads_spam', { input: { thread_ids: threadIds } });
+}
+
+
+export type BackendNotSpamReceipt = NotSpamReceipt;
+export type BackendSpamFilterMode = SpamFilterMode;
+export type BackendSpamFilterStatus = SpamFilterStatus;
+
+
+/** Teaches the local filter the threads are wanted and brings any in Spam back to the Inbox. */
+export async function backendMarkThreadsNotSpam(threadIds: string[]): Promise<BackendNotSpamReceipt> {
+  return invoke<BackendNotSpamReceipt>('mark_threads_not_spam', { input: { thread_ids: threadIds } });
+}
+
+
+/** Unlearns a Not spam and puts the threads it moved back in Spam. */
+export async function backendUndoNotSpam(receipt: BackendNotSpamReceipt): Promise<void> {
+  return invoke<void>('undo_not_spam', { input: { receipt } });
+}
+
+
+export async function backendGetSpamFilterStatus(): Promise<BackendSpamFilterStatus> {
+  return invoke<BackendSpamFilterStatus>('get_spam_filter_status');
+}
+
+
+export async function backendSetSpamFilterMode(mode: BackendSpamFilterMode): Promise<void> {
+  return invoke<void>('set_spam_filter_mode', { input: { mode } });
 }
 
 

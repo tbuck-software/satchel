@@ -19,7 +19,7 @@ import { useTopicsStore } from '@/stores/topics';
 import { THREAD_LIST_WIDTH_LIMITS, useUiStore } from '@/stores/ui';
 import { useFollowUpsStore } from '@/stores/followUps';
 import { formatListTime } from '@/utils/listTime';
-import { NEW_SENDER_PREVIEW_LIMIT, layoutPhoneInbox } from '@/utils/threadList';
+import { NEW_SENDER_PREVIEW_LIMIT, inboxGroupingInScope, layoutPhoneInbox } from '@/utils/threadList';
 import type { WorkflowState } from '@/types/workflow';
 import SmartBucketIcon from '@/components/mail/SmartBucketIcon.vue';
 import ThreadGroupList from '@/components/mail/ThreadGroupList.vue';
@@ -52,6 +52,8 @@ const TopicDetail = defineAsyncComponent(() => import('@/components/topics/Topic
 const SelectionToolbar = defineAsyncComponent(() => import('@/components/mail/SelectionToolbar.vue'));
 // The search machinery loads with the first query, not with the Inbox.
 const ListSearchResults = defineAsyncComponent(() => import('@/components/mail/ListSearchResults.vue'));
+// Phone only: sync and account status on the subtitle line.
+const ShellStatusChip = defineAsyncComponent(() => import('@/components/layout/ShellStatusChip.vue'));
 
 const router = useRouter();
 const { t } = useI18n();
@@ -147,9 +149,11 @@ const folderViewActive = computed(() => threads.mailboxFilter.kind === 'folder')
 // Later is two sections by return time; bundles would hide exactly that.
 const laterViewActive = computed(() => threads.workflowFilter === 'later' && !contactViewActive.value);
 const smartInboxActive = computed(() =>
-  !folderViewActive.value
-    && !contactViewActive.value
-    && !laterViewActive.value
+  inboxGroupingInScope({
+    workflow: threads.workflowFilter,
+    mailbox: threads.mailboxFilter,
+    contactEmail: threads.activeContactEmail,
+  })
     && (settings.inboxGroupingMode === 'smart' || Boolean(activeBucket.value)),
 );
 const listItems = computed(() => {
@@ -948,6 +952,9 @@ function acceptExistingSenders() {
         :switch-label="$t('nav.mailboxes.current', { mailbox: listTitle })"
         @switch="ui.openMailboxSwitcher()"
       >
+        <template #status>
+          <ShellStatusChip />
+        </template>
         <template #actions>
           <IconButton size="lg" :title="$t('common.search')" @click="openPhoneSearch">
             <AppIcon size="lg"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></AppIcon>

@@ -474,6 +474,37 @@ test('an allow-listed sender domain needs a trusted DMARC pass before fetching p
   await expect.poll(() => requests).toEqual(['https://tracker.example.test/authenticated']);
 });
 
+test('copies mail text without loading its images in the app document', async ({ page }) => {
+  const requests: string[] = [];
+  await page.route('https://tracker.example.test/**', async (route) => {
+    requests.push(route.request().url());
+    await route.fulfill({ status: 204 });
+  });
+  const mail = await renderMail(page, '<p id="copied">Hello <img alt="pixel" width="1" height="1"> world</p>');
+  // Stands in for a reference both blockers missed: the mail's CSP refuses it.
+  await mail.locator('img').evaluate((img) => img.setAttribute('src', 'https://tracker.example.test/copied'));
+  await mail.getByText('world').click();
+  await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).not.toBe('IFRAME');
+
+  const html = await page.evaluate(() => {
+    const frame = document.querySelector<HTMLIFrameElement>('iframe.satchel-email-document');
+    const doc = frame?.contentDocument;
+    const paragraph = doc?.getElementById('copied');
+    if (!doc || !paragraph) return '';
+    const range = doc.createRange();
+    range.selectNodeContents(paragraph);
+    doc.getSelection()?.removeAllRanges();
+    doc.getSelection()?.addRange(range);
+    const clipboardData = new DataTransfer();
+    document.dispatchEvent(new ClipboardEvent('copy', { clipboardData, bubbles: true, cancelable: true }));
+    return clipboardData.getData('text/html');
+  });
+
+  expect(html).toContain('tracker.example.test/copied');
+  await page.waitForTimeout(500);
+  expect(requests).toEqual([]);
+});
+
 test('resend prefill mounts the real editor without fetching foreign tracking pixels', async ({ page }) => {
   const requests: string[] = [];
   await page.route('https://tracker.example.test/**', async (route) => {

@@ -36,6 +36,7 @@ pub struct UiStrings {
     pub notification_send_failed: String,
     pub notification_sync_failed: String,
     pub notification_follow_up_due: String,
+    pub notification_task_due: String,
     pub notification_no_subject: String,
     pub notification_channel_name: String,
     pub notification_channel_description: String,

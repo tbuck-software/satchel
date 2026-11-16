@@ -150,6 +150,16 @@ describe('settings section visibility', () => {
   });
 });
 
+describe('labs', () => {
+  it('is offered on every shell, phone included', async () => {
+    expect(await sectionsFor(DESKTOP)).toContain('labs');
+    expect(await sectionsFor(PHONE)).toContain('labs');
+    vi.resetModules();
+    const { resolveSettingsSection } = await import('./settingsSections');
+    expect(resolveSettingsSection('labs')).toBe('labs');
+  });
+});
+
 describe('sections folded into others', () => {
   it('open the section that holds them now', async () => {
     vi.resetModules();

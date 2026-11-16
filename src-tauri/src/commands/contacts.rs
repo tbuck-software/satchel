@@ -16,6 +16,7 @@ use satchel_core::db::contacts::{
     normalize_email, AvatarSource, ContactAvatarOverrideRequest, ContactError, ContactRecord,
     ContactRepository, ContactUpsertRequest,
 };
+use satchel_core::db::known_senders;
 
 use crate::utils::oauth::{access_token_from_account_config, OAuthProvider};
 
@@ -24,6 +25,17 @@ use super::error::{CommandError, CommandResult};
 const LOCAL_AVATAR_SYNC_ERROR_KEY: &str = "backend.errors.contactAvatarLocalSyncFailed";
 const PROVIDER_AVATAR_SYNC_ERROR_KEY: &str = "backend.errors.contactAvatarProviderSyncFailed";
 const FALLBACK_AVATAR_SYNC_ERROR_KEY: &str = "backend.errors.contactAvatarFallbackSyncFailed";
+const GOOGLE_PEOPLE_BASE: &str = "https://people.googleapis.com/v1";
+
+/// What a provider contact read is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ContactRead {
+    /// Avatars and the address book: "Other contacts" lend photos too, and
+    /// Outlook stops at the photo cap.
+    Photos,
+    /// Only the address book, for `known_senders`: every page, no photos.
+    AddressBook,
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
@@ -115,6 +127,16 @@ struct ProviderContactPhoto {
     emails: Vec<String>,
     display_name: Option<String>,
     photo_url: String,
+}
+
+/// What one account's contacts yield: photos for avatars, and the addresses in
+/// the account's own address book for `known_senders`.
+#[derive(Debug, Default)]
+struct ProviderContacts {
+    photos: Vec<ProviderContactPhoto>,
+    /// `None` when the address book was not read whole; a partial list must
+    /// not replace a complete one.
+    address_book: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -261,14 +283,21 @@ pub async fn sync_contact_avatars_inner(
             }
         };
 
-        let result = fetch_current_contact_photos(
+        let result = fetch_current_contacts(
             &client,
             provider,
             crate::utils::oauth::fresh_account_config_for_provider(pool, &account.id, provider),
-            "https://people.googleapis.com/v1",
+            GOOGLE_PEOPLE_BASE,
+            ContactRead::Photos,
         )
         .await;
-        let (token, contacts) = match result {
+        let (
+            token,
+            ProviderContacts {
+                photos,
+                address_book,
+            },
+        ) = match result {
             Ok(result) => result,
             Err(error) => {
                 tracing::warn!(error = %error, account_id = %account.id,
@@ -279,7 +308,10 @@ pub async fn sync_contact_avatars_inner(
                 continue;
             }
         };
-        for contact in contacts.into_iter().take(500) {
+        if let Some(emails) = address_book {
+            store_provider_address_book(pool, provider, &account.id, emails).await;
+        }
+        for contact in photos.into_iter().take(500) {
             let Some(data_url) = download_avatar_data_url(&contact.photo_url, Some(&token)).await
             else {
                 continue;
@@ -333,15 +365,22 @@ async fn sync_macos_contact_avatars(_pool: &SqlitePool) -> Result<i64, String> {
 #[cfg(target_os = "macos")]
 async fn sync_macos_contact_avatars(pool: &SqlitePool) -> Result<i64, String> {
     let targets = contact_avatar_targets(pool, 500).await?;
-    if targets.is_empty() {
-        return Ok(0);
-    }
-
     let target_emails: HashSet<String> =
         targets.iter().map(|target| target.email.clone()).collect();
+    let LocalContacts {
+        photos,
+        address_book,
+    } = fetch_native_macos_contacts(&target_emails)?;
+    // The whole store was read: it replaces what the last read contributed.
+    if let Err(error) =
+        known_senders::replace_address_book(pool, known_senders::AddressBook::MacOs, address_book)
+            .await
+    {
+        tracing::warn!(error = %error, "local address book persistence failed");
+    }
     let mut updated = 0_i64;
 
-    for photo in fetch_native_macos_contact_photos(&target_emails)? {
+    for photo in photos {
         if upsert_contact_avatar(
             pool,
             &photo.email,
@@ -386,9 +425,15 @@ struct LocalContactPhoto {
 }
 
 #[cfg(target_os = "macos")]
-fn fetch_native_macos_contact_photos(
-    target_emails: &HashSet<String>,
-) -> Result<Vec<LocalContactPhoto>, String> {
+struct LocalContacts {
+    /// Photos for addresses mail has shown so far.
+    photos: Vec<LocalContactPhoto>,
+    /// Every address in the store, photo or not.
+    address_book: Vec<String>,
+}
+
+#[cfg(target_os = "macos")]
+fn fetch_native_macos_contacts(target_emails: &HashSet<String>) -> Result<LocalContacts, String> {
     use objc2::rc::autoreleasepool;
     use objc2::AnyThread;
     use objc2_contacts::{
@@ -423,9 +468,16 @@ fn fetch_native_macos_contact_photos(
             .map_err(|err| err.to_string())?;
         let enumerator = result.value();
         let mut photos = Vec::new();
+        let mut address_book = Vec::new();
 
         for contact in enumerator {
             let contact: objc2::rc::Retained<CNContact> = contact;
+            let mut emails = Vec::new();
+            for labeled in contact.emailAddresses() {
+                let labeled: objc2::rc::Retained<CNLabeledValue<NSString>> = labeled;
+                emails.push(labeled.value().to_str(pool).trim().to_ascii_lowercase());
+            }
+            address_book.extend(emails.iter().cloned());
             if !contact.imageDataAvailable() {
                 continue;
             }
@@ -440,9 +492,7 @@ fn fetch_native_macos_contact_photos(
             }) else {
                 continue;
             };
-            for labeled in contact.emailAddresses() {
-                let labeled: objc2::rc::Retained<CNLabeledValue<NSString>> = labeled;
-                let email = labeled.value().to_str(pool).trim().to_ascii_lowercase();
+            for email in emails {
                 if target_emails.contains(&email) {
                     photos.push(LocalContactPhoto {
                         email,
@@ -452,7 +502,10 @@ fn fetch_native_macos_contact_photos(
                 }
             }
         }
-        Ok(photos)
+        Ok(LocalContacts {
+            photos,
+            address_book,
+        })
     })
 }
 
@@ -551,14 +604,71 @@ async fn upsert_contact_avatar(
 
 // The config future may refresh or observe a reconnect. Both permission checks
 // and the token must come from its result, never the pre-await account snapshot.
-async fn fetch_current_contact_photos(
+/// Refresh the address books of OAuth accounts for `known_senders`, without
+/// photos. The avatar sync reads them too, but only when asked to; this keeps
+/// a contact added in Google or Outlook from waiting for that.
+pub async fn sync_provider_address_books(pool: &SqlitePool) -> Result<usize, AccountError> {
+    let accounts = AccountRepository::new(pool)
+        .list_active_oauth_configs()
+        .await?;
+    let client = satchel_core::utils::http::client_builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .expect("contacts HTTP client initialization failed");
+    let mut refreshed = 0;
+    for account in accounts {
+        let Ok(provider) = OAuthProvider::parse(&account.provider) else {
+            continue;
+        };
+        let result = fetch_current_contacts(
+            &client,
+            provider,
+            crate::utils::oauth::fresh_account_config_for_provider(pool, &account.id, provider),
+            GOOGLE_PEOPLE_BASE,
+            ContactRead::AddressBook,
+        )
+        .await;
+        match result {
+            Ok((_, ProviderContacts { address_book, .. })) => {
+                if let Some(emails) = address_book {
+                    store_provider_address_book(pool, provider, &account.id, emails).await;
+                    refreshed += 1;
+                }
+            }
+            Err(error) => {
+                tracing::warn!(error = %error, account_id = %account.id,
+                    "address book refresh failed");
+            }
+        }
+    }
+    Ok(refreshed)
+}
+
+async fn store_provider_address_book(
+    pool: &SqlitePool,
+    provider: OAuthProvider,
+    account_id: &str,
+    emails: Vec<String>,
+) {
+    let book = known_senders::AddressBook::Account {
+        kind: provider.as_str(),
+        account_id,
+    };
+    if let Err(error) = known_senders::replace_address_book(pool, book, emails).await {
+        tracing::warn!(error = %error, account_id, "address book persistence failed");
+    }
+}
+
+async fn fetch_current_contacts(
     client: &reqwest::Client,
     provider: OAuthProvider,
     current: impl std::future::Future<
         Output = crate::sync::errors::SyncResult<satchel_core::accounts::AccountConfig>,
     >,
     google_base: &str,
-) -> Result<(String, Vec<ProviderContactPhoto>), String> {
+    read: ContactRead,
+) -> Result<(String, ProviderContacts), String> {
     let config = current.await.map_err(|err| err.encoded())?;
     if matches!(provider, OAuthProvider::Gmail)
         && crate::utils::oauth::google_scope_granted(
@@ -566,44 +676,59 @@ async fn fetch_current_contact_photos(
             crate::utils::oauth::GOOGLE_CONTACTS_SCOPE,
         ) == Some(false)
     {
-        return Ok((String::new(), Vec::new()));
+        // Access to contacts was withdrawn: stop counting what it once showed.
+        return Ok((
+            String::new(),
+            ProviderContacts {
+                photos: Vec::new(),
+                address_book: Some(Vec::new()),
+            },
+        ));
     }
     let token = access_token_from_account_config(provider, &config)
         .await
         .map_err(|err| err.encoded())?;
     let contacts = match provider {
         OAuthProvider::Gmail => {
-            fetch_google_contact_photos(
+            fetch_google_contacts(
                 client,
                 &token,
-                crate::utils::oauth::google_scope_granted(
-                    &config,
-                    crate::utils::oauth::GOOGLE_OTHER_CONTACTS_SCOPE,
-                ) == Some(true),
+                read == ContactRead::Photos
+                    && crate::utils::oauth::google_scope_granted(
+                        &config,
+                        crate::utils::oauth::GOOGLE_OTHER_CONTACTS_SCOPE,
+                    ) == Some(true),
                 google_base,
             )
             .await?
         }
-        OAuthProvider::Outlook => fetch_graph_contact_photos(client, &token).await?,
+        OAuthProvider::Outlook => fetch_graph_contacts(client, &token, read).await?,
     };
     Ok((token, contacts))
 }
 
-async fn fetch_google_contact_photos(
+async fn fetch_google_contacts(
     client: &reqwest::Client,
     token: &str,
     include_other_contacts: bool,
     base: &str,
-) -> Result<Vec<ProviderContactPhoto>, String> {
-    let mut contacts = Vec::new();
+) -> Result<ProviderContacts, String> {
+    let mut people = Vec::new();
     fetch_google_people_page(
         client,
         token,
         &format!("{base}/people/me/connections"),
         "connections",
-        &mut contacts,
+        &mut people,
     )
     .await?;
+    // Only the user's own contacts make a sender known. "Other contacts" are
+    // collected by Gmail from mail traffic; they still lend their photos.
+    let address_book = people
+        .iter()
+        .flat_map(|person| person.email_addresses.iter())
+        .filter_map(|email| email.value.clone())
+        .collect();
 
     if include_other_contacts {
         fetch_google_people_page(
@@ -611,12 +736,15 @@ async fn fetch_google_contact_photos(
             token,
             &format!("{base}/otherContacts"),
             "otherContacts",
-            &mut contacts,
+            &mut people,
         )
         .await?;
     }
 
-    Ok(contacts)
+    Ok(ProviderContacts {
+        photos: people.into_iter().filter_map(google_person_photo).collect(),
+        address_book: Some(address_book),
+    })
 }
 
 async fn fetch_google_people_page(
@@ -624,7 +752,7 @@ async fn fetch_google_people_page(
     token: &str,
     url: &str,
     list_key: &str,
-    out: &mut Vec<ProviderContactPhoto>,
+    out: &mut Vec<GooglePerson>,
 ) -> Result<(), String> {
     let mut next_page_token: Option<String> = None;
     loop {
@@ -670,7 +798,7 @@ async fn fetch_google_people_page(
         } else {
             body.other_contacts
         };
-        out.extend(people.into_iter().filter_map(google_person_photo));
+        out.extend(people);
 
         next_page_token = body.next_page_token;
         if next_page_token.is_none() {
@@ -703,11 +831,13 @@ fn google_person_photo(person: GooglePerson) -> Option<ProviderContactPhoto> {
     })
 }
 
-async fn fetch_graph_contact_photos(
+async fn fetch_graph_contacts(
     client: &reqwest::Client,
     token: &str,
-) -> Result<Vec<ProviderContactPhoto>, String> {
+    read: ContactRead,
+) -> Result<ProviderContacts, String> {
     let mut contacts = Vec::new();
+    let mut address_book = Vec::new();
     let mut next_url = Some(
         "https://graph.microsoft.com/v1.0/me/contacts?$select=id,displayName,emailAddresses&$top=100"
             .to_string(),
@@ -744,6 +874,7 @@ async fn fetch_graph_contact_photos(
             if emails.is_empty() {
                 continue;
             }
+            address_book.extend(emails.iter().cloned());
             let photo_url = format!(
                 "https://graph.microsoft.com/v1.0/me/contacts/{}/photo/$value",
                 contact.id
@@ -756,12 +887,17 @@ async fn fetch_graph_contact_photos(
         }
 
         next_url = body.next_link;
-        if contacts.len() >= 500 {
+        if read == ContactRead::Photos && contacts.len() >= 500 {
             break;
         }
     }
 
-    Ok(contacts)
+    // Stopping at the photo cap leaves the rest of the address book unread.
+    let complete = next_url.is_none();
+    Ok(ProviderContacts {
+        photos: contacts,
+        address_book: complete.then_some(address_book),
+    })
 }
 
 async fn download_avatar_data_url(url: &str, bearer_token: Option<&str>) -> Option<String> {
@@ -1039,8 +1175,9 @@ async fn fetch_bimi_avatar(domain: &str) -> Option<String> {
 
 async fn fetch_gravatar_avatar(email: &str) -> Option<String> {
     let normalized = email.trim().to_ascii_lowercase();
-    let md5_hash = format!("{:x}", Md5::digest(normalized.as_bytes()));
-    let sha256_hash = format!("{:x}", sha2::Sha256::digest(normalized.as_bytes()));
+    let md5_hash = satchel_core::utils::hex::lower_hex(&Md5::digest(normalized.as_bytes()));
+    let sha256_hash =
+        satchel_core::utils::hex::lower_hex(&sha2::Sha256::digest(normalized.as_bytes()));
     for hash in [md5_hash, sha256_hash] {
         let url = format!("https://www.gravatar.com/avatar/{hash}?d=404&s=192");
         if let Some(data_url) = download_avatar_data_url(&url, None).await {
@@ -1181,7 +1318,7 @@ mod tests {
             let task = tokio::spawn({
                 let pool = pool.clone();
                 async move {
-                    fetch_current_contact_photos(
+                    fetch_current_contacts(
                         &reqwest::Client::new(),
                         OAuthProvider::Gmail,
                         async {
@@ -1195,6 +1332,7 @@ mod tests {
                             .await
                         },
                         &base,
+                        ContactRead::Photos,
                     )
                     .await
                     .unwrap()
@@ -1230,7 +1368,18 @@ mod tests {
                 .await
                 .unwrap();
             release_tx.send(()).unwrap();
-            let (_, contacts) = task.await.unwrap();
+            let (
+                _,
+                ProviderContacts {
+                    photos: contacts,
+                    address_book,
+                },
+            ) = task.await.unwrap();
+            // Without the contacts grant the list is empty, not unknown.
+            assert_eq!(
+                address_book.map(|emails| emails.len()),
+                Some(usize::from(new_regular))
+            );
             stop_tx.send(()).unwrap();
             let requests = server.await.unwrap();
             let expected = usize::from(new_regular) * (1 + usize::from(new_other));
@@ -1243,6 +1392,51 @@ mod tests {
                 new_regular && new_other
             );
         }
+    }
+
+    /// Every own contact makes its sender known, photo or not; "Other
+    /// contacts" are not asked for when only the address book is wanted.
+    #[tokio::test]
+    async fn the_address_book_read_keeps_contacts_without_photos() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            while !request.windows(4).any(|part| part == b"\r\n\r\n") {
+                let mut buf = [0; 2048];
+                let read = stream.read(&mut buf).await.unwrap();
+                assert!(read > 0);
+                request.extend_from_slice(&buf[..read]);
+            }
+            let body = serde_json::json!({"connections": [
+                {"emailAddresses":[{"value":"Pictured@Example.test"}],
+                 "photos":[{"url":"https://photos.example.test/p.png"}]},
+                {"emailAddresses":[{"value":"plain@example.test"}],
+                 "photos":[{"url":"https://photos.example.test/default.png","default":true}]},
+            ]})
+            .to_string();
+            let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            stream.write_all(response.as_bytes()).await.unwrap();
+            String::from_utf8(request).unwrap()
+        });
+
+        let contacts = fetch_google_contacts(&reqwest::Client::new(), "token", false, &base)
+            .await
+            .unwrap();
+        let request = server.await.unwrap();
+
+        assert!(request.starts_with("GET /people/me/connections?"));
+        assert_eq!(
+            contacts.address_book,
+            Some(vec![
+                "Pictured@Example.test".to_owned(),
+                "plain@example.test".to_owned()
+            ])
+        );
+        assert_eq!(contacts.photos.len(), 1);
+        assert_eq!(contacts.photos[0].emails, ["pictured@example.test"]);
     }
 
     #[tokio::test]

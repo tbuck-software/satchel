@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
 use crate::db::contacts::ContactRepository;
+use crate::email::calendar::parse_ics_duration;
 
 const MAX_DAV_RESPONSE_BYTES: usize = 50 * 1024 * 1024;
 const CARDDAV_ADDRESSBOOK_QUERY: &str = r#"<?xml version="1.0" encoding="utf-8"?>
@@ -29,6 +30,9 @@ const CARDDAV_LISTING_PROPFIND: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 const MAX_MULTIGET_HREFS: usize = 150;
 const GROUPWARE_CALENDAR_SYNC_ERROR_KEY: &str = "backend.errors.groupwareCalendarSyncFailed";
 const GROUPWARE_CONTACT_SYNC_ERROR_KEY: &str = "backend.errors.groupwareContactSyncFailed";
+const GROUPWARE_TASK_SYNC_ERROR_KEY: &str = "backend.errors.groupwareTaskSyncFailed";
+
+pub mod tasks;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
@@ -54,6 +58,10 @@ pub struct GroupwareSyncSummary {
     pub events_synced: usize,
     pub address_books_found: usize,
     pub contacts_synced: usize,
+    pub task_lists_found: usize,
+    pub tasks_synced: usize,
+    /// What the task sync did, for the frontend's notices.
+    pub task_summary: crate::tasks::sync::TaskSyncSummary,
     pub errors: Vec<String>,
 }
 
@@ -130,6 +138,29 @@ impl DavKind {
 #[derive(Debug, Clone)]
 struct DavCollection {
     href: Url,
+    name: Option<String>,
+    color: Option<String>,
+    /// `supported-calendar-component-set`; None when the server does not say,
+    /// which RFC 4791 §5.2.3 reads as "any component".
+    components: Option<Vec<String>>,
+    /// From `current-user-privilege-set`; None when the server does not say.
+    writable: Option<bool>,
+}
+
+impl DavCollection {
+    fn supports(&self, component: &str) -> bool {
+        self.components
+            .as_ref()
+            .is_none_or(|components| components.iter().any(|value| value == component))
+    }
+
+    /// VTODO only when the server says so: a server that does not advertise
+    /// components would otherwise turn every calendar into a task list.
+    fn advertises(&self, component: &str) -> bool {
+        self.components
+            .as_ref()
+            .is_some_and(|components| components.iter().any(|value| value == component))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -152,7 +183,15 @@ pub async fn sync_groupware_account(
     };
 
     if let Some(config) = snapshot.caldav.as_ref() {
-        match sync_caldav(pool, &client, account_id, config).await {
+        // One discovery serves events and tasks.
+        let discovered = discover_collections(&client, config, DavKind::Calendar).await;
+        let events = match &discovered {
+            Ok(collections) => {
+                sync_caldav_events(pool, &client, account_id, config, collections).await
+            }
+            Err(error) => Err(error.clone()),
+        };
+        match events {
             Ok((collections, events)) => {
                 summary.calendars_found += collections;
                 summary.events_synced += events;
@@ -165,9 +204,35 @@ pub async fn sync_groupware_account(
                     .push(groupware_sync_error(DavKind::Calendar, &account));
             }
         }
+        // A failed discovery was reported once, as the calendar's.
+        if let Ok(collections) = discovered {
+            let remote = tasks::CalDavTaskRemote::with_collections(
+                client.clone(),
+                config.clone(),
+                collections,
+            );
+            match crate::tasks::sync::sync_account(pool, account_id, &remote).await {
+                Ok(tasks) => {
+                    summary.task_lists_found += tasks.lists;
+                    summary.tasks_synced += tasks.pulled + tasks.pushed;
+                    summary.task_summary.merge(&tasks);
+                }
+                Err(error) => {
+                    tracing::warn!(error = %error, account_id, "CalDAV task synchronization failed");
+                    let account = account_label(pool, account_id).await;
+                    summary.errors.push(
+                        serde_json::json!({
+                            "key": GROUPWARE_TASK_SYNC_ERROR_KEY,
+                            "params": { "account": account },
+                        })
+                        .to_string(),
+                    );
+                }
+            }
+        }
     }
     if let Some(config) = snapshot.carddav.as_ref() {
-        match sync_carddav(pool, &client, config).await {
+        match sync_carddav(pool, &client, account_id, config).await {
             Ok((collections, contacts)) => {
                 summary.address_books_found += collections;
                 summary.contacts_synced += contacts;
@@ -190,6 +255,9 @@ impl GroupwareSyncSummary {
         self.events_synced += other.events_synced;
         self.address_books_found += other.address_books_found;
         self.contacts_synced += other.contacts_synced;
+        self.task_lists_found += other.task_lists_found;
+        self.tasks_synced += other.tasks_synced;
+        self.task_summary.merge(&other.task_summary);
         self.errors.extend(other.errors);
     }
 }
@@ -291,8 +359,8 @@ async fn discover_collections(
     };
 
     let list_body = r#"<?xml version="1.0" encoding="utf-8"?>
-<d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:a="urn:ietf:params:xml:ns:carddav">
-  <d:prop><d:resourcetype/><d:displayname/></d:prop>
+<d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:a="urn:ietf:params:xml:ns:carddav" xmlns:x="http://apple.com/ns/ical/">
+  <d:prop><d:resourcetype/><d:displayname/><c:supported-calendar-component-set/><x:calendar-color/><d:current-user-privilege-set/></d:prop>
 </d:propfind>"#;
     let xml = dav_xml_request(
         client,
@@ -316,7 +384,23 @@ async fn discover_collections(
             continue;
         };
         let href = resolve_dav_href(&server, &href)?;
-        collections.push(DavCollection { href });
+        let components = xml_elements(&response, "supported-calendar-component-set")
+            .into_iter()
+            .next()
+            .map(|set| {
+                xml_attribute_values(&set, "comp", "name")
+                    .into_iter()
+                    .map(|name| name.to_ascii_uppercase())
+                    .collect::<Vec<_>>()
+            })
+            .filter(|components| !components.is_empty());
+        collections.push(DavCollection {
+            href,
+            name: xml_text(&response, "displayname").filter(|name| !name.trim().is_empty()),
+            color: xml_text(&response, "calendar-color").and_then(|color| normalize_color(&color)),
+            components,
+            writable: privileges_writable(&response),
+        });
     }
 
     if collections.is_empty() {
@@ -329,18 +413,22 @@ async fn discover_collections(
     Ok(collections)
 }
 
-async fn sync_caldav(
+async fn sync_caldav_events(
     pool: &SqlitePool,
     client: &reqwest::Client,
     account_id: &str,
     config: &DavConfig,
+    collections: &[DavCollection],
 ) -> Result<(usize, usize), String> {
-    let collections = discover_collections(client, config, DavKind::Calendar).await?;
+    let collections = collections
+        .iter()
+        .filter(|collection| collection.supports("VEVENT"))
+        .collect::<Vec<_>>();
     let mut synced = 0;
     let start = (chrono::Utc::now() - chrono::Duration::days(365)).format("%Y%m%dT%H%M%SZ");
     let end = (chrono::Utc::now() + chrono::Duration::days(730)).format("%Y%m%dT%H%M%SZ");
 
-    for collection in &collections {
+    for collection in collections.iter().copied() {
         let body = format!(
             r#"<?xml version="1.0" encoding="utf-8"?>
 <c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
@@ -387,14 +475,17 @@ async fn sync_caldav(
 async fn sync_carddav(
     pool: &SqlitePool,
     client: &reqwest::Client,
+    account_id: &str,
     config: &DavConfig,
 ) -> Result<(usize, usize), String> {
     let collections = discover_collections(client, config, DavKind::AddressBook).await?;
     let mut synced = 0;
+    let mut address_book = Vec::new();
     for collection in &collections {
         let vcards = fetch_addressbook_vcards(client, config, collection).await?;
         for vcard in &vcards {
             let parsed = parse_vcard(vcard);
+            address_book.extend(parsed.emails.iter().cloned());
             for email in parsed.emails {
                 if upsert_carddav_contact(
                     pool,
@@ -409,6 +500,18 @@ async fn sync_carddav(
             }
         }
     }
+    // Every collection was read: the list replaces the previous one, so a
+    // contact deleted on the server stops making its sender known.
+    let book = crate::db::known_senders::AddressBook::Account {
+        kind: "carddav",
+        account_id,
+    };
+    crate::db::known_senders::replace_address_book(pool, book, address_book)
+        .await
+        .map_err(|error| {
+            tracing::warn!(error = ?error, "CardDAV address book persistence failed");
+            groupware_sync_error_key(DavKind::AddressBook).to_string()
+        })?;
     Ok((collections.len(), synced))
 }
 
@@ -551,9 +654,11 @@ pub async fn put_calendar_event(
         (url, collection.to_string())
     } else {
         let collections = discover_collections(&client, &config, DavKind::Calendar).await?;
+        // A VTODO-only collection (iCloud Reminders, a Nextcloud task list)
+        // refuses events.
         let collection = collections
             .into_iter()
-            .next()
+            .find(|collection| collection.supports("VEVENT"))
             .ok_or_else(|| "no writable CalDAV calendar found".to_string())?;
         let filename = format!("{}.ics", sanitize_path_component(uid));
         let url = collection
@@ -563,14 +668,66 @@ pub async fn put_calendar_event(
         (url, collection.href.to_string())
     };
 
+    let etag = dav_put(
+        &client,
+        &config,
+        &url,
+        raw_ics,
+        existing_href.is_none(),
+        existing_etag,
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(Some(RemoteCalendarWrite {
+        href: url.to_string(),
+        etag,
+        collection_href,
+    }))
+}
+
+/// Why a DAV write was refused, as far as the caller can act on it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DavWriteError {
+    /// 412: the ETag (or `If-None-Match: *`) precondition failed.
+    PreconditionFailed,
+    /// 404/410: the resource is gone.
+    NotFound,
+    /// 403: no right to write here.
+    Forbidden,
+    Other(String),
+}
+
+impl std::fmt::Display for DavWriteError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PreconditionFailed => f.write_str("DAV precondition failed"),
+            Self::NotFound => f.write_str("DAV resource not found"),
+            Self::Forbidden => f.write_str("DAV write forbidden"),
+            Self::Other(detail) => f.write_str(detail),
+        }
+    }
+}
+
+/// PUT one iCalendar resource. A creation sends `If-None-Match: *`, a
+/// replacement `If-Match` with the ETag it was edited against.
+async fn dav_put(
+    client: &reqwest::Client,
+    config: &DavConfig,
+    url: &Url,
+    raw_ics: &str,
+    create: bool,
+    etag: Option<&str>,
+) -> Result<Option<String>, DavWriteError> {
+    let server = Url::parse(&config.server).map_err(|err| DavWriteError::Other(err.to_string()))?;
+    ensure_same_origin(&server, url).map_err(DavWriteError::Other)?;
     let mut request = client
         .request(Method::PUT, url.clone())
         .basic_auth(&config.username, Some(&config.password))
         .header(header::CONTENT_TYPE, "text/calendar; charset=utf-8")
         .body(as_caldav_resource(raw_ics));
-    request = if let Some(etag) = existing_etag.filter(|value| !value.trim().is_empty()) {
+    request = if let Some(etag) = etag.filter(|value| !value.trim().is_empty()) {
         request.header(header::IF_MATCH, etag)
-    } else if existing_href.is_none() {
+    } else if create {
         request.header(header::IF_NONE_MATCH, "*")
     } else {
         request
@@ -578,20 +735,53 @@ pub async fn put_calendar_event(
     let response = request
         .send()
         .await
-        .map_err(|err| format!("CalDAV write failed: {err}"))?;
-    if !response.status().is_success() {
-        return Err(dav_status_error("CalDAV write", response).await);
+        .map_err(|err| DavWriteError::Other(format!("CalDAV write failed: {err}")))?;
+    match response.status() {
+        StatusCode::PRECONDITION_FAILED => return Err(DavWriteError::PreconditionFailed),
+        StatusCode::FORBIDDEN => return Err(DavWriteError::Forbidden),
+        StatusCode::NOT_FOUND | StatusCode::GONE if !create => return Err(DavWriteError::NotFound),
+        status if !status.is_success() => {
+            return Err(DavWriteError::Other(
+                dav_status_error("CalDAV write", response).await,
+            ))
+        }
+        _ => {}
     }
-    let etag = response
+    Ok(response
         .headers()
         .get(header::ETAG)
         .and_then(|value| value.to_str().ok())
-        .map(str::to_string);
-    Ok(Some(RemoteCalendarWrite {
-        href: url.to_string(),
-        etag,
-        collection_href,
-    }))
+        .map(str::to_string))
+}
+
+/// DELETE one resource with its ETag as precondition. Gone counts as done.
+async fn dav_delete(
+    client: &reqwest::Client,
+    config: &DavConfig,
+    url: &Url,
+    etag: Option<&str>,
+) -> Result<(), DavWriteError> {
+    let server = Url::parse(&config.server).map_err(|err| DavWriteError::Other(err.to_string()))?;
+    ensure_same_origin(&server, url).map_err(DavWriteError::Other)?;
+    let mut request = client
+        .request(Method::DELETE, url.clone())
+        .basic_auth(&config.username, Some(&config.password));
+    if let Some(etag) = etag.filter(|value| !value.trim().is_empty()) {
+        request = request.header(header::IF_MATCH, etag);
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|err| DavWriteError::Other(format!("CalDAV delete failed: {err}")))?;
+    match response.status() {
+        StatusCode::PRECONDITION_FAILED => Err(DavWriteError::PreconditionFailed),
+        StatusCode::FORBIDDEN => Err(DavWriteError::Forbidden),
+        StatusCode::NOT_FOUND | StatusCode::GONE => Ok(()),
+        status if status.is_success() => Ok(()),
+        _ => Err(DavWriteError::Other(
+            dav_status_error("CalDAV delete", response).await,
+        )),
+    }
 }
 
 pub async fn delete_calendar_event_remote(
@@ -619,6 +809,305 @@ pub async fn delete_calendar_event_remote(
         return Ok(());
     }
     Err(dav_status_error("CalDAV delete", response).await)
+}
+
+/// Whether the account config carries a CalDAV service.
+pub fn has_caldav(config_json: &crate::accounts::AccountConfig) -> bool {
+    parse_groupware_config(config_json).caldav.is_some()
+}
+
+/// Where a CalDAV server takes free/busy requests (RFC 6638), and as whom.
+#[derive(Debug, Clone)]
+struct ScheduleOutbox {
+    url: Url,
+    /// The first `mailto:` of `calendar-user-address-set`.
+    organizer: Option<String>,
+}
+
+/// Outbox discovery costs three requests; its answer, or that the server has
+/// none, is kept this long per server and user.
+const OUTBOX_TTL: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+type OutboxCache = std::collections::HashMap<String, (std::time::Instant, Option<ScheduleOutbox>)>;
+
+static OUTBOXES: std::sync::LazyLock<std::sync::Mutex<OutboxCache>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(OutboxCache::new()));
+
+/// Busy time of `addresses` from the server's scheduling outbox. A server
+/// that does not advertise `calendar-auto-schedule`, or has no outbox,
+/// answers for nobody; recipients it reports a failure for are left out.
+/// Either way they are unknown.
+pub async fn free_busy(
+    config_json: &crate::accounts::AccountConfig,
+    account_email: &str,
+    addresses: &[String],
+    start: chrono::DateTime<chrono::Utc>,
+    end: chrono::DateTime<chrono::Utc>,
+) -> Result<crate::calendar::free_busy::ProviderAnswers, String> {
+    use crate::calendar::free_busy::ProviderAnswers;
+    let Some(config) = parse_groupware_config(config_json).caldav else {
+        return Ok(ProviderAnswers::default());
+    };
+    let client = dav_client()?;
+    let cache_key = format!("{}\u{0}{}", config.server, config.username);
+    let cached = OUTBOXES.lock().ok().and_then(|cache| {
+        cache
+            .get(&cache_key)
+            .filter(|(at, _)| at.elapsed() < OUTBOX_TTL)
+            .map(|(_, outbox)| outbox.clone())
+    });
+    let outbox = match cached {
+        Some(outbox) => outbox,
+        None => {
+            let outbox = discover_schedule_outbox(&client, &config).await?;
+            if let Ok(mut cache) = OUTBOXES.lock() {
+                cache.insert(cache_key, (std::time::Instant::now(), outbox.clone()));
+            }
+            outbox
+        }
+    };
+    let Some(outbox) = outbox else {
+        return Ok(ProviderAnswers::default());
+    };
+    let organizer = outbox.organizer.as_deref().unwrap_or(account_email);
+    let body = free_busy_request(
+        &uuid::Uuid::new_v4().to_string(),
+        organizer,
+        addresses,
+        start,
+        end,
+        chrono::Utc::now(),
+    );
+    let response = client
+        .post(outbox.url.clone())
+        .basic_auth(&config.username, Some(&config.password))
+        .header(
+            header::CONTENT_TYPE,
+            "text/calendar; charset=utf-8; method=REQUEST",
+        )
+        .body(body)
+        .send()
+        .await
+        .map_err(|err| format!("CalDAV free/busy request failed: {err}"))?;
+    let status = response.status();
+    // A DAV server that throttles says 429 or 503; a 403 means no scheduling here.
+    if crate::calendar::free_busy::is_refusal(status.as_u16(), true) {
+        // The server will not schedule for this user; asking every minute won't change it.
+        tracing::warn!(status = status.as_u16(), "CalDAV free/busy refused");
+        return Ok(ProviderAnswers {
+            refused: addresses.to_vec(),
+            ..ProviderAnswers::default()
+        });
+    }
+    if !status.is_success() {
+        return Err(dav_status_error("CalDAV free/busy", response).await);
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|err| format!("CalDAV free/busy read failed: {err}"))?;
+    if bytes.len() > MAX_DAV_RESPONSE_BYTES {
+        return Err("DAV response exceeds the 50 MB safety limit".to_string());
+    }
+    let xml = String::from_utf8(bytes.to_vec())
+        .map_err(|_| "DAV response is not valid UTF-8".to_string())?;
+    Ok(ProviderAnswers {
+        known: parse_schedule_response(&xml, addresses),
+        ..ProviderAnswers::default()
+    })
+}
+
+async fn discover_schedule_outbox(
+    client: &reqwest::Client,
+    config: &DavConfig,
+) -> Result<Option<ScheduleOutbox>, String> {
+    let server = Url::parse(&config.server).map_err(|err| format!("invalid DAV URL: {err}"))?;
+    let propfind = Method::from_bytes(b"PROPFIND").expect("valid method");
+    let body = r#"<?xml version="1.0" encoding="utf-8"?>
+<d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:prop><d:current-user-principal/><c:schedule-outbox-URL/><c:calendar-user-address-set/><c:calendar-home-set/></d:prop>
+</d:propfind>"#;
+    let root = dav_xml_request(client, config, propfind.clone(), &server, Some("0"), body).await?;
+    let principal = match nested_href(&root, "current-user-principal") {
+        Some(href) => resolve_dav_href(&server, &href)?,
+        None => server.clone(),
+    };
+    let xml = if principal == server {
+        root
+    } else {
+        dav_xml_request(client, config, propfind, &principal, Some("0"), body).await?
+    };
+    let Some(outbox) = nested_href(&xml, "schedule-outbox-URL") else {
+        return Ok(None);
+    };
+    let outbox = resolve_dav_href(&server, &outbox)?;
+    let home = nested_href(&xml, "calendar-home-set")
+        .map(|href| resolve_dav_href(&server, &href))
+        .transpose()?
+        .unwrap_or(principal);
+    // RFC 6638 §2: a server that schedules says so in the DAV header.
+    let options = client
+        .request(Method::OPTIONS, home)
+        .basic_auth(&config.username, Some(&config.password))
+        .send()
+        .await
+        .map_err(|err| format!("DAV OPTIONS failed: {err}"))?;
+    let schedules = options
+        .headers()
+        .get_all("DAV")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .any(|token| token.trim().eq_ignore_ascii_case("calendar-auto-schedule"));
+    if !schedules {
+        return Ok(None);
+    }
+    let organizer = xml_elements(&xml, "calendar-user-address-set")
+        .into_iter()
+        .flat_map(|set| xml_elements(&set, "href"))
+        .map(|href| xml_unescape(href.trim()))
+        .find_map(|href| mailto(&href));
+    Ok(Some(ScheduleOutbox {
+        url: outbox,
+        organizer,
+    }))
+}
+
+fn mailto(uri: &str) -> Option<String> {
+    let uri = uri.trim();
+    let address = uri
+        .get(..7)
+        .filter(|scheme| scheme.eq_ignore_ascii_case("mailto:"))
+        .map(|_| &uri[7..])?;
+    Some(address.trim().to_ascii_lowercase()).filter(|address| address.contains('@'))
+}
+
+/// The VFREEBUSY request of RFC 6638 §3.2.1 for one organizer and many attendees.
+fn free_busy_request(
+    uid: &str,
+    organizer: &str,
+    addresses: &[String],
+    start: chrono::DateTime<chrono::Utc>,
+    end: chrono::DateTime<chrono::Utc>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> String {
+    let stamp = |time: chrono::DateTime<chrono::Utc>| time.format("%Y%m%dT%H%M%SZ").to_string();
+    let mut lines = vec![
+        "BEGIN:VCALENDAR".to_string(),
+        "VERSION:2.0".to_string(),
+        "PRODID:-//Satchel//EN".to_string(),
+        "METHOD:REQUEST".to_string(),
+        "BEGIN:VFREEBUSY".to_string(),
+        format!("UID:{uid}"),
+        format!("DTSTAMP:{}", stamp(now)),
+        format!("DTSTART:{}", stamp(start)),
+        format!("DTEND:{}", stamp(end)),
+        format!("ORGANIZER:mailto:{organizer}"),
+    ];
+    // Callers pass parsed addresses; a line break here would still smuggle a
+    // property into the request, so anything with one is left out.
+    lines.extend(
+        addresses
+            .iter()
+            .filter(|address| {
+                !address
+                    .chars()
+                    .any(|ch| ch.is_control() || ch.is_whitespace())
+            })
+            .map(|address| format!("ATTENDEE:mailto:{address}")),
+    );
+    lines.push("END:VFREEBUSY".to_string());
+    lines.push("END:VCALENDAR".to_string());
+    format!("{}\r\n", lines.join("\r\n"))
+}
+
+/// Recipients of a `schedule-response` the server answered for (request
+/// status 2.x), with their busy periods.
+fn parse_schedule_response(
+    xml: &str,
+    asked: &[String],
+) -> std::collections::HashMap<String, Vec<crate::calendar::availability::Busy>> {
+    let mut known = std::collections::HashMap::new();
+    for response in xml_elements(xml, "response") {
+        let Some(recipient) = xml_elements(&response, "recipient").into_iter().next() else {
+            continue;
+        };
+        // RFC 6638 wraps the recipient in DAV:href; early drafts did not.
+        let recipient =
+            xml_text(&recipient, "href").unwrap_or_else(|| xml_unescape(recipient.trim()));
+        let Some(address) = mailto(&recipient).and_then(|address| {
+            asked
+                .iter()
+                .find(|asked| asked.eq_ignore_ascii_case(&address))
+        }) else {
+            continue;
+        };
+        let status = xml_text(&response, "request-status").unwrap_or_default();
+        if !status.trim_start().starts_with('2') {
+            continue;
+        }
+        let Some(data) = xml_text(&response, "calendar-data") else {
+            continue;
+        };
+        let data = ["&#13;", "&#xD;", "&#xd;"]
+            .iter()
+            .fold(data, |data, entity| data.replace(entity, ""));
+        known.insert(address.clone(), parse_free_busy_periods(&data));
+    }
+    known
+}
+
+/// The busy periods of a VFREEBUSY reply. FBTYPE defaults to BUSY;
+/// BUSY-TENTATIVE is tentative, FREE is no busy time at all.
+fn parse_free_busy_periods(ics: &str) -> Vec<crate::calendar::availability::Busy> {
+    let parse_time = |value: &str| {
+        chrono::NaiveDateTime::parse_from_str(value.trim().trim_end_matches('Z'), "%Y%m%dT%H%M%S")
+            .ok()
+            .map(|time| time.and_utc())
+    };
+    let mut busy = Vec::new();
+    for line in unfold_lines(ics) {
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        let mut parts = name.split(';');
+        if !parts
+            .next()
+            .is_some_and(|property| property.trim().eq_ignore_ascii_case("FREEBUSY"))
+        {
+            continue;
+        }
+        let kind = parts
+            .find_map(|param| {
+                param
+                    .split_once('=')
+                    .filter(|(key, _)| key.eq_ignore_ascii_case("FBTYPE"))
+                    .map(|(_, value)| value.trim().to_ascii_uppercase())
+            })
+            .unwrap_or_else(|| "BUSY".to_string());
+        if kind == "FREE" {
+            continue;
+        }
+        for period in value.split(',') {
+            let Some((from, until)) = period.split_once('/') else {
+                continue;
+            };
+            let Some(start) = parse_time(from) else {
+                continue;
+            };
+            let end =
+                parse_time(until).or_else(|| parse_ics_duration(until).map(|span| start + span));
+            if let Some(end) = end.filter(|end| *end > start) {
+                busy.push(crate::calendar::availability::Busy {
+                    start,
+                    end,
+                    tentative: kind == "BUSY-TENTATIVE",
+                });
+            }
+        }
+    }
+    busy.sort_by_key(|block| (block.start, block.end));
+    busy
 }
 
 async fn dav_xml_request(
@@ -658,15 +1147,12 @@ async fn dav_xml_request(
     String::from_utf8(bytes.to_vec()).map_err(|_| "DAV response is not valid UTF-8".to_string())
 }
 
+/// The status and the size of the answer, never its text: these errors are
+/// logged, and a server's error page can echo attendees, paths or tokens.
 async fn dav_status_error(context: &str, response: reqwest::Response) -> String {
     let status = response.status();
-    let body = response.text().await.unwrap_or_default();
-    let detail = body.chars().take(500).collect::<String>();
-    if detail.trim().is_empty() {
-        format!("{context} failed with status {status}")
-    } else {
-        format!("{context} failed with status {status}: {detail}")
-    }
+    let length = response.bytes().await.map_or(0, |body| body.len());
+    format!("{context} failed with status {status} ({length} bytes of response)")
 }
 
 fn resolve_dav_href(base: &Url, href: &str) -> Result<Url, String> {
@@ -702,6 +1188,66 @@ fn xml_text(xml: &str, local_name: &str) -> Option<String> {
 
 fn xml_has_element(xml: &str, local_name: &str) -> bool {
     !xml_elements(xml, local_name).is_empty()
+}
+
+/// The values of `attribute` on every `local_name` tag, e.g. the `name` of
+/// each `<c:comp name="VTODO"/>`.
+fn xml_attribute_values(xml: &str, local_name: &str, attribute: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut offset = 0;
+    while let Some(open_rel) = xml[offset..].find('<') {
+        let open = offset + open_rel;
+        let Some(end_rel) = xml[open..].find('>') else {
+            break;
+        };
+        let end = open + end_rel;
+        offset = end + 1;
+        let raw = xml[open + 1..end].trim().trim_end_matches('/');
+        let mut parts = raw.splitn(2, char::is_whitespace);
+        let qualified = parts.next().unwrap_or("");
+        if qualified.rsplit(':').next() != Some(local_name) {
+            continue;
+        }
+        let rest = parts.next().unwrap_or("");
+        let mut cursor = rest;
+        while let Some(eq) = cursor.find('=') {
+            let name = cursor[..eq].trim();
+            let after = cursor[eq + 1..].trim_start();
+            let Some(quote) = after.chars().next().filter(|ch| *ch == '"' || *ch == '\'') else {
+                break;
+            };
+            let Some(close) = after[1..].find(quote) else {
+                break;
+            };
+            if name.rsplit(':').next() == Some(attribute) {
+                out.push(xml_unescape(&after[1..1 + close]));
+            }
+            cursor = &after[close + 2..];
+        }
+    }
+    out
+}
+
+/// Whether `current-user-privilege-set` (RFC 3744 §5.4) lets us change
+/// resources: `write`, `write-content` or `all`. None when it is not there.
+fn privileges_writable(response: &str) -> Option<bool> {
+    let set = xml_elements(response, "current-user-privilege-set")
+        .into_iter()
+        .find(|set| xml_has_element(set, "privilege"))?;
+    Some(
+        ["write", "write-content", "all"]
+            .iter()
+            .any(|privilege| xml_has_element(&set, privilege)),
+    )
+}
+
+/// `#RRGGBB` from Apple's `calendar-color`, which may carry an alpha byte.
+fn normalize_color(value: &str) -> Option<String> {
+    let hex = value.trim().strip_prefix('#')?;
+    if !(hex.len() == 6 || hex.len() == 8) || !hex.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(format!("#{}", hex[..6].to_ascii_lowercase()))
 }
 
 fn xml_elements(xml: &str, local_name: &str) -> Vec<String> {
@@ -860,6 +1406,104 @@ mod tests {
     use super::*;
 
     #[test]
+    fn free_busy_request_names_the_organizer_and_every_attendee() {
+        let at = |text: &str| chrono::DateTime::parse_from_rfc3339(text).unwrap().to_utc();
+        let ics = free_busy_request(
+            "uid-1",
+            "me@example.test",
+            &["a@example.test".into(), "b@example.test".into()],
+            at("2026-11-09T00:00:00Z"),
+            at("2026-11-10T00:00:00Z"),
+            at("2026-11-06T12:00:00Z"),
+        );
+        assert!(ics.starts_with("BEGIN:VCALENDAR\r\n"));
+        assert!(ics.contains("\r\nMETHOD:REQUEST\r\nBEGIN:VFREEBUSY\r\n"));
+        assert!(ics.contains("\r\nDTSTART:20261109T000000Z\r\nDTEND:20261110T000000Z\r\n"));
+        assert!(ics.contains("\r\nORGANIZER:mailto:me@example.test\r\n"));
+        assert!(ics
+            .contains("\r\nATTENDEE:mailto:a@example.test\r\nATTENDEE:mailto:b@example.test\r\n"));
+        assert!(ics.ends_with("END:VFREEBUSY\r\nEND:VCALENDAR\r\n"));
+    }
+
+    #[test]
+    fn schedule_response_keeps_answered_recipients_with_their_periods() {
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<C:schedule-response xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <C:response>
+    <C:recipient><D:href>mailto:Lena@Example.test</D:href></C:recipient>
+    <C:request-status>2.0;Success</C:request-status>
+    <C:calendar-data>BEGIN:VCALENDAR&#13;
+VERSION:2.0&#13;
+METHOD:REPLY&#13;
+BEGIN:VFREEBUSY&#13;
+FREEBUSY;FBTYPE=BUSY:20261109T090000Z/20261109T100000Z,20261109T140000Z/PT30M&#13;
+FREEBUSY;FBTYPE=BUSY-TENTATIVE:20261109T110000Z/20261109T113000Z&#13;
+FREEBUSY;FBTYPE=FREE:20261109T120000Z/20261109T130000Z&#13;
+FREEBUSY:20261109T150000Z/PT1H&#13;
+END:VFREEBUSY&#13;
+END:VCALENDAR&#13;
+</C:calendar-data>
+  </C:response>
+  <C:response>
+    <C:recipient>mailto:nobody@example.test</C:recipient>
+    <C:request-status>3.7;Invalid calendar user</C:request-status>
+  </C:response>
+</C:schedule-response>"#;
+        let asked = [
+            "lena@example.test".to_string(),
+            "nobody@example.test".to_string(),
+        ];
+        let known = parse_schedule_response(xml, &asked);
+        assert_eq!(known.len(), 1);
+        let lena = &known["lena@example.test"];
+        let spans = lena
+            .iter()
+            .map(|block| {
+                (
+                    block.start.format("%H:%M").to_string(),
+                    block.end.format("%H:%M").to_string(),
+                    block.tentative,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            spans,
+            vec![
+                ("09:00".into(), "10:00".into(), false),
+                ("11:00".into(), "11:30".into(), true),
+                ("14:00".into(), "14:30".into(), false),
+                ("15:00".into(), "16:00".into(), false),
+            ]
+        );
+    }
+
+    #[test]
+    fn ics_durations_cover_weeks_days_and_times() {
+        assert_eq!(
+            parse_ics_duration("PT1H30M"),
+            Some(chrono::Duration::minutes(90))
+        );
+        assert_eq!(parse_ics_duration("P1D"), Some(chrono::Duration::days(1)));
+        assert_eq!(parse_ics_duration("P1W"), Some(chrono::Duration::weeks(1)));
+        assert_eq!(
+            parse_ics_duration("P1DT2H"),
+            Some(chrono::Duration::hours(26))
+        );
+        assert_eq!(parse_ics_duration("1H"), None);
+        assert_eq!(parse_ics_duration("PT5"), None);
+    }
+
+    #[test]
+    fn mailto_accepts_any_case_and_needs_an_address() {
+        assert_eq!(
+            mailto("MAILTO:Lena@Example.test"),
+            Some("lena@example.test".into())
+        );
+        assert_eq!(mailto("mailto:"), None);
+        assert_eq!(mailto("/principals/lena/"), None);
+    }
+
+    #[test]
     fn normalizes_https_server_names() {
         assert_eq!(
             normalize_server_url("gwcaldav.example.test").unwrap(),
@@ -946,6 +1590,38 @@ mod tests {
         assert!(body.contains("<d:href>/book/a%20b.vcf</d:href>"));
         assert!(body.contains("&amp;"));
         assert!(!body.contains("c&d"));
+    }
+
+    #[test]
+    fn reads_component_sets_and_colors() {
+        let xml = r#"<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+          <d:response><d:href>/cal/todo/</d:href><d:propstat><d:prop>
+            <c:supported-calendar-component-set><c:comp name="VTODO"/><c:comp name='vevent' /></c:supported-calendar-component-set>
+          </d:prop></d:propstat><d:propstat><d:prop><c:supported-calendar-component-set/></d:prop>
+          <d:status>HTTP/1.1 404 Not Found</d:status></d:propstat></d:response>
+        </d:multistatus>"#;
+        let set = xml_elements(xml, "supported-calendar-component-set").remove(0);
+        assert_eq!(
+            xml_attribute_values(&set, "comp", "name"),
+            ["VTODO", "vevent"]
+        );
+        assert_eq!(normalize_color("#FF8800CC").as_deref(), Some("#ff8800"));
+        assert_eq!(normalize_color("blue"), None);
+    }
+
+    #[test]
+    fn reads_whether_the_collection_takes_writes() {
+        let read_only = r#"<d:response><d:propstat><d:prop><d:current-user-privilege-set>
+            <d:privilege><d:read/></d:privilege><d:privilege><d:read-current-user-privilege-set/></d:privilege>
+          </d:current-user-privilege-set></d:prop></d:propstat></d:response>"#;
+        let writable = r#"<d:response><d:propstat><d:prop><d:current-user-privilege-set>
+            <d:privilege><d:read/></d:privilege><d:privilege><d:write-content/></d:privilege>
+          </d:current-user-privilege-set></d:prop></d:propstat></d:response>"#;
+        let unknown = r#"<d:response><d:propstat><d:prop><d:current-user-privilege-set/></d:prop>
+          <d:status>HTTP/1.1 404 Not Found</d:status></d:propstat></d:response>"#;
+        assert_eq!(privileges_writable(read_only), Some(false));
+        assert_eq!(privileges_writable(writable), Some(true));
+        assert_eq!(privileges_writable(unknown), None);
     }
 
     #[test]

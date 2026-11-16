@@ -66,3 +66,73 @@ describe('all-day date-only boundary', () => {
   });
 
 });
+
+describe('Outlook events', () => {
+  const outlookEvent = (fields: Record<string, unknown> = {}) => itemFromEvent({
+    id: 'outlook-event-1', uid: 'uid', account_id: 'outlook', title: 'Weekly sync',
+    starts_at: '2026-07-14T14:00:00Z', ends_at: '2026-07-14T15:00:00Z', all_day: 0,
+    attendees_json: '["alice@example.test"]', source: 'outlook', collection_href: 'cal-main',
+    description: 'Join: Microsoft Teams', location: null, created_at: '', updated_at: 'revision-1',
+    read_only: 0, recurrence_instance: 1, rich_description: 1, ...fields,
+  });
+  const open = (draft: ReturnType<typeof draftFromItem>, guestsNeedInvites = false) => mount(EventEditorDialog, {
+    props: { draft, saving: false, guestsNeedInvites }, global: { stubs: { Teleport: true } },
+  });
+
+  it('keeps a formatted description as Outlook has it and says why', async () => {
+    const view = open(draftFromItem(outlookEvent()));
+    const description = view.get('textarea');
+    expect(description.attributes('disabled')).toBeDefined();
+    expect(view.text()).toContain('This description is formatted in Outlook');
+    await view.find('input').setValue('Weekly sync (moved)');
+    await view.find('.event-editor__actions .app-button--primary').trigger('click');
+    expect(view.emitted('save')![0]![0]).toMatchObject({ title: 'Weekly sync (moved)', description: 'Join: Microsoft Teams' });
+  });
+
+  it('says an edit reaches one occurrence and the attendees', () => {
+    const view = open(draftFromItem(outlookEvent({ rich_description: 0 })));
+    expect(view.get('textarea').attributes('disabled')).toBeUndefined();
+    expect(view.text()).toContain('Changes apply to this occurrence only.');
+    expect(view.text()).toContain('Attendees will be notified of your changes.');
+  });
+
+  it('warns that guests of a new Outlook event need invitations', async () => {
+    const view = open({ ...emptyDraft(new Date('2026-07-14T10:00')), title: 'Lunch' }, true);
+    const hint = 'Guests are only saved with invitations on.';
+    expect(view.text()).not.toContain(hint);
+    const inputs = view.findAll('input');
+    const guests = inputs.find((input) => input.attributes('placeholder')?.includes('@'))
+      ?? inputs[inputs.length - 2]!;
+    await guests.setValue('bob@example.test');
+    expect(view.text()).toContain(hint);
+    // The last switch is "Send invitations"; the first is "All day".
+    const switches = view.findAll('input[role="switch"]');
+    await switches[switches.length - 1]!.setValue(true);
+    expect(view.text()).not.toContain(hint);
+  });
+
+  it('does not warn for calendars that keep guests without invitations', async () => {
+    const view = open({ ...emptyDraft(new Date('2026-07-14T10:00')), title: 'Lunch', attendees: 'bob@example.test' }, false);
+    expect(view.text()).not.toContain('Guests are only saved with invitations on.');
+  });
+});
+
+describe('untitled events', () => {
+  for (const source of ['outlook', 'caldav']) {
+    it(`open ${source} events with an empty title, not the placeholder`, async () => {
+      const item = itemFromEvent({ id: 'event', uid: 'uid', account_id: 'a', title: '',
+        starts_at: '2026-07-14T14:00:00Z', ends_at: '2026-07-14T15:00:00Z', all_day: 0,
+        attendees_json: '[]', source, collection_href: null, description: null, location: null,
+        created_at: '', updated_at: 'revision-1' });
+      expect(item.title).toBe('(No title)');
+      const draft = draftFromItem(item);
+      expect(draft.title).toBe('');
+      const view = mount(EventEditorDialog, { props: { draft, saving: false }, global: { stubs: { Teleport: true } } });
+      expect((view.find('input').element as HTMLInputElement).value).toBe('');
+      // Only the time changes: the title is required, never "(No title)".
+      await view.find('.event-editor__actions .app-button--primary').trigger('click');
+      expect(view.emitted('save')).toBeUndefined();
+      expect(view.get('[role="alert"]').text()).toBeTruthy();
+    });
+  }
+});

@@ -3,6 +3,8 @@ import { expect, test } from './mock-contract.fixture';
 test('nightly updates keep the same app and announce a download without moving the sidebar', async ({ page }) => {
   await page.goto('/settings?section=about');
   const toggle = page.getByRole('switch', { name: 'Nightly updates', exact: true });
+  // The dev server serves the settings graph last; on a CI runner that takes more than 5 s.
+  await expect(toggle).toBeVisible({ timeout: 30_000 });
   await expect(toggle).toBeEnabled();
   await expect(toggle).not.toBeChecked();
   await page.locator('.about-pane .toggle-switch').click();

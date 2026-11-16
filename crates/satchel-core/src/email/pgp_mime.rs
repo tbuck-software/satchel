@@ -115,6 +115,37 @@ pub fn build_encrypted(rfc822: &str, armored_ciphertext: &str) -> String {
     out
 }
 
+/// Put header lines in front of an entity's own headers. Used for protected
+/// headers: what the envelope hides (the real `Subject`) travels inside the
+/// encrypted, and signed, entity.
+pub fn with_protected_headers(entity: &str, header_lines: &[String]) -> String {
+    if header_lines.is_empty() {
+        return entity.to_string();
+    }
+    format!("{}\r\n{entity}", header_lines.join("\r\n"))
+}
+
+/// `multipart/signed` around an entity, as the plaintext of an encrypted
+/// message: the same shape `signed_entity_for_encryption` builds from a whole
+/// message, for an entity that already carries protected headers.
+pub fn signed_multipart(entity: &str, armored_signature: &str) -> String {
+    let boundary = boundary("sig");
+    let mut out = format!(
+        "Content-Type: multipart/signed; micalg=pgp-sha256; \
+         protocol=\"application/pgp-signature\"; boundary=\"{boundary}\"\r\n\r\n"
+    );
+    out.push_str("This is an OpenPGP/MIME signed message (RFC 3156).\r\n");
+    out.push_str(&format!("--{boundary}\r\n"));
+    out.push_str(entity);
+    out.push_str(&format!("\r\n--{boundary}\r\n"));
+    out.push_str("Content-Type: application/pgp-signature; name=\"signature.asc\"\r\n");
+    out.push_str("Content-Description: OpenPGP digital signature\r\n");
+    out.push_str("Content-Disposition: attachment; filename=\"signature.asc\"\r\n\r\n");
+    out.push_str(&normalize_crlf(armored_signature.trim()));
+    out.push_str(&format!("\r\n--{boundary}--\r\n"));
+    out
+}
+
 /// The full message to encrypt when signing and encrypting together.
 ///
 /// RFC 3156 §6.2 nests sign-then-encrypt: the signed multipart becomes the

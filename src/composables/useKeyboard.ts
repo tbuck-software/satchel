@@ -11,6 +11,8 @@ import { useThreadReply } from './useThreadReply';
 import { useMessageLinks } from './useMessageLinks';
 import { useUndo } from './useUndo';
 import { activeThreadReaderCommands } from './useThreadReaderCommands';
+import { useSenderSweep } from './useSenderSweep';
+import { useTaskEditor } from './useTaskEditor';
 import { focusSettingsFilter } from './settingsFilterFocus';
 import { focusListSearch } from './listSearchFocus';
 import { t } from '@/i18n/runtime';
@@ -25,6 +27,7 @@ import {
 } from '@/config/keybindings';
 import { KEYBINDING_SPECS, viewLabelKey, type KeybindingContext } from '@/config/keybindingDefaults';
 import { openView } from '@/router/mailViews';
+import { offersNotSpam } from '@/utils/threadList';
 import {
   leaveListKeyboardLevel,
   listKeyboardSharesSelection,
@@ -59,6 +62,28 @@ const CONTEXT_BY_ACTION: ReadonlyMap<string, KeybindingContext> = new Map(
   KEYBINDING_SPECS.map((spec) => [spec.action, spec.context]),
 );
 
+/**
+ * A `g` sequence that code loaded later brings along, such as a Labs view.
+ * It is not rebindable and not listed in the shortcut editor; the sequence
+ * hint names it. A built-in binding on the same keys wins.
+ */
+export interface ViewShortcut {
+  action: string;
+  binding: string;
+  view: string;
+  label: () => string;
+}
+
+const extraViewShortcuts = new Map<string, ViewShortcut>();
+
+/** Adds a view shortcut while the returned function has not been called. */
+export function registerViewShortcut(shortcut: ViewShortcut): () => void {
+  extraViewShortcuts.set(shortcut.action, shortcut);
+  return () => {
+    if (extraViewShortcuts.get(shortcut.action) === shortcut) extraViewShortcuts.delete(shortcut.action);
+  };
+}
+
 /** True while focus sits on a button/link that should keep Enter and Space. */
 function isActivatableTarget(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
@@ -78,6 +103,8 @@ export function useKeyboard() {
   const actions = useThreadActions();
   const messageLinks = useMessageLinks();
   const undo = useUndo();
+  const senderSweep = useSenderSweep();
+  const taskEditor = useTaskEditor();
   let pendingSequence = '';
   let sequenceTimer: number | null = null;
   // Read once per keystroke; every binding below is judged against it.
@@ -143,31 +170,43 @@ export function useKeyboard() {
     void openView(router, route);
   }
 
+  function navigationDestinations(): Array<{ binding: string; view: string; label: () => string }> {
+    const builtIn = VIEW_SPECS.filter((spec) => available(spec.action)).map((spec) => ({
+      binding: keyFor(spec.action),
+      view: spec.view!,
+      label: () => t(viewLabelKey(spec.view!)),
+    }));
+    const taken = new Set(builtIn.map((destination) => destination.binding));
+    const extra = contextActive('navigation')
+      ? [...extraViewShortcuts.values()].filter((shortcut) => !taken.has(shortcut.binding)
+        && keybindingEnabled(shortcut.action, shortcut.binding, settings.singleKeyShortcuts))
+      : [];
+    return [...builtIn, ...extra];
+  }
+
   function handleNavigationSequence(event: KeyboardEvent): boolean {
-    const destinations = VIEW_SPECS.filter((spec) => available(spec.action));
+    const destinations = navigationDestinations();
     const stroke = keyboardEventStroke(event);
 
     if (pendingSequence) {
       const candidate = `${pendingSequence} ${stroke}`;
-      const match = destinations.find(
-        (destination) => keyFor(destination.action) === candidate,
-      );
+      const match = destinations.find((destination) => destination.binding === candidate);
       if (match) {
-        goTo(match.view!);
+        goTo(match.view);
         return true;
       }
       clearSequence();
     }
 
     const isPrefix = destinations.some((destination) =>
-      bindingStrokes(keyFor(destination.action))[0] === stroke,
+      bindingStrokes(destination.binding)[0] === stroke,
     );
     if (!isPrefix) return false;
 
     pendingSequence = stroke;
     // The hint names the second key as bound, so a rebinding shows up here too.
     ui.showKeySequenceHint(destinations
-      .map((destination) => `${(bindingStrokes(keyFor(destination.action))[1] ?? '').toUpperCase()} ${t(viewLabelKey(destination.view!))}`)
+      .map((destination) => `${(bindingStrokes(destination.binding)[1] ?? '').toUpperCase()} ${destination.label()}`)
       .join(' · '));
     // A chord must not stay armed after the user has mentally moved on. This
     // window is deliberately longer than a double-click but shorter than the
@@ -484,6 +523,34 @@ export function useKeyboard() {
       if (ids.length === 0) return false;
       void actions.markSpam(ids);
       return true;
+    }
+
+    if (matches(event, 'markNotSpam')) {
+      // Like the menus: only where the filter marked the mail or it sits in Spam.
+      const ids = targetIds().filter((id) => {
+        const thread = threads.find(id);
+        return thread ? offersNotSpam(thread, threads.mailboxFilter) : false;
+      });
+      if (ids.length === 0) return false;
+      void actions.markNotSpam(ids);
+      return true;
+    }
+
+    if (matches(event, 'sweepSender')) {
+      const id = currentThreadId();
+      if (!id) return false;
+      void senderSweep.openForThread(id);
+      return true;
+    }
+
+    if (matches(event, 'translateMessage')) {
+      return activeThreadReaderCommands()?.toggleTranslation() ?? false;
+    }
+
+    if (matches(event, 'createTask')) {
+      const id = currentThreadId();
+      if (!id) return false;
+      return taskEditor.openForThread(id, threads.find(id)?.subject);
     }
 
     if (matches(event, 'print')) {

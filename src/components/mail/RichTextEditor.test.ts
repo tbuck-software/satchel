@@ -5,6 +5,7 @@ import { createPinia } from 'pinia';
 import { mount } from '@vue/test-utils';
 import { describe, expect, it, vi } from 'vitest';
 import RichTextEditor from './RichTextEditor.vue';
+import { insertMailTable, mailTableHtml } from '@/utils/composerTable';
 
 /** Binds the editor the way ComposeView does: the emitted HTML comes straight back. */
 function render(initialHtml: string) {
@@ -51,6 +52,50 @@ describe('RichTextEditor per-keystroke work', () => {
     html.value = typed;
     await nextTick();
     expect(editor.getText()).toContain('world');
+    wrapper.unmount();
+  });
+});
+
+describe('RichTextEditor tables', () => {
+  it('emits a table the recipient can read without a stylesheet', async () => {
+    const { wrapper, editor, html, text } = render('<p></p>');
+    editor.commands.setTextSelection(1);
+    insertMailTable(editor);
+    editor.commands.insertContent('Item');
+    await nextTick();
+
+    const template = document.createElement('template');
+    template.innerHTML = html.value ?? '';
+    const table = template.content.querySelector('table')!;
+    expect(table.getAttribute('style')).toMatch(/border-collapse:\s*collapse/);
+    const header = table.querySelector('th')!;
+    expect(header.getAttribute('style')).toMatch(/border:\s*1px solid/);
+    expect(header.getAttribute('style')).toMatch(/padding:\s*6px 10px/);
+    // The flattening happens on the way out of the component, not in the schema.
+    expect(header.querySelector('p')?.getAttribute('style')).toBe('margin:0');
+    expect(text.value).toContain('| Item |');
+    wrapper.unmount();
+  });
+
+  it('recognises a reopened draft it already shows instead of loading it again', async () => {
+    // A draft as saved: the component's own emitted HTML.
+    const first = render('<p></p>');
+    first.editor.commands.setTextSelection(1);
+    insertMailTable(first.editor);
+    first.editor.commands.insertContent('Q1');
+    await nextTick();
+    const saved = first.html.value!;
+    first.wrapper.unmount();
+
+    // Reopened: the same table arrives through the prop, first as the stored
+    // HTML and then once more from the composer restoring the draft.
+    const { wrapper, editor, html } = render(saved.replace(/ style="margin:0"/g, ''));
+    const shown = editor.state.doc;
+    html.value = saved;
+    await nextTick();
+
+    expect(editor.state.doc).toBe(shown);
+    expect(mailTableHtml(editor.getHTML())).toBe(saved);
     wrapper.unmount();
   });
 });

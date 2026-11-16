@@ -1,0 +1,32 @@
+{
+  "en": {
+    "thread": {
+      "move": {
+        "partlyMoved": "Moved {applied} of {total} to “{folder}”; the rest could not be moved. {reason}"
+      },
+      "result": {
+        "partlyFiled": "Moved {applied} of {total}; the rest could not be moved. {reason}"
+      }
+    },
+    "backend": {
+      "errors": {
+        "mailMoveInterrupted": "The move was interrupted before it finished. Try again."
+      }
+    }
+  },
+  "de": {
+    "thread": {
+      "move": {
+        "partlyMoved": "{applied} von {total} nach „{folder}“ verschoben; der Rest ließ sich nicht verschieben. {reason}"
+      },
+      "result": {
+        "partlyFiled": "{applied} von {total} verschoben; der Rest ließ sich nicht verschieben. {reason}"
+      }
+    },
+    "backend": {
+      "errors": {
+        "mailMoveInterrupted": "Das Verschieben wurde unterbrochen, bevor es fertig war. Bitte erneut versuchen."
+      }
+    }
+  }
+}

@@ -15,14 +15,16 @@ name = "satchel_core"
 ipc-types = ["dep:ts-rs"]
 # A fixed master key for tests of crates that depend on this one.
 test-support = []
+# Knobs that only tests turn, such as the batch size of bulk moves.
+test-hooks = []
 
 [dependencies]
 aes-gcm = "0.10"
 ammonia = "4.2.4"
-argon2 = "0.5"
+argon2 = "0.6"
 async-imap = { version = "0.11.2", default-features = false, features = ["runtime-tokio"] }
 async-trait = "0.1"
-base64 = "0.22"
+base64 = { version = "0.23", default-features = false, features = ["std"] }
 bytes = "1"
 # MIME boundary search: the byte-at-a-time scan was quadratic per nesting level.
 memchr = "2"
@@ -33,6 +35,8 @@ futures = "0.3"
 # Request bodies that report when their last byte reached the transport.
 http-body = "1"
 icalendar = "0.16"
+# Mail merge addresses: an internationalised domain is checked as its punycode form.
+idna = "1"
 lettre = { version = "0.11", default-features = false, features = ["builder", "ring", "smtp-transport", "tokio1-rustls"] }
 postroom = { git = "https://github.com/tbuck-software/postroom.git", rev = "0a670a2b709d3ae2ed62a1ba2a3090b2a0748b58" }
 postroom-rfc5322 = { git = "https://github.com/tbuck-software/postroom.git", rev = "0a670a2b709d3ae2ed62a1ba2a3090b2a0748b58" }
@@ -51,7 +55,7 @@ rustls-pki-types = "1"
 scraper = "0.27.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sha2 = "0.10"
+sha2 = "0.11"
 socket2 = "0.6"
 sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio-rustls"] }
 tempfile = "3"
@@ -62,6 +66,9 @@ ts-rs = { version = "=12.0.1", optional = true, features = ["serde-json-impl", "
 tokio-rustls = "0.26"
 tracing = "0.1"
 uuid = { version = "1", features = ["v4", "serde"] }
+# Guesses a message's language locally, so Translate is offered only where it
+# helps. Trigram tables, no dictionaries, no network.
+whatlang = "0.18"
 
 # Desktop trusts a bundled root list; the app crate owns the platform plugins.
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
@@ -106,3 +113,5 @@ libc = "0.2"
 
 [dev-dependencies]
 proptest = "1"
+# This crate's own integration tests turn the test knobs.
+satchel-core = { path = ".", features = ["test-hooks"] }

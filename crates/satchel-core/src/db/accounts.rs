@@ -24,6 +24,8 @@ pub const ACCOUNT_COLORS: [&str; 8] = [
 /// A 128px picture is a few kilobytes as WebP or JPEG; this leaves room for
 /// a PNG without letting a photo straight off the camera into every list.
 pub const MAX_AVATAR_BYTES: usize = 96 * 1024;
+/// Characters, not bytes. Longer names only get cut off in every list.
+pub const MAX_ACCOUNT_NAME_CHARS: usize = 120;
 const CREDENTIALS_REF: &str = "encrypted-in-config";
 const IMAP_PROVIDER: &str = "imap";
 const POP3_PROVIDER: &str = "pop3";
@@ -31,6 +33,8 @@ const POP3_PROVIDER: &str = "pop3";
 #[derive(Clone)]
 pub struct CreateEmailAccount {
     pub display_name: String,
+    /// Satchel's own name for the account; `None` shows the sender name.
+    pub label: Option<String>,
     pub email: String,
     pub provider: String,
     /// Plain JSON. The repository encrypts it before the database write.
@@ -40,7 +44,10 @@ pub struct CreateEmailAccount {
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct AccountSummary {
     pub id: String,
+    /// The name on outgoing mail.
     pub display_name: String,
+    /// The account's name in Satchel's lists; `None` shows `display_name`.
+    pub label: Option<String>,
     pub email: String,
     pub provider: String,
     pub kind: String,
@@ -207,6 +214,8 @@ pub enum AccountError {
     ColorInvalid,
     #[error("account picture must be a small PNG, JPEG or WebP data URL")]
     AvatarInvalid,
+    #[error("account name is too long or holds control characters")]
+    NameInvalid,
     #[error("account persistence failed")]
     Persistence(#[source] sqlx::Error),
 }
@@ -355,20 +364,39 @@ impl<'a> AccountRepository<'a> {
         &self,
         account_id: Option<&str>,
     ) -> Result<Vec<CalendarAccountRef>, AccountError> {
+        self.list_active_provider_accounts("gmail", account_id)
+            .await
+    }
+
+    pub async fn list_active_outlook_calendar_accounts(
+        &self,
+        account_id: Option<&str>,
+    ) -> Result<Vec<CalendarAccountRef>, AccountError> {
+        self.list_active_provider_accounts("outlook", account_id)
+            .await
+    }
+
+    async fn list_active_provider_accounts(
+        &self,
+        provider: &str,
+        account_id: Option<&str>,
+    ) -> Result<Vec<CalendarAccountRef>, AccountError> {
         match account_id {
             Some(account_id) => sqlx::query_as::<_, CalendarAccountRef>(
                 "SELECT id, email FROM accounts
-                 WHERE id = ? AND provider = 'gmail' AND is_active = 1",
+                 WHERE id = ? AND provider = ? AND is_active = 1",
             )
             .bind(account_id)
+            .bind(provider)
             .fetch_all(self.pool)
             .await
             .map_err(Into::into),
             None => sqlx::query_as::<_, CalendarAccountRef>(
                 "SELECT id, email FROM accounts
-                 WHERE provider = 'gmail' AND is_active = 1
+                 WHERE provider = ? AND is_active = 1
                  ORDER BY created_at ASC",
             )
+            .bind(provider)
             .fetch_all(self.pool)
             .await
             .map_err(Into::into),
@@ -377,7 +405,7 @@ impl<'a> AccountRepository<'a> {
 
     pub async fn list_active(&self) -> Result<Vec<AccountSummary>, AccountError> {
         sqlx::query_as::<_, AccountSummary>(
-            "SELECT id, display_name, email, provider, kind, color,
+            "SELECT id, display_name, label, email, provider, kind, color,
                     last_oauth_error, last_oauth_error_at, last_sync_at,
                     sync_status, last_sync_error, last_sync_error_at,
                     sync_progress_json, avatar
@@ -401,19 +429,29 @@ impl<'a> AccountRepository<'a> {
         let stored_config = encrypt_account_config(&id, &config.to_string())
             .map_err(|detail| AccountError::CredentialAccess { detail })?;
         let color = next_account_color(self.pool).await?;
+        let label = input
+            .label
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let display_name = input.display_name.trim();
+        if !label.is_none_or(valid_account_name) || !valid_account_name(display_name) {
+            return Err(AccountError::NameInvalid);
+        }
 
         sqlx::query_as::<_, AccountSummary>(
             "INSERT INTO accounts
-                (id, display_name, email, provider, config, credentials_ref,
+                (id, display_name, label, email, provider, config, credentials_ref,
                  sync_state, color, is_active, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-             RETURNING id, display_name, email, provider, kind, color,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+             RETURNING id, display_name, label, email, provider, kind, color,
                        last_oauth_error, last_oauth_error_at, last_sync_at,
                        sync_status, last_sync_error, last_sync_error_at,
                        sync_progress_json, avatar",
         )
         .bind(&id)
-        .bind(&input.display_name)
+        .bind(display_name)
+        .bind(label)
         .bind(&input.email)
         .bind(&input.provider)
         .bind(stored_config)
@@ -463,6 +501,35 @@ impl<'a> AccountRepository<'a> {
             return Err(AccountError::AvatarInvalid);
         }
         self.update_appearance(account_id, "avatar", avatar).await
+    }
+
+    /// Rename the account and set the name on its outgoing mail. A blank
+    /// `label` falls back to the sender name; a blank sender name sends the
+    /// bare address.
+    pub async fn set_names(
+        &self,
+        account_id: &str,
+        label: Option<&str>,
+        sender_name: &str,
+    ) -> Result<(), AccountError> {
+        let label = label.map(str::trim).filter(|value| !value.is_empty());
+        let sender_name = sender_name.trim();
+        if !label.is_none_or(valid_account_name) || !valid_account_name(sender_name) {
+            return Err(AccountError::NameInvalid);
+        }
+        let result = sqlx::query(
+            "UPDATE accounts SET label = ?, display_name = ?, updated_at = ? WHERE id = ?",
+        )
+        .bind(label)
+        .bind(sender_name)
+        .bind(chrono::Utc::now().to_rfc3339())
+        .bind(account_id)
+        .execute(self.pool)
+        .await?;
+        if result.rows_affected() == 0 {
+            return Err(AccountError::NotFound);
+        }
+        Ok(())
     }
 
     async fn update_appearance(
@@ -903,8 +970,13 @@ async fn update_oauth_account(
     let config = oauth::merge_authorized_token_into_config(&account.config, client, token)
         .map_err(oauth_config_error)?;
     let stored_config = encrypt_oauth_config(&account.id, &config)?;
-    let display_name =
-        resolved_oauth_display_name(identity, &account.display_name, normalized_email);
+    // A renewed sign-in keeps the name the user may have edited; only the
+    // first connection takes it from the provider profile.
+    let display_name = if has_oauth_config(&account.config) {
+        account.display_name.clone()
+    } else {
+        resolved_oauth_display_name(identity, &account.display_name, normalized_email)
+    };
     sqlx::query(
         "UPDATE accounts
          SET display_name = ?, email = ?, provider = ?, config = ?, updated_at = ?,
@@ -984,6 +1056,11 @@ where
         .unwrap_or(ACCOUNT_COLORS[used.len() % ACCOUNT_COLORS.len()]))
 }
 
+/// Control characters would end up in a `From:` header.
+fn valid_account_name(name: &str) -> bool {
+    name.chars().count() <= MAX_ACCOUNT_NAME_CHARS && !name.chars().any(char::is_control)
+}
+
 pub fn valid_account_color(color: &str) -> bool {
     color.len() == 7
         && color.starts_with('#')
@@ -1050,11 +1127,7 @@ async fn retire_oauth_placeholder(
             .bind(&session_account.id)
             .fetch_one(&mut **transaction)
             .await?;
-    let has_oauth = serde_json::from_str::<OAuthConfigSnapshot>(&session_account.config)
-        .ok()
-        .and_then(|snapshot| snapshot.oauth)
-        .is_some();
-    if message_count > 0 || has_oauth {
+    if message_count > 0 || has_oauth_config(&session_account.config) {
         return Ok(());
     }
     sqlx::query("UPDATE accounts SET is_active = 0, updated_at = ? WHERE id = ?")
@@ -1063,6 +1136,14 @@ async fn retire_oauth_placeholder(
         .execute(&mut **transaction)
         .await?;
     Ok(())
+}
+
+/// Whether a decrypted config already holds an OAuth grant.
+fn has_oauth_config(config: &str) -> bool {
+    serde_json::from_str::<OAuthConfigSnapshot>(config)
+        .ok()
+        .and_then(|snapshot| snapshot.oauth)
+        .is_some()
 }
 
 fn oauth_emails_match(provider: OAuthProvider, left: &str, right: &str) -> bool {
@@ -1465,6 +1546,7 @@ mod tests {
         let created = AccountRepository::new(&pool)
             .create_email(CreateEmailAccount {
                 display_name: "Personal".into(),
+                label: None,
                 email: "person@example.test".into(),
                 provider: "imap".into(),
                 config: Some(secret.clone()),
@@ -1579,6 +1661,7 @@ mod tests {
         let created = repository
             .create_email(CreateEmailAccount {
                 display_name: "Work".into(),
+                label: None,
                 email: "person@example.test".into(),
                 provider: "imap".into(),
                 config: Some(serde_json::json!({
@@ -1619,6 +1702,7 @@ mod tests {
         let oauth = repository
             .create_email(CreateEmailAccount {
                 display_name: "Mail".into(),
+                label: None,
                 email: "person@gmail.example".into(),
                 provider: "gmail".into(),
                 config: None,
@@ -1639,6 +1723,7 @@ mod tests {
         let created = repository
             .create_email(CreateEmailAccount {
                 display_name: "Work".into(),
+                label: None,
                 email: "person@example.test".into(),
                 provider: "imap".into(),
                 config: Some(serde_json::json!({
@@ -1690,6 +1775,7 @@ mod tests {
         let created = AccountRepository::new(&pool)
             .create_email(CreateEmailAccount {
                 display_name: "Empty".into(),
+                label: None,
                 email: "empty@example.test".into(),
                 provider: "imap".into(),
                 config: None,
@@ -2137,5 +2223,110 @@ mod tests {
                 .as_str(),
             original
         );
+    }
+
+    #[tokio::test]
+    async fn names_are_trimmed_validated_and_listed() {
+        let pool = pool().await;
+        insert_plain_account(&pool, "acc-a", DEFAULT_COLOR).await;
+        let repository = AccountRepository::new(&pool);
+
+        repository
+            .set_names("acc-a", Some("  Work "), " Tom Example ")
+            .await
+            .expect("names");
+        let listed = repository.list_active().await.expect("accounts");
+        assert_eq!(listed[0].label.as_deref(), Some("Work"));
+        assert_eq!(listed[0].display_name, "Tom Example");
+
+        // A blank label falls back to the sender name instead of storing "".
+        repository
+            .set_names("acc-a", Some("   "), "Tom")
+            .await
+            .expect("cleared");
+        assert_eq!(repository.list_active().await.unwrap()[0].label, None);
+
+        for (label, sender) in [
+            (Some("Work"), "Tom\r\nBcc: x@example.test"),
+            (Some("Wo\u{7}rk"), "Tom"),
+            (Some("x".repeat(MAX_ACCOUNT_NAME_CHARS + 1).as_str()), "Tom"),
+        ] {
+            assert!(matches!(
+                repository.set_names("acc-a", label, sender).await,
+                Err(AccountError::NameInvalid)
+            ));
+        }
+        assert!(matches!(
+            repository.set_names("missing", None, "Tom").await,
+            Err(AccountError::NotFound)
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_new_account_keeps_its_name_apart_from_the_sender() {
+        crate::utils::crypto::seed_master_key_for_tests();
+        let pool = pool().await;
+        let repository = AccountRepository::new(&pool);
+        let create = |label: Option<&str>, sender: &str, email: &str| CreateEmailAccount {
+            display_name: sender.into(),
+            label: label.map(Into::into),
+            email: email.into(),
+            provider: "imap".into(),
+            config: None,
+        };
+
+        let named = repository
+            .create_email(create(Some(" Work "), " Tom Example ", "a@example.test"))
+            .await
+            .expect("named account");
+        assert_eq!(named.label.as_deref(), Some("Work"));
+        assert_eq!(named.display_name, "Tom Example");
+        let unnamed = repository
+            .create_email(create(Some("  "), "Tom", "b@example.test"))
+            .await
+            .expect("unnamed account");
+        assert_eq!(unnamed.label, None);
+        assert!(matches!(
+            repository
+                .create_email(create(None, "Tom\r\nBcc: x@example.test", "c@example.test"))
+                .await,
+            Err(AccountError::NameInvalid)
+        ));
+    }
+
+    #[tokio::test]
+    async fn renewing_a_sign_in_keeps_the_edited_sender_name() {
+        crate::utils::crypto::seed_master_key_for_tests();
+        let pool = pool().await;
+        insert_oauth_fixture(
+            &pool,
+            "existing",
+            "person@gmail.com",
+            &oauth_config("old-refresh", "old-access"),
+        )
+        .await;
+        insert_oauth_fixture(&pool, "fresh", "new@gmail.com", "{}").await;
+        let repository = AccountRepository::new(&pool);
+
+        for (id, email) in [("existing", "person@gmail.com"), ("fresh", "new@gmail.com")] {
+            repository
+                .connect_oauth(
+                    id,
+                    &oauth_client("client"),
+                    &oauth_token(Some("new-refresh")),
+                    &oauth_identity(email),
+                    "2026-02-01",
+                )
+                .await
+                .unwrap();
+        }
+        let name = |id: &'static str| {
+            sqlx::query_scalar::<_, String>("SELECT display_name FROM accounts WHERE id = ?")
+                .bind(id)
+                .fetch_one(&pool)
+        };
+        assert_eq!(name("existing").await.unwrap(), "Existing");
+        // The first connection still names the account after the profile.
+        assert_eq!(name("fresh").await.unwrap(), "OAuth User");
     }
 }

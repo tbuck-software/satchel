@@ -137,6 +137,19 @@ impl<'a> SentMessageRepository<'a> {
         };
 
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        // A sync that already fetched the server copy makes a local one a duplicate.
+        if let Some(header) = request.message_id_header.as_deref() {
+            if let Some((id, Some(thread_id))) =
+                crate::db::sent_copies::synced_sent_copy(&mut *tx, &request.account_id, header)
+                    .await?
+            {
+                tx.commit().await?;
+                return Ok(SentMessageRecord {
+                    message_id: id,
+                    thread_id,
+                });
+            }
+        }
         // Folder repair belongs to the same transaction: a failed sent-message
         // write must not leave a synthetic folder behind.
         let sent_folder_id = ensure_sent_folder(&mut tx, &request.account_id, &now).await?;
@@ -224,7 +237,7 @@ impl<'a> SentMessageRepository<'a> {
             )
             .bind(&attachment_id)
             .bind(&message_id)
-            .bind(crate::utils::filename::strip_filename_controls(&attachment.filename))
+            .bind(crate::utils::filename::safe_attachment_name(&attachment.filename))
             .bind(&attachment.mime_type)
             .bind(attachment.size)
             .bind(attachment.content_id.as_deref())
@@ -454,17 +467,15 @@ async fn ensure_sent_folder(
     .execute(&mut **tx)
     .await?;
 
-    sqlx::query_scalar::<_, String>(
-        "SELECT id FROM folders
-         WHERE account_id = ? AND (folder_type = 'sent' OR id = ?)
-         ORDER BY CASE WHEN folder_type = 'sent' THEN 0 ELSE 1 END, created_at ASC, id ASC
-         LIMIT 1",
-    )
-    .bind(account_id)
-    .bind(&candidate_id)
-    .fetch_one(&mut **tx)
-    .await
-    .map_err(Into::into)
+    // The same choice the outbox APPENDs to; a different one strands this
+    // copy next to the server copy instead of being replaced by it.
+    if let Some(folder) =
+        crate::db::sent_copies::preferred_sent_folder(&mut **tx, account_id).await?
+    {
+        return Ok(folder.id);
+    }
+    // A row under the candidate id that is typed otherwise (e.g. a custom "Sent").
+    Ok(candidate_id)
 }
 
 fn normalize_subject(subject: &str) -> String {

@@ -36,6 +36,7 @@ const harness = vi.hoisted(() => ({
     togglePinned: vi.fn(),
   },
   composer: { isOpen: false, openNew: vi.fn(), openReply: vi.fn(), openForward: vi.fn() },
+  openView: vi.fn(),
 }));
 
 vi.mock('vue-router', () => ({
@@ -46,6 +47,7 @@ vi.mock('vue-router', () => ({
     currentRoute: { value: { name: 'inbox' } },
   }),
 }));
+vi.mock('@/router/mailViews', () => ({ openView: harness.openView }));
 vi.mock('@/stores/ui', () => ({ useUiStore: () => harness.ui }));
 vi.mock('@/stores/settings', () => ({ useSettingsStore: () => harness.settings }));
 vi.mock('@/stores/threads', () => ({ useThreadsStore: () => harness.threads }));
@@ -67,7 +69,7 @@ vi.mock('./useThreadMessageKeyboardNavigation', () => ({
   toggleFocusedThreadMessage: () => false,
 }));
 
-import { useKeyboard } from './useKeyboard';
+import { registerViewShortcut, useKeyboard } from './useKeyboard';
 
 let mounted: ReturnType<typeof mount> | null = null;
 
@@ -159,5 +161,41 @@ describe('single-key shortcut switch', () => {
     press('/', { metaKey: true });
 
     expect(harness.ui.openOmni).not.toHaveBeenCalled();
+  });
+});
+
+describe('view shortcuts registered by lazy code', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    harness.settings.singleKeyShortcuts = true;
+  });
+
+  afterEach(() => {
+    mounted?.unmount();
+    mounted = null;
+  });
+
+  it('opens the view while registered and stops when unregistered', () => {
+    mountKeyboard();
+    const stop = registerViewShortcut({ action: 'goChats', binding: 'g h', view: 'chats', label: () => 'Chats' });
+    press('g');
+    press('h');
+    expect(harness.openView).toHaveBeenCalledWith(expect.anything(), 'chats');
+
+    stop();
+    harness.openView.mockClear();
+    press('g');
+    press('h');
+    expect(harness.openView).not.toHaveBeenCalled();
+  });
+
+  it('leaves a built-in sequence to its own view', () => {
+    mountKeyboard();
+    const stop = registerViewShortcut({ action: 'goChats', binding: 'g c', view: 'chats', label: () => 'Chats' });
+    press('g');
+    press('c');
+    expect(harness.openView).toHaveBeenCalledWith(expect.anything(), 'calendar');
+    expect(harness.openView).not.toHaveBeenCalledWith(expect.anything(), 'chats');
+    stop();
   });
 });

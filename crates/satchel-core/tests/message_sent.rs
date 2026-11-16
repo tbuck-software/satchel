@@ -553,3 +553,74 @@ async fn concurrent_first_sends_create_one_sent_folder() {
     assert_eq!(folder_count, 1);
     assert_eq!(message_count, 2);
 }
+
+/// Apple Mail's legacy `Sent Messages` is listed (and stored) first; the live
+/// `Sent` holds the mail. The local copy must go where the APPEND goes.
+async fn seed_two_sent_folders(pool: &SqlitePool) {
+    seed_account(pool, "acc-1", "me@example.com").await;
+    sqlx::query(
+        "INSERT INTO folders (id, account_id, name, full_path, remote_id, folder_type, created_at, updated_at) VALUES
+         ('sent-legacy', 'acc-1', 'INBOX.Sent Messages', 'INBOX.Sent Messages', 'INBOX.Sent Messages', 'sent', '2026-03-08T16:35:37Z', '2026-11-15T00:04:31.4Z'),
+         ('sent-live', 'acc-1', 'INBOX.Sent', 'INBOX.Sent', 'INBOX.Sent', 'sent', '2026-03-08T16:35:38Z', '2026-11-15T00:04:31.6Z')",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn with_two_sent_folders_the_local_copy_goes_where_the_append_goes() {
+    let pool = pool().await;
+    seed_two_sent_folders(&pool).await;
+
+    let sent = SentMessageRepository::new(&pool)
+        .persist(request("acc-1"))
+        .await
+        .unwrap();
+
+    let folder: String = sqlx::query_scalar("SELECT folder_id FROM messages WHERE id = ?")
+        .bind(&sent.message_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let append_target = satchel_core::db::sent_copies::preferred_sent_folder(&pool, "acc-1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(folder, "sent-live");
+    assert_eq!(append_target.id, folder);
+    assert_eq!(append_target.remote_path, "INBOX.Sent");
+}
+
+#[tokio::test]
+async fn a_server_copy_synced_before_the_local_write_is_not_duplicated() {
+    let pool = pool().await;
+    seed_two_sent_folders(&pool).await;
+    sqlx::query(
+        "INSERT INTO threads (id, account_id, subject, last_message_date, message_count, unread_count, created_at, updated_at)
+         VALUES ('th-server', 'acc-1', 'Hello world', '2026-11-14T23:38:50Z', 1, 0, '', '');
+         INSERT INTO messages (id, account_id, folder_id, thread_id, message_id_header, from_address, to_addresses, date, is_sent, remote_uid, remote_id, created_at, updated_at)
+         VALUES ('m-imap-398', 'acc-1', 'sent-live', 'th-server', '<sent@satchel.local>', 'me@example.com', '[]', '2026-11-14T23:38:50Z', 1, 398, '398', '', '')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let sent = SentMessageRepository::new(&pool)
+        .persist(SentMessageWriteRequest {
+            message_id_header: Some("<sent@satchel.local>".into()),
+            ..request("acc-1")
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(sent.message_id, "m-imap-398");
+    assert_eq!(sent.thread_id, "th-server");
+    let copies: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM messages WHERE message_id_header = '<sent@satchel.local>'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(copies, 1);
+}

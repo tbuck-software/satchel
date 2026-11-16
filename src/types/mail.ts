@@ -146,11 +146,20 @@ export interface Thread {
   hasInvite?: boolean;
   inviteStatus?: string;
   inviteCancelled?: boolean;
+  /** The local spam filter judged it spam and nobody has said Not spam since. */
+  likelySpam?: boolean;
+  /** The filter moved it to Spam (Move mode). */
+  spamMoved?: boolean;
 }
 
 export interface Account {
   id: string;
+  /** What Satchel calls the account: its label, else the sender name. */
   displayName: string;
+  /** The name the user gave the account; `null` when it shows the sender name. */
+  label?: string | null;
+  /** The name on outgoing mail. Absent means `displayName`. */
+  senderName?: string;
   email: string;
   provider: string;
   kind: 'email' | 'webhook' | 'script' | 'rss';

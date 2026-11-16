@@ -1,7 +1,7 @@
 import type { DataRepairProgress } from './services/backend/generated/app/sync/maintenance/DataRepairProgress';
 import { applyLocalePreference } from '@/i18n/runtime';
 import { listen, type Event } from '@tauri-apps/api/event';
-import { onBeforeUnmount, onMounted, watch } from 'vue';
+import { onBeforeUnmount, onMounted, onScopeDispose, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { bootstrapPersistence } from '@/persistence/bootstrap';
@@ -35,6 +35,7 @@ import {
 } from '@/utils/notificationNavigation';
 import type { IosNotificationResponses, NotificationActionOutcome } from '@/mobile/iosNotificationResponses';
 import { useAccountsStore } from '@/stores/accounts';
+import { useAccountQuotaStore } from '@/stores/accountQuota';
 import { useAliasesStore } from '@/stores/aliases';
 import { useConnectionStore } from '@/stores/connection';
 import { useContactsStore } from '@/stores/contacts';
@@ -109,6 +110,7 @@ function useNativeUiStrings(): void {
       notification_send_failed: t('nativeUi.notifications.sendFailed'),
       notification_sync_failed: t('nativeUi.notifications.syncFailed'),
       notification_follow_up_due: t('nativeUi.notifications.followUpDue'),
+      notification_task_due: t('nativeUi.notifications.taskDue'),
       notification_no_subject: t('nativeUi.notifications.noSubject'),
       notification_channel_name: t('nativeUi.notifications.channelName'),
       notification_channel_description: t('nativeUi.notifications.channelDescription'),
@@ -249,6 +251,7 @@ export function useAppBootstrap(): void {
   const { t } = useI18n();
   const router = useRouter();
   const accountsStore = useAccountsStore();
+  const accountQuotaStore = useAccountQuotaStore();
   const mailboxesStore = useMailboxesStore();
   const threadsStore = useThreadsStore();
   const messagesStore = useMessagesStore();
@@ -280,6 +283,11 @@ export function useAppBootstrap(): void {
   useNativeUiStrings();
   useDraftFlushOnExit();
 
+  // Labs: the flags and the experiments' code load behind an import, so a
+  // switched-off experiment costs startup nothing (`@/labs/runtime`).
+  let stopLabs: (() => void) | null = null;
+  onBeforeUnmount(() => stopLabs?.());
+
   function openWaitingForReply() {
     threadsStore.workflowFilter = 'later';
     threadsStore.setMailboxFilter({ kind: 'all', value: null });
@@ -297,6 +305,7 @@ export function useAppBootstrap(): void {
 
   let icsDragOverHandler: ((event: DragEvent) => void) | null = null;
   let icsDropHandler: ((event: DragEvent) => void) | null = null;
+  let disposeFileDropGuard: (() => void) | null = null;
   /*
    * Every event registration that succeeded, in one place. Thirteen named
    * variables and thirteen `if` blocks in the teardown meant a listener could
@@ -311,6 +320,7 @@ export function useAppBootstrap(): void {
   async function loadCoreStores() {
     await Promise.all([
       accountsStore.load(),
+      accountQuotaStore.load(),
       mailboxesStore.load(),
       threadsStore.load(),
       workflowStore.load(),
@@ -755,6 +765,9 @@ export function useAppBootstrap(): void {
     const notificationRestore = backendSupportsNativeCommands()
       ? (async () => { await restoreBackgroundNotifications(); })()
       : Promise.resolve();
+    void import('@/labs/runtime').then(({ startLabs }) => {
+      if (!bootstrapDisposed) stopLabs = startLabs();
+    }).catch((error) => console.warn('labs failed to start', error));
     const coreStoresLoad = (async () => { await loadCoreStores(); })().catch((error) => {
       console.error('core stores failed to load', error);
       connectionStore.reportBackendError('threads', error);
@@ -1124,6 +1137,10 @@ export function useAppBootstrap(): void {
       };
       window.addEventListener('dragover', icsDragOverHandler);
       window.addEventListener('drop', icsDropHandler);
+      // After the .ics handlers: it answers only the file drags they left.
+      void import('@/utils/fileDropGuard').then(({ installFileDropGuard }) => {
+        if (!bootstrapDisposed) disposeFileDropGuard = installFileDropGuard();
+      });
     }
 
     if (backendSupportsNativeCommands()) {
@@ -1148,6 +1165,8 @@ export function useAppBootstrap(): void {
           const summary = await runImapSyncOnce();
           if (bootstrapDisposed) return;
           connectionStore.applySyncSummary(summary);
+          // A full sync may have read a new quota; the stored row is cheap.
+          void accountQuotaStore.load();
           if (summary.messages_synced > 0) {
             await Promise.all([threadsStore.refreshHead({ revalidateCachedRows: true }), mailboxesStore.load()]);
           }
@@ -1217,6 +1236,8 @@ export function useAppBootstrap(): void {
         window.removeEventListener('drop', icsDropHandler);
         icsDropHandler = null;
       }
+      disposeFileDropGuard?.();
+      disposeFileDropGuard = null;
     }
   });
 }
@@ -1239,4 +1260,16 @@ export function useComposeWindowBootstrap(): void {
   // The one shared lifetime concern a popout does have: it is where the
   // unsaved draft lives when the user quits.
   useDraftFlushOnExit();
+  // A file dropped beside the composer's attachment zone does nothing.
+  let disposeFileDropGuard: (() => void) | null = null;
+  let disposed = false;
+  if (typeof window !== 'undefined') {
+    void import('@/utils/fileDropGuard').then(({ installFileDropGuard }) => {
+      if (!disposed) disposeFileDropGuard = installFileDropGuard();
+    });
+  }
+  onScopeDispose(() => {
+    disposed = true;
+    disposeFileDropGuard?.();
+  });
 }

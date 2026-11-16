@@ -3,13 +3,15 @@ import AppButton from '@/components/ui/AppButton.vue';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
 import IconButton from '@/components/ui/IconButton.vue';
 import { useDismissable } from '@/composables/useDismissable';
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { BackendDownloadAttachmentResult } from '@/types/messages';
 import { useToast } from '@/composables/useToast';
 import { useAttachmentActions } from '@/composables/useAttachmentActions';
 import { attachmentBytes } from '@/utils/attachmentBytes';
 import ModalShell from '@/components/ui/ModalShell.vue';
+
+const PdfPreview = defineAsyncComponent(() => import('./PdfPreview.vue'));
 
 const { t } = useI18n();
 const toast = useToast();
@@ -34,7 +36,6 @@ const objectUrl = ref('');
 // and both the preview and the text view want the same bytes.
 const bytes = ref<Uint8Array | null>(null);
 const pdfFailed = ref(false);
-let pdfLoadTimer: number | null = null;
 
 function releaseObjectUrl() {
   if (objectUrl.value) URL.revokeObjectURL(objectUrl.value);
@@ -42,24 +43,17 @@ function releaseObjectUrl() {
 }
 
 function prepareObjectUrl(result: BackendDownloadAttachmentResult, payload: Uint8Array) {
-  if (!result.mime_type.startsWith('image/') && result.mime_type !== 'application/pdf') return;
+  if (!result.mime_type.startsWith('image/')) return;
   releaseObjectUrl();
   // `Uint8Array<ArrayBufferLike>` is not a `BlobPart`; the slice narrows it.
   const view = payload.slice();
   objectUrl.value = URL.createObjectURL(
     new Blob([view.buffer as ArrayBuffer], { type: result.mime_type }),
   );
-  if (result.mime_type === 'application/pdf') {
-    pdfLoadTimer = window.setTimeout(() => {
-      pdfFailed.value = true;
-    }, 8_000);
-  }
 }
 
 let request: symbol | null = null;
 function clearPreview() {
-  if (pdfLoadTimer !== null) window.clearTimeout(pdfLoadTimer);
-  pdfLoadTimer = null;
   releaseObjectUrl();
   data.value = null;
   bytes.value = null;
@@ -149,95 +143,86 @@ async function openWithSystem() {
   }
 }
 
-function markPdfLoaded() {
-  if (pdfLoadTimer !== null) window.clearTimeout(pdfLoadTimer);
-  pdfLoadTimer = null;
-}
-
-function markPdfFailed() {
-  if (pdfLoadTimer !== null) window.clearTimeout(pdfLoadTimer);
-  pdfLoadTimer = null;
-  pdfFailed.value = true;
-}
-
 // Back closes this before whatever it was opened from.
 useDismissable(() => true, () => emit('close'));
 </script>
 
 <template>
-  <ModalShell
-    :label="$t('mail.attachment.previewLabel')"
-    width="960px"
-    height="900px"
-    @dismiss="emit('close')"
-  >
-    <div class="preview-body">
-      <header>
-        <span class="title">{{ data?.filename || filename || $t('mail.attachment.fallbackName') }}</span>
-        <div class="actions">
-          <AppButton
-            v-if="nestedMessagePath"
-            class="ghost"
-            @click="openInViewer"
-            variant="ghost"
-            size="sm"
-          >
-            {{ $t('mail.attachment.openInWindow') }}
-          </AppButton>
-          <AppButton
-            v-if="data"
-            class="ghost"
-            :disabled="openingExternal"
-            @click="openWithSystem"
-            variant="ghost"
-            size="sm"
-          >
-            {{ $t('mail.attachment.openWithDefault') }}
-          </AppButton>
-          <AppButton v-if="data" class="ghost" @click="saveAs" variant="ghost" size="sm">
-            {{ $t('mail.attachment.saveEllipsis') }}
-          </AppButton>
-          <IconButton :title="$t('common.close')" class="close" @click="emit('close')">×</IconButton>
-        </div>
-      </header>
-      <div class="content">
-        <div v-if="loading" class="state">{{ $t('mail.attachment.loading') }}</div>
-        <div v-else-if="error" class="state error">{{ error }}</div>
-        <img v-else-if="isImage" :src="objectUrl" :alt="data?.filename" />
-        <iframe
-          v-else-if="isPdf && !pdfFailed"
-          :src="objectUrl"
-          :title="$t('mail.attachment.pdfPreview')"
-          @load="markPdfLoaded"
-          @error="markPdfFailed"
-        />
-        <div v-else-if="isPdf" class="state error">
-          <p>{{ $t('mail.attachment.pdfFailed') }}</p>
-          <AppButton class="primary" @click="openWithSystem" variant="primary" size="sm">
-            {{ $t('mail.attachment.openWithDefault') }}
-          </AppButton>
-        </div>
-        <pre v-else-if="isText">{{ decodedText }}</pre>
-        <div v-else class="state">
-          <i18n-t keypath="mail.attachment.previewUnavailable" tag="p">
-            <template #mime><code>{{ mime }}</code></template>
-          </i18n-t>
-          <AppButton
-            v-if="nestedMessagePath"
-            class="primary"
-            @click="openInViewer"
-            variant="primary"
-            size="sm"
-          >
-            {{ $t('mail.attachment.openInWindow') }}
-          </AppButton>
-          <AppButton class="primary" @click="saveAs" variant="primary" size="sm">
-            {{ $t('mail.attachment.saveEllipsis') }}
-          </AppButton>
+  <!-- Keep reader transforms and clipping from containing the modal. -->
+  <Teleport to="body">
+    <ModalShell
+      :label="$t('mail.attachment.previewLabel')"
+      width="960px"
+      height="900px"
+      @dismiss="emit('close')"
+    >
+      <div class="preview-body">
+        <header>
+          <span class="title">{{ data?.filename || filename || $t('mail.attachment.fallbackName') }}</span>
+          <div class="actions">
+            <AppButton
+              v-if="nestedMessagePath"
+              class="ghost"
+              @click="openInViewer"
+              variant="ghost"
+              size="sm"
+            >
+              {{ $t('mail.attachment.openInWindow') }}
+            </AppButton>
+            <AppButton
+              v-if="data"
+              class="ghost"
+              :disabled="openingExternal"
+              @click="openWithSystem"
+              variant="ghost"
+              size="sm"
+            >
+              {{ $t('mail.attachment.openWithDefault') }}
+            </AppButton>
+            <AppButton v-if="data" class="ghost" @click="saveAs" variant="ghost" size="sm">
+              {{ $t('mail.attachment.saveEllipsis') }}
+            </AppButton>
+            <IconButton :title="$t('common.close')" class="close" @click="emit('close')">×</IconButton>
+          </div>
+        </header>
+        <div class="content">
+          <div v-if="loading" class="state">{{ $t('mail.attachment.loading') }}</div>
+          <div v-else-if="error" class="state error">{{ error }}</div>
+          <img v-else-if="isImage" :src="objectUrl" :alt="data?.filename" />
+          <Suspense v-else-if="isPdf && bytes && !pdfFailed">
+            <PdfPreview :key="attachmentId" :bytes="bytes" @failed="pdfFailed = true" />
+            <template #fallback>
+              <div class="state" role="status">{{ $t('mail.attachment.loading') }}</div>
+            </template>
+          </Suspense>
+          <div v-else-if="isPdf" class="state error">
+            <p>{{ $t('mail.attachment.pdfFailed') }}</p>
+            <AppButton class="primary" @click="openWithSystem" variant="primary" size="sm">
+              {{ $t('mail.attachment.openWithDefault') }}
+            </AppButton>
+          </div>
+          <pre v-else-if="isText">{{ decodedText }}</pre>
+          <div v-else class="state">
+            <i18n-t keypath="mail.attachment.previewUnavailable" tag="p">
+              <template #mime><code>{{ mime }}</code></template>
+            </i18n-t>
+            <AppButton
+              v-if="nestedMessagePath"
+              class="primary"
+              @click="openInViewer"
+              variant="primary"
+              size="sm"
+            >
+              {{ $t('mail.attachment.openInWindow') }}
+            </AppButton>
+            <AppButton class="primary" @click="saveAs" variant="primary" size="sm">
+              {{ $t('mail.attachment.saveEllipsis') }}
+            </AppButton>
+          </div>
         </div>
       </div>
-    </div>
-  </ModalShell>
+    </ModalShell>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -256,7 +241,6 @@ header {
   display: flex; align-items: center; justify-content: center;
 }
 .content img { max-width: 100%; max-height: 100%; object-fit: contain; }
-.content iframe { width: 100%; height: 100%; border: 0; background: var(--email-canvas); }
 .content pre {
   width: 100%; height: 100%; padding: 16px; margin: 0;
   font-family: var(--font-mono); font-size: var(--font-size-sm);

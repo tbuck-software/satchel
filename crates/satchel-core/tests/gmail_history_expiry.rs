@@ -15,6 +15,14 @@ const OLD_INTERNAL_DATE_MS: &str = "1560000000000";
 const RECENT_CURSOR_TS: u64 = 1_785_000_000;
 
 fn route(request_line: &str) -> (&'static str, String) {
+    // Messages with a user label make the provider read label names, to
+    // recognise Satchel's workflow labels.
+    if request_line.contains("/labels") {
+        return (
+            "200 OK",
+            r#"{"labels":[{"id":"Label_kunden","name":"Kunden","type":"user"}]}"#.to_string(),
+        );
+    }
     if request_line.contains("/profile") {
         return ("200 OK", r#"{"historyId":"999"}"#.to_string());
     }

@@ -88,10 +88,12 @@ pub async fn rename_folder(
     state: tauri::State<'_, AppState>,
     input: RenameFolderInput,
 ) -> CommandResult<Folder> {
-    FolderRepository::new(pool.inner(), state.queue.as_ref())
+    let folder = FolderRepository::new(pool.inner(), state.queue.as_ref())
         .rename(&input.folder_id, &input.new_name)
-        .await
-        .map_err(Into::into)
+        .await?;
+    // A rule that moves into it names the folder on the server by name.
+    crate::commands::rules::spawn_server_rules_push(pool.inner().clone());
+    Ok(folder)
 }
 
 #[tauri::command]
@@ -102,6 +104,8 @@ pub async fn delete_folder(
 ) -> CommandResult<()> {
     FolderRepository::new(pool.inner(), state.queue.as_ref())
         .delete(&input.folder_id)
-        .await
-        .map_err(Into::into)
+        .await?;
+    // A rule that moved into it can no longer run on the server.
+    crate::commands::rules::spawn_server_rules_push(pool.inner().clone());
+    Ok(())
 }

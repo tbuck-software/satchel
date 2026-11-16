@@ -53,4 +53,32 @@ describe('Google feature connections', () => {
     expect(wrapper.get('[role="alert"]').text()).toContain('Contact access was declined');
     expect(wrapper.get('button').attributes('disabled')).toBeUndefined();
   });
+
+  it('offers Outlook accounts calendar access and recognises Microsoft\'s bare scope names', async () => {
+    const accounts = useAccountsStore();
+    accounts.accounts = [
+      { id: 'gmail', email: 'person@example.test', displayName: 'Personal', provider: 'gmail', kind: 'email', color: 'blue' },
+      { id: 'outlook', email: 'person@outlook.example', displayName: 'Work', provider: 'outlook', kind: 'email', color: 'blue' },
+    ];
+    vi.mocked(backendOauthStatus).mockResolvedValue({ account_id: 'outlook', provider: 'outlook',
+      connected: true, has_refresh_token: true, expires_at: null,
+      granted_scopes: ['openid', 'https://graph.microsoft.com/Mail.ReadWrite'] });
+    const reconnect = vi.spyOn(accounts, 'startReauth').mockImplementation(async () => {
+      vi.mocked(backendOauthStatus).mockResolvedValue({ account_id: 'outlook', provider: 'outlook',
+        connected: true, has_refresh_token: true, expires_at: null,
+        granted_scopes: ['openid', 'Mail.ReadWrite', 'Calendars.ReadWrite'] });
+    });
+    const wrapper = mount(GoogleConnections, { props: { provider: 'outlook', purpose: 'calendar' } });
+    await flushPromises();
+    expect(wrapper.text()).toContain('Outlook Calendar');
+    expect(wrapper.findAll('button')).toHaveLength(1);
+    expect(wrapper.get('button').text()).toContain('person@outlook.example');
+    expect(backendOauthStatus).toHaveBeenCalledWith('outlook');
+    expect(backendOauthStatus).not.toHaveBeenCalledWith('gmail');
+    await wrapper.get('button').trigger('click');
+    await flushPromises();
+    expect(reconnect).toHaveBeenCalledWith('outlook', 'calendar');
+    expect(wrapper.emitted('connected')).toEqual([['outlook']]);
+    expect(wrapper.get('button').text()).toContain('Connected');
+  });
 });

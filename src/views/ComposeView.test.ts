@@ -161,6 +161,10 @@ vi.mock('@/composables/useComposerTransport', () => ({
     undoSend: harness.undoSend,
   }),
 }));
+vi.mock('@/services/backend/availability', () => ({
+  backendFindFreeSlots: vi.fn(async () => ({ time_zone: 'UTC', unknown: [], days: [] })),
+  backendQueryFreeBusy: vi.fn(),
+}));
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({
     error: harness.toastError,
@@ -171,6 +175,7 @@ vi.mock('@/composables/useToast', () => ({
 }));
 
 import ComposeView from './ComposeView.vue';
+import InsertAvailabilityDialog from '@/components/mail/InsertAvailabilityDialog.vue';
 import { useUiStore } from '@/stores/ui';
 
 const DRAFT_BODY = 'The quarterly figures are attached.';
@@ -414,6 +419,21 @@ it('keeps edits to the quoted history when switching between plain text and HTML
   wrapper.unmount();
 });
 
+it('sends a reply from the address the composer shows, also for the primary identity', async () => {
+  harness.getByThread.mockReturnValue([{
+    id: 'original', threadId: 'thread-1',
+    from: { name: 'Client', email: 'client@example.com' }, to: [],
+    subject: 'Project update', bodyText: 'Original conversation history',
+    timestamp: '2026-10-13T10:00:00Z', isRead: true, attachments: [],
+  }]);
+  harness.sendMessage.mockResolvedValue({ status: 'sent', thread_id: 'thread-1', message_id: 'new' });
+  const wrapper = render(undefined, true, { mode: 'reply', threadId: 'thread-1', initialBody: 'Thanks' });
+  await flushPromises();
+  await send(wrapper);
+  expect(harness.sendMessage.mock.calls[0]![0].fromAddress).toBe('me@example.com');
+  wrapper.unmount();
+});
+
 /**
  * One rejected side load used to leave `initialized` false for good: no dirty
  * tracking, no autosave, no close guard, and ten minutes of typing gone.
@@ -654,6 +674,17 @@ describe('composer send guard', () => {
     const secondary = wrapper.get('.split-button__secondary');
     expect(secondary.attributes('disabled')).toBeDefined();
     expect(secondary.attributes('aria-describedby')).toBe(describedBy);
+  });
+
+  it('refuses the palette\'s mail merge in a reply and keeps the recipients', async () => {
+    const wrapper = render(['boss@example.com'], true, { mode: 'reply', threadId: 'thread-1', mailMergeRequests: 0 });
+    await flushPromises();
+    await wrapper.setProps({ mailMergeRequests: 1 });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('Mail merge works with a new message, not with a reply or forward.');
+    expect(wrapper.find('[data-testid="mail-merge-source"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="mail-merge-bar"]').exists()).toBe(false);
   });
 
   it('names the invalid address in the hint', async () => {
@@ -1063,3 +1094,40 @@ describe('phone composer', () => {
     wrapper.unmount();
   });
 });
+
+describe('insert my availability', () => {
+  const content = { text: "I'm free:\n- Mon: 09:00-10:00", html: "<p>I'm free:</p><ul><li><p>Mon: 09:00-10:00</p></li></ul>" };
+
+  async function openAndInsert(wrapper: ReturnType<typeof render>) {
+    await wrapper.get('[data-testid="compose-insert-availability"]').trigger('click');
+    await flushPromises();
+    await vi.dynamicImportSettled();
+    await flushPromises();
+    wrapper.findComponent(InsertAvailabilityDialog).vm.$emit('insert', content);
+    await flushPromises();
+  }
+
+  it('says so when the rich editor cannot take the text', async () => {
+    harness.composePlainText = false;
+    harness.realEditor = false;
+    harness.toastError.mockClear();
+    const wrapper = render();
+    await flushPromises();
+    await openAndInsert(wrapper);
+    expect(harness.toastError).toHaveBeenCalledWith('The availability could not be inserted. Click into the message and try again.');
+    expect(wrapper.findComponent(InsertAvailabilityDialog).exists()).toBe(false);
+  });
+
+  it('puts the text at the caret of a plain-text message', async () => {
+    harness.composePlainText = true;
+    harness.toastError.mockClear();
+    const wrapper = render();
+    await flushPromises();
+    const area = wrapper.get('textarea.plain-editor');
+    (area.element as HTMLTextAreaElement).setSelectionRange(0, 0);
+    await openAndInsert(wrapper);
+    expect((area.element as HTMLTextAreaElement).value).toContain(`${content.text}\n${DRAFT_BODY}`);
+    expect(harness.toastError).not.toHaveBeenCalled();
+  });
+});
+

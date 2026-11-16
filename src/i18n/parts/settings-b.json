@@ -245,7 +245,11 @@
         "onlyContacts": "Only reply to known contacts",
         "saved": "Saved.",
         "title": "Out of office",
-        "until": "Until"
+        "until": "Until",
+        "imapServerRulesHint": "Turn on server rules for this account (Settings → Accounts) to set the reply on your server, or set it in your provider's webmail.",
+        "imapNoVacation": "This server cannot send automatic replies. Use your provider's webmail.",
+        "imapNoWindow": "This server cannot start or stop the reply on a date.",
+        "imapWrapperOrder": "Satchel's script runs before “{script}”. If “{script}” sends its own auto-reply, turn that one off."
       },
       "search": {
         "placeholder": "Filter settings",
@@ -509,7 +513,11 @@
         "onlyContacts": "Nur an bekannte Kontakte antworten",
         "saved": "Gespeichert.",
         "title": "Out of Office / Abwesenheit",
-        "until": "Bis"
+        "until": "Bis",
+        "imapServerRulesHint": "Schalte die Server-Regeln für dieses Konto ein (Einstellungen → Konten), um die Antwort am Server zu setzen, oder richte sie im Webmail ein.",
+        "imapNoVacation": "Dieser Server kann keine automatischen Antworten senden. Nutze das Webmail deines Anbieters.",
+        "imapNoWindow": "Dieser Server kann die Antwort nicht zu einem Datum starten oder beenden.",
+        "imapWrapperOrder": "Satchels Skript läuft vor „{script}“. Sendet „{script}“ eine eigene Abwesenheitsnotiz, schalte diese dort aus."
       },
       "search": {
         "placeholder": "Einstellungen filtern",

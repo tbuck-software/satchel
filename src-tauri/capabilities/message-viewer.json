@@ -6,8 +6,6 @@
     "message-file-*"
   ],
   "permissions": [
-    "core:event:allow-listen",
-    "core:event:allow-unlisten",
     "dialog:allow-save",
     "core:window:allow-close",
     "core:window:allow-set-focus",

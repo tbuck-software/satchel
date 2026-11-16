@@ -45,6 +45,11 @@ import { isSmimeSignatureAttachment, isSystemAttachment } from '@/utils/messageA
 import { summarizeAuthentication } from '@/utils/messageAuthentication';
 import type { AnchorBox } from '@/utils/popoverPlacement';
 import { useMessageSecurityActions } from '@/composables/useMessageSecurityActions';
+import { useMessageTranslation } from '@/composables/useMessageTranslation';
+import { languageName } from '@/utils/languageName';
+import { openDraftTarget } from '@/composables/openDraftTarget';
+import { startMessageDrag } from '@/utils/appDragTarget';
+import { startContactDrag } from '@/utils/contactDrag';
 import MessageBodyViewSwitch from './MessageBodyViewSwitch.vue';
 import { BODY_VIEW_SWITCH } from './bodyViewSwitch';
 import { BODY_VIEW_STATE, type BodyViewState } from './bodyViewState';
@@ -86,7 +91,7 @@ const invitesStore = useInvitesStore();
 const accountsStore = useAccountsStore();
 const bodyCacheKey = computed(() =>
   `${props.message.id}:uidvalidity:${props.message.remoteUidValidity ?? 'local'}`);
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const sourceDialogOpen = ref(false);
 const messageActionsOpen = ref(false);
 const pgpDismissed = ref(false);
@@ -362,6 +367,41 @@ function chooseBodyView(mode: string) {
 const imageGuard = shallowRef<ImageGuardChoices | null>(null);
 provide(IMAGE_GUARD_CHOICES, imageGuard);
 
+/*
+ * Translate, and the way back to the original. The translated body renders
+ * in the same isolated frame as the original, through the same CSP; only
+ * the HTML handed to the renderer changes.
+ */
+
+/** The consent question loads with its copy only when it is asked. */
+async function requestTranslationConsent(accountId: string): Promise<boolean> {
+  const { askTranslationConsent } = await import('./translationConsent');
+  return askTranslationConsent(accountId);
+}
+
+const messageTranslation = useMessageTranslation(
+  () => ({
+    id: props.message.id,
+    accountId: senderAccountId.value,
+    bodyLoaded: bodyLoaded.value && !props.message.bodyLoadError && !props.message.sourcePayload,
+    encrypted: props.message.pgp?.state === 'decrypted' || props.message.smime?.state === 'decrypted',
+    collapsed: props.collapsed,
+  }),
+  requestTranslationConsent,
+);
+const shownTranslation = messageTranslation.shown;
+const translatedFrom = computed(() => {
+  const source = shownTranslation.value?.source_language;
+  return source ? languageName(source, locale.value) : '';
+});
+const rendererHtml = computed(() => (
+  shownTranslation.value ? shownTranslation.value.body_html ?? undefined : props.message.bodyHtml
+));
+const rendererText = computed(() => shownTranslation.value?.body_text ?? visibleBodyText.value);
+const rendererCacheKey = computed(() => (
+  shownTranslation.value ? `${bodyCacheKey.value}:translated:${shownTranslation.value.target_language}` : bodyCacheKey.value
+));
+
 /** Someone besides the sender and us would get a reply all. */
 const canReplyAll = computed(() => {
   const others = new Set(
@@ -380,6 +420,7 @@ function runCommand(command: MessageMenuCommand) {
     case 'topic': topicsStore.openPicker({ itemType: 'message', itemIds: [props.message.id] }); break;
     case 'source': sourceDialogOpen.value = true; break;
     case 'toggleCollapsed': emit('toggleCollapsed'); break;
+    case 'translate': messageTranslation.toggle(); break;
   }
 }
 
@@ -389,6 +430,11 @@ const messageMenu = computed<MessageMenu>(() => ({
   collapsed: props.collapsed,
   bodyView: bodyViewChoices.value,
   images: ui.isMobile && !props.collapsed ? imageGuard.value : null,
+  // The sheet offers it whenever it can work; the language guess only
+  // decides the desktop header button.
+  translation: messageTranslation.available.value || messageTranslation.shown.value !== null
+    ? { shown: messageTranslation.shown.value !== null }
+    : null,
   run: runCommand,
 }));
 
@@ -398,6 +444,25 @@ const messageMenu = computed<MessageMenu>(() => ({
  */
 const threadMenu = inject(THREAD_MESSAGE_MENU, null);
 const hostsThreadMenu = computed(() => threadMenu?.hostId.value === props.message.id);
+/*
+ * Outlook's drag: the avatar and the sender's line carry this message onto
+ * the composer (an `.eml` of exactly this one), the sender's name and address
+ * carry the sender as a recipient. The rest of the header stays selectable
+ * text. With a draft open the same attach is a button among the actions.
+ */
+const canDragMessage = computed(() => !ui.isMobile && !props.message.isDraft);
+function onMessageDragStart(event: DragEvent) {
+  startMessageDrag(event, [props.message.id]);
+}
+function onSenderDragStart(event: DragEvent) {
+  // The line's own handler would put the message on top of the sender.
+  event.stopPropagation();
+  startContactDrag(event, [{ email: props.message.from.email, name: senderName.value }]);
+}
+function attachToDraft() {
+  void openDraftTarget.value?.attach({ kind: 'messages', ids: [props.message.id] });
+}
+
 const showMenuButton = computed(() => !threadMenu || threadMenu.inlineIds.value.has(props.message.id));
 if (threadMenu) {
   watchEffect(() => {
@@ -527,17 +592,29 @@ function openSenderDetails() {
           :aria-label="$t('mail.message.fileSender', { name: senderName })"
           aria-haspopup="menu"
           :aria-expanded="senderMenuAnchor !== null"
+          :draggable="canDragMessage"
+          @dragstart="onMessageDragStart"
           @click.stop="toggleSenderMenu"
         >
           <Avatar :name="senderName" :email="props.message.from.email" :size="avatarSize" />
         </CardButton>
-        <Avatar v-else :name="senderName" :email="props.message.from.email" :size="avatarSize" />
+        <span v-else class="sender-avatar-handle" :draggable="canDragMessage" @dragstart="onMessageDragStart">
+          <Avatar :name="senderName" :email="props.message.from.email" :size="avatarSize" />
+        </span>
         <div class="min-w-0">
-          <!-- A folded message keeps one line and lets its snippet give way. -->
-          <div class="flex items-center gap-x-2 gap-y-0.5">
+          <!-- A folded message keeps one line and lets its snippet give way.
+               The line is the message's drag handle, the name the sender's;
+               the address line, recipients and date stay selectable text. -->
+          <div
+            class="message-drag-handle flex items-center gap-x-2 gap-y-0.5"
+            :draggable="canDragMessage"
+            @dragstart="onMessageDragStart"
+          >
             <AppButton
               class="sender-identity-trigger sender-name-trigger text-md font-semibold text-primary"
               :aria-label="$t('mail.recipients.showSenderDetails', { name: senderName })"
+              :draggable="!ui.isMobile && Boolean(props.message.from.email)"
+              @dragstart="onSenderDragStart"
               @click.stop="openSenderDetails"
               variant="link"
               size="sm"
@@ -566,6 +643,8 @@ function openSenderDetails() {
               class="message-sender-email sender-identity-trigger"
               :title="props.message.from.email"
               :aria-label="$t('mail.recipients.showSenderDetails', { name: senderName })"
+              :draggable="!ui.isMobile"
+              @dragstart="onSenderDragStart"
               @click.stop="openSenderDetails"
               variant="link"
               size="sm"
@@ -626,6 +705,18 @@ function openSenderDetails() {
               </IconButton>
             </template>
             <IconButton
+              v-if="messageTranslation.offered.value"
+              class="message-translate-trigger"
+              size="sm"
+              :title="shownTranslation ? $t('translation.reader.showOriginal') : $t('translation.reader.translate')"
+              :aria-pressed="shownTranslation !== null"
+              :active="shownTranslation !== null"
+              :disabled="messageTranslation.busy.value"
+              @click.stop="messageTranslation.toggle()"
+            >
+              <AppIcon size="sm"><path d="M2.5 3.5h6M5.5 2v1.5M4 3.5c.4 2.3 1.9 4.2 4 5.2M7.5 3.5c-.5 2.6-2.4 4.8-5 5.8" /><path d="m8.5 14 2.75-6.5L14 14M9.4 12h3.7" /></AppIcon>
+            </IconButton>
+            <IconButton
               v-if="headerBodyView"
               class="message-view-mode-trigger"
               size="sm"
@@ -640,6 +731,14 @@ function openSenderDetails() {
                 <path v-else-if="headerBodyView.mode === 'text' || headerBodyView.mode === 'markdown'" d="M3 4h10M3 7.3h10M3 10.6h6.5" />
                 <template v-else><rect x="2.5" y="2.5" width="11" height="11" rx="1.8" /><path d="M2.5 6.5h11M6.5 6.5v7" /></template>
               </AppIcon>
+            </IconButton>
+            <IconButton
+              v-if="openDraftTarget && !props.message.isDraft"
+              size="sm"
+              :title="$t('composeDrop.attach')"
+              @click="attachToDraft"
+            >
+              <AppIcon size="sm"><path d="M10.5 5.5 6.2 9.8a1.4 1.4 0 0 0 2 2l4.6-4.6a2.8 2.8 0 0 0-4-4L4.2 7.8a4.2 4.2 0 0 0 6 6l3.3-3.3" /></AppIcon>
             </IconButton>
             <IconButton size="sm" :title="$t('mail.message.showSource')" @click="sourceDialogOpen = true">
               <AppIcon size="sm"><path d="M6 4L2.5 8 6 12" /><path d="M10 4l3.5 4L10 12" /></AppIcon>
@@ -774,13 +873,23 @@ function openSenderDetails() {
           :cache-key="bodyCacheKey"
         />
       </template>
+      <template v-else>
+      <p v-if="shownTranslation || messageTranslation.busy.value" class="translation-note mt-3" role="status">
+        <template v-if="shownTranslation">
+          <span>{{ translatedFrom ? $t('translation.reader.translatedFrom', { language: translatedFrom }) : $t('translation.reader.translated') }}</span>
+          <span aria-hidden="true">·</span>
+          <AppButton class="translation-note__back" variant="link" size="sm" @click="messageTranslation.showOriginal()">
+            {{ $t('translation.reader.showOriginal') }}
+          </AppButton>
+        </template>
+        <span v-else>{{ $t('translation.reader.translating') }}</span>
+      </p>
       <EmailRenderer
-        v-else
         class="mt-3 text-secondary leading-relaxed"
-        :html="props.message.bodyHtml"
-        :text="visibleBodyText"
-        :body-segments="props.message.bodySegments"
-        :body-provenance="props.message.bodyProvenance"
+        :html="rendererHtml"
+        :text="rendererText"
+        :body-segments="shownTranslation ? undefined : props.message.bodySegments"
+        :body-provenance="shownTranslation ? undefined : props.message.bodyProvenance"
         :pgp-state="pgpState"
         :can-decrypt="true"
         :decrypting="pgpBusy"
@@ -788,9 +897,10 @@ function openSenderDetails() {
         :trusted-dmarc-pass="props.message.authDmarc === 'pass'"
         :attachments="props.message.attachments"
         :normalize-quotes="settings.collapseQuotedHistory"
-        :cache-key="bodyCacheKey"
+        :cache-key="rendererCacheKey"
         @request-unlock="handleUnlock"
       />
+      </template>
     </div>
     <div
       v-if="!bodyLoaded"
@@ -889,6 +999,32 @@ function openSenderDetails() {
 </template>
 
 <style scoped>
+/* A fact and a way back, in the body-view note's quiet register. */
+.translation-note {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-xs);
+  margin-bottom: 0;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-sm);
+}
+
+.translation-note__back {
+  color: var(--text-accent);
+  font-weight: var(--weight-medium);
+}
+
+/* Without the sender menu the avatar is still the message's drag handle. */
+.sender-avatar-handle {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.sender-avatar-handle[draggable='true'],
+.message-drag-handle[draggable='true'] {
+  cursor: grab;
+}
+
 /* The avatar is the affordance, so the button adds only a focus/open ring —
    a bordered wrapper would put a second circle around a circle.
    It must not shrink: `CardButton` allows it, and a long address squeezed
@@ -995,15 +1131,21 @@ function openSenderDetails() {
 }
 
 /* The body, attachments and banners line up under the sender's name; the
-   header keeps the avatar in the margin. 52px = the 40px avatar plus its gap. */
+   header keeps the avatar in the margin. The inset is the 40px avatar plus
+   the header's gap (gap-3.5): at a flat 52px the body began 2px left of
+   the name above it. ThreadReplyBar keeps the same axis. */
+.message-surface--indented {
+  --message-text-inset: calc(40px + var(--space-3-5));
+}
+
 .message-surface--indented > :not(.message-header) {
-  padding-left: 52px;
+  padding-left: var(--message-text-inset);
 }
 
 /* A boxed notice moves its box there, not only its text: padded instead, the
-   frame began at the avatar and the words sat 52px inside it. */
+   frame began at the avatar and the words sat inside it by the inset. */
 .message-surface--indented > .message-notice {
-  margin-left: 52px;
+  margin-left: var(--message-text-inset);
   padding-left: var(--space-md);
 }
 

@@ -147,6 +147,20 @@ fn build_rfc822_inner(
             if importance == "high" { "High" } else { "Low" }
         ));
     }
+    // RFC 3834: a rule's forward is not answered or forwarded again.
+    if let Some(value) = message
+        .auto_submitted
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        // A token (`auto-generated`); anything else would be a header injection.
+        let token: String = value
+            .chars()
+            .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '-')
+            .collect();
+        headers.push(format!("Auto-Submitted: {token}"));
+    }
     if let Some(in_reply_to) = &message.in_reply_to {
         headers.push(fold_header(
             "In-Reply-To",
@@ -158,6 +172,11 @@ fn build_rfc822_inner(
             "References",
             &sanitize_header_text(&message.references.join(" ")),
         ));
+    }
+    for (name, value) in &message.extra_headers {
+        if extra_header_allowed(name) {
+            headers.push(fold_header(name, &encode_header_value(value)));
+        }
     }
     headers.push("MIME-Version: 1.0".to_string());
 
@@ -478,6 +497,39 @@ pub fn is_content_header(header: &str) -> bool {
         || lower.starts_with("mime-version:")
 }
 
+/// One header line as the builder writes it: encoded words for non-ASCII
+/// text, folded to the line limit. For headers that go inside an encrypted
+/// entity (Delta Chat's protected `Subject`).
+pub fn header_line(name: &str, value: &str) -> String {
+    fold_header(name, &encode_header_value(value))
+}
+
+/// A caller-supplied header name: a plain token, and none of the headers the
+/// builder writes itself, so an extra header cannot add a second `From:` or
+/// replace the MIME structure.
+fn extra_header_allowed(name: &str) -> bool {
+    const RESERVED: &[&str] = &[
+        "from",
+        "to",
+        "cc",
+        "bcc",
+        "reply-to",
+        "subject",
+        "date",
+        "message-id",
+        "in-reply-to",
+        "references",
+        "mime-version",
+        "content-type",
+        "content-transfer-encoding",
+    ];
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        && !RESERVED.contains(&name.to_ascii_lowercase().as_str())
+}
+
 /// Strip CR/LF (and other ASCII control chars) from text destined for a header
 /// line. Without this, a subject decoded from an incoming mail's RFC2047 header
 /// (e.g. "Foo\r\nBcc: attacker@evil.com") would inject attacker-controlled
@@ -724,6 +776,45 @@ mod tests {
             }],
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn extra_headers_are_written_folded_and_cannot_replace_builder_headers() {
+        let message = OutgoingMessage {
+            from_address: Some("me@example.test".to_owned()),
+            to: vec!["lena@example.test".to_owned()],
+            subject: "Message from Me".to_owned(),
+            body: "hi".to_owned(),
+            extra_headers: vec![
+                ("Chat-Version".to_owned(), "1.0".to_owned()),
+                ("Chat-Group-Name".to_owned(), "Familié".to_owned()),
+                (
+                    "Autocrypt".to_owned(),
+                    format!(
+                        "addr=me@example.test; keydata={}",
+                        "QUJD ".repeat(60).trim_end()
+                    ),
+                ),
+                ("From".to_owned(), "evil@example.test".to_owned()),
+                ("Bad Name".to_owned(), "x".to_owned()),
+            ],
+            ..Default::default()
+        };
+        let raw = build_rfc822(&message, None, None).unwrap();
+        let (headers, _) = raw.split_once("\r\n\r\n").unwrap();
+        assert!(headers.contains("\r\nChat-Version: 1.0\r\n"));
+        assert!(headers.contains("Chat-Group-Name: =?UTF-8?"));
+        assert_eq!(headers.matches("From:").count(), 1);
+        assert!(!headers.contains("evil@example.test"));
+        assert!(!headers.contains("Bad Name"));
+        for line in headers.split("\r\n") {
+            assert!(line.len() <= HARD_LIMIT_OCTETS, "{line}");
+        }
+        let names = split_logical_headers(headers)
+            .into_iter()
+            .map(|header| header.split_once(':').unwrap().0.to_owned())
+            .collect::<Vec<_>>();
+        assert!(names.contains(&"Autocrypt".to_owned()));
     }
 
     fn message_with_bcc() -> OutgoingMessage {
@@ -1000,6 +1091,27 @@ mod tests {
             assert!(word.len() <= MAX_ENCODED_WORD, "{word}");
         }
         assert!(header.ends_with("<juergen@beispiel.test>"));
+    }
+
+    #[test]
+    fn an_automatic_send_says_so_and_a_normal_one_does_not() {
+        let mut message = OutgoingMessage {
+            to: vec!["books@example.test".to_owned()],
+            subject: "Fwd: Invoice".to_owned(),
+            auto_submitted: Some("auto-generated".to_owned()),
+            ..Default::default()
+        };
+        let raw = build_rfc822(&message, Some("me@example.test"), None).unwrap();
+        assert_eq!(
+            header_value(&raw, "Auto-Submitted:"),
+            "Auto-Submitted: auto-generated"
+        );
+        message.auto_submitted = Some("auto-generated\r\nBcc: x@example.test".to_owned());
+        let raw = build_rfc822(&message, Some("me@example.test"), None).unwrap();
+        assert!(!raw.contains("\r\nBcc:"), "no header injection: {raw}");
+        message.auto_submitted = None;
+        let raw = build_rfc822(&message, Some("me@example.test"), None).unwrap();
+        assert!(!raw.contains("Auto-Submitted"));
     }
 
     fn message_with_attachment(filename: &str) -> OutgoingMessage {

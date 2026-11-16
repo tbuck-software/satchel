@@ -191,7 +191,8 @@
         "summary": "{count} new emails",
         "syncing": "Syncing content",
         "syncFailed": "Remote sync failed",
-        "trash": "Delete"
+        "trash": "Delete",
+        "taskDue": "Task due"
       },
       "oauth": {
         "cancelledMessage": "The provider did not complete sign-in.",
@@ -520,7 +521,8 @@
         "summary": "{count} neue E-Mails",
         "syncing": "Inhalte werden synchronisiert",
         "syncFailed": "Remote-Abgleich fehlgeschlagen",
-        "trash": "Löschen"
+        "trash": "Löschen",
+        "taskDue": "Aufgabe fällig"
       },
       "oauth": {
         "cancelledMessage": "Die Anmeldung wurde vom Anbieter nicht abgeschlossen.",

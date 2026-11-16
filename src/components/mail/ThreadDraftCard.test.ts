@@ -33,7 +33,10 @@ describe('ThreadDraftCard', () => {
 
     expect(wrapper.get('.draft-card__label').text()).toBe('Draft · not sent');
     expect(wrapper.get('.draft-card__recipient').text()).toBe('To Sarah Kim');
-    expect(wrapper.get('.draft-card__identity').text()).toBe('as Work');
+    // The account's face (its initial, hidden from assistive tech) precedes it.
+    const identity = wrapper.get('.draft-card__identity');
+    expect(identity.find('.account-avatar').attributes('aria-hidden')).toBe('true');
+    expect(identity.text()).toBe('W as Work');
     expect(wrapper.get('.draft-card__saved').text()).toMatch(/^Last saved /);
     expect(wrapper.get('.draft-card__preview').text()).toBe('The fix is on staging.');
     expect(wrapper.get('article').attributes('data-thread-message-id')).toBe('draft-1');

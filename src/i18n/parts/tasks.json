@@ -1,0 +1,220 @@
+{
+  "en": {
+    "tasks": {
+      "title": "Tasks",
+      "new": "New task",
+      "loadFailed": "Could not load your tasks.",
+      "empty": {
+        "title": "Nothing to do",
+        "description": "Add a task above, or press T on a mail to turn it into one."
+      },
+      "groups": {
+        "overdue": "Overdue",
+        "today": "Today",
+        "upcoming": "Upcoming",
+        "someday": "No date",
+        "completed": "Completed"
+      },
+      "due": {
+        "today": "Today",
+        "tomorrow": "Tomorrow",
+        "yesterday": "Yesterday"
+      },
+      "priority": {
+        "none": "None",
+        "high": "High",
+        "medium": "Medium",
+        "low": "Low"
+      },
+      "markDone": "Mark as done",
+      "markOpen": "Mark as not done",
+      "openMail": "Open mail",
+      "hasReminder": "Reminder set",
+      "pending": "Not synced yet",
+      "showCompleted": "Show {count} completed task | Show {count} completed tasks",
+      "hideCompleted": "Hide completed tasks",
+      "quickAdd": {
+        "label": "Add a task",
+        "placeholder": "Add a task, e.g. “Call Anna tomorrow 15:00”",
+        "preview": "“{title}”, due {due}"
+      },
+      "keys": {
+        "title": "Keyboard",
+        "move": "Move",
+        "complete": "Done / not done",
+        "edit": "Edit",
+        "add": "Add",
+        "delete": "Delete"
+      },
+      "lists": {
+        "title": "Task lists",
+        "all": "All tasks",
+        "new": "New list…",
+        "newTitle": "New task list",
+        "name": "Name",
+        "create": "Create list",
+        "rename": "Rename list",
+        "renameTitle": "Rename task list",
+        "delete": "Delete list",
+        "deleteTitle": "Delete “{list}”?",
+        "deleteBody": "Its {count} task is deleted with it. | Its {count} tasks are deleted with it.",
+        "defaultName": "My tasks",
+        "withAccount": "{list} · {account}",
+        "onThisDevice": "On this device",
+        "account": "Account",
+        "goneHint": "This list was removed on the server. Its tasks stay here, read-only, until you delete the list.",
+        "readOnlyHint": "This list is read-only on the server."
+      },
+      "editor": {
+        "newTitle": "New task",
+        "editTitle": "Edit task",
+        "title": "Title",
+        "titlePlaceholder": "What needs doing?",
+        "fromMail": "Made from a mail.",
+        "list": "List",
+        "dueDate": "Due date",
+        "dueTime": "Time (optional)",
+        "remind": "Remind me",
+        "reminderAt": "Reminder",
+        "priority": "Priority",
+        "notes": "Notes",
+        "notesPlaceholder": "Details, links, next steps",
+        "completed": "Done",
+        "syncedHint": "This list syncs with your account's server. Changes made here reach it in the background.",
+        "readOnlyHint": "This list is read-only on the server, so the task cannot be changed here.",
+        "changedRetry": "This task changed on another device in the meantime. Save again to keep your version."
+      },
+      "toast": {
+        "created": "Task added",
+        "createdFromMail": "Task added, linked to the mail",
+        "completed": "Done: {title}",
+        "deleted": "Task deleted",
+        "nextOccurrence": "Next: “{title}”, due {due}"
+      },
+      "repeats": "Repeats",
+      "recurring": {
+        "confirmTitle": "Complete the whole series?",
+        "confirmBody": "This task repeats. Completing it here ends the series for all your devices.",
+        "completeSeries": "Complete series"
+      },
+      "notices": {
+        "conflicts": "{count} task was updated on the server; its version replaced your change. | {count} tasks were updated on the server; their versions replaced your changes.",
+        "restored": "A task you deleted came back: it had been changed on the server. | {count} tasks you deleted came back: they had been changed on the server.",
+        "readOnlyDropped": "A change was not saved: the list is read-only on the server. | {count} changes were not saved: the list is read-only on the server.",
+        "keptLocal": "A task deleted on the server kept your change and is now in My tasks. | {count} tasks deleted on the server kept your changes and are now in My tasks.",
+        "listsGone": "A task list was removed on the server. It stays here, read-only, until you delete it. | {count} task lists were removed on the server. They stay here, read-only, until you delete them.",
+        "readOnlyKept": "A new task could not be added to a read-only list; it is in My tasks. | {count} new tasks could not be added to a read-only list; they are in My tasks."
+      },
+      "sync": "Sync tasks"
+    }
+  },
+  "de": {
+    "tasks": {
+      "title": "Aufgaben",
+      "new": "Neue Aufgabe",
+      "loadFailed": "Die Aufgaben konnten nicht geladen werden.",
+      "empty": {
+        "title": "Nichts zu tun",
+        "description": "Lege oben eine Aufgabe an oder drücke T in einer E-Mail, um daraus eine zu machen."
+      },
+      "groups": {
+        "overdue": "Überfällig",
+        "today": "Heute",
+        "upcoming": "Demnächst",
+        "someday": "Ohne Datum",
+        "completed": "Erledigt"
+      },
+      "due": {
+        "today": "Heute",
+        "tomorrow": "Morgen",
+        "yesterday": "Gestern"
+      },
+      "priority": {
+        "none": "Keine",
+        "high": "Hoch",
+        "medium": "Mittel",
+        "low": "Niedrig"
+      },
+      "markDone": "Als erledigt markieren",
+      "markOpen": "Als offen markieren",
+      "openMail": "E-Mail öffnen",
+      "hasReminder": "Erinnerung gesetzt",
+      "pending": "Noch nicht synchronisiert",
+      "showCompleted": "{count} erledigte Aufgabe anzeigen | {count} erledigte Aufgaben anzeigen",
+      "hideCompleted": "Erledigte Aufgaben ausblenden",
+      "quickAdd": {
+        "label": "Aufgabe hinzufügen",
+        "placeholder": "Aufgabe hinzufügen, z. B. „Anna anrufen morgen 15:00“",
+        "preview": "„{title}“, fällig {due}"
+      },
+      "keys": {
+        "title": "Tastatur",
+        "move": "Bewegen",
+        "complete": "Erledigt / offen",
+        "edit": "Bearbeiten",
+        "add": "Hinzufügen",
+        "delete": "Löschen"
+      },
+      "lists": {
+        "title": "Aufgabenlisten",
+        "all": "Alle Aufgaben",
+        "new": "Neue Liste …",
+        "newTitle": "Neue Aufgabenliste",
+        "name": "Name",
+        "create": "Liste anlegen",
+        "rename": "Liste umbenennen",
+        "renameTitle": "Aufgabenliste umbenennen",
+        "delete": "Liste löschen",
+        "deleteTitle": "„{list}“ löschen?",
+        "deleteBody": "Die {count} Aufgabe darin wird mitgelöscht. | Die {count} Aufgaben darin werden mitgelöscht.",
+        "defaultName": "Meine Aufgaben",
+        "withAccount": "{list} · {account}",
+        "onThisDevice": "Auf diesem Gerät",
+        "account": "Konto",
+        "goneHint": "Diese Liste wurde auf dem Server entfernt. Die Aufgaben darin bleiben hier schreibgeschützt, bis du die Liste löschst.",
+        "readOnlyHint": "Diese Liste ist auf dem Server schreibgeschützt."
+      },
+      "editor": {
+        "newTitle": "Neue Aufgabe",
+        "editTitle": "Aufgabe bearbeiten",
+        "title": "Titel",
+        "titlePlaceholder": "Was ist zu tun?",
+        "fromMail": "Aus einer E-Mail erstellt.",
+        "list": "Liste",
+        "dueDate": "Fällig am",
+        "dueTime": "Uhrzeit (optional)",
+        "remind": "Erinnern",
+        "reminderAt": "Erinnerung",
+        "priority": "Priorität",
+        "notes": "Notizen",
+        "notesPlaceholder": "Details, Links, nächste Schritte",
+        "completed": "Erledigt",
+        "syncedHint": "Diese Liste wird mit dem Server deines Kontos synchronisiert. Änderungen hier erreichen ihn im Hintergrund.",
+        "readOnlyHint": "Diese Liste ist auf dem Server schreibgeschützt; die Aufgabe lässt sich hier nicht ändern.",
+        "changedRetry": "Diese Aufgabe wurde inzwischen auf einem anderen Gerät geändert. Speichere erneut, um deine Fassung zu behalten."
+      },
+      "toast": {
+        "created": "Aufgabe angelegt",
+        "createdFromMail": "Aufgabe angelegt, mit der E-Mail verknüpft",
+        "completed": "Erledigt: {title}",
+        "deleted": "Aufgabe gelöscht",
+        "nextOccurrence": "Als Nächstes: „{title}“, fällig {due}"
+      },
+      "repeats": "Wiederholt sich",
+      "recurring": {
+        "confirmTitle": "Ganze Serie erledigen?",
+        "confirmBody": "Diese Aufgabe wiederholt sich. Erledigst du sie hier, endet die Serie auf allen deinen Geräten.",
+        "completeSeries": "Serie erledigen"
+      },
+      "notices": {
+        "conflicts": "{count} Aufgabe wurde auf dem Server geändert; deren Fassung hat deine Änderung ersetzt. | {count} Aufgaben wurden auf dem Server geändert; deren Fassungen haben deine Änderungen ersetzt.",
+        "restored": "Eine gelöschte Aufgabe ist zurück, weil jemand sie auf dem Server geändert hatte. | {count} gelöschte Aufgaben sind zurück, weil jemand sie auf dem Server geändert hatte.",
+        "readOnlyDropped": "Eine Änderung wurde nicht gespeichert: Die Liste ist auf dem Server schreibgeschützt. | {count} Änderungen wurden nicht gespeichert: Die Liste ist auf dem Server schreibgeschützt.",
+        "keptLocal": "Eine auf dem Server gelöschte Aufgabe behält deine Änderung und liegt jetzt in „Meine Aufgaben“. | {count} auf dem Server gelöschte Aufgaben behalten deine Änderungen und liegen jetzt in „Meine Aufgaben“.",
+        "listsGone": "Eine Aufgabenliste wurde auf dem Server entfernt. Bis du die Liste löschst, bleibt sie hier schreibgeschützt. | {count} Aufgabenlisten wurden auf dem Server entfernt. Bis du die Listen löschst, bleiben sie hier schreibgeschützt.",
+        "readOnlyKept": "Eine neue Aufgabe ließ sich nicht in eine schreibgeschützte Liste eintragen; sie liegt in „Meine Aufgaben“. | {count} neue Aufgaben ließen sich nicht in eine schreibgeschützte Liste eintragen; sie liegen in „Meine Aufgaben“."
+      },
+      "sync": "Aufgaben synchronisieren"
+    }
+  }
+}

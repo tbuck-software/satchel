@@ -7,6 +7,7 @@ import { registerThreadReaderCommands } from './useThreadReaderCommands';
 import { useCommands } from './useCommands';
 import { COMMAND_ICONS } from '@/components/navigation/commandIcons';
 import { useToast } from './useToast';
+import { openDraftTarget } from './openDraftTarget';
 
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -92,6 +93,9 @@ describe('reader actions in the palette', () => {
       toggleMuted: vi.fn(),
       markSpam: vi.fn(),
       blockSender: vi.fn(),
+      sweepSender: vi.fn(),
+      toggleTranslation: vi.fn(() => true),
+      translationAvailable: false,
       print: vi.fn(),
       exportThread: vi.fn(),
     };
@@ -110,6 +114,50 @@ describe('reader actions in the palette', () => {
     expect(reader.move).toHaveBeenCalledWith('folder-1');
     unregister();
     expect(command('thread:print-conversation')).toBeUndefined();
+  });
+
+  it('offers Translate whenever the focused message can be translated', () => {
+    const reader = {
+      threadId: 'thread-1',
+      moveTargets: [],
+      isMuted: false,
+      move: vi.fn(),
+      toggleMuted: vi.fn(),
+      markSpam: vi.fn(),
+      blockSender: vi.fn(),
+      sweepSender: vi.fn(),
+      toggleTranslation: vi.fn(() => true),
+      translationAvailable: false,
+      print: vi.fn(),
+      exportThread: vi.fn(),
+    };
+    const unregister = registerThreadReaderCommands(reader);
+    expect(command('thread:translate')).toBeUndefined();
+    unregister();
+
+    const offering = registerThreadReaderCommands({ ...reader, translationAvailable: true });
+    const translate = command('thread:translate');
+    expect(translate?.title).toBe('Translate message or show the original');
+    void translate?.run();
+    expect(reader.toggleTranslation).toHaveBeenCalledTimes(1);
+    offering();
+  });
+});
+
+describe('Not spam in the palette', () => {
+  it('is offered only for mail the filter marked or that sits in Spam', () => {
+    const threads = useThreadsStore();
+    const thread = { id: 'thread-1', mailboxNames: ['INBOX'], likelySpam: false };
+    vi.spyOn(threads, 'find').mockImplementation(() => thread as never);
+
+    expect(command('thread:not-spam')).toBeUndefined();
+
+    thread.likelySpam = true;
+    expect(command('thread:not-spam')).toBeTruthy();
+
+    thread.likelySpam = false;
+    thread.mailboxNames = ['Junk'];
+    expect(command('thread:not-spam')).toBeTruthy();
   });
 });
 
@@ -131,5 +179,19 @@ describe('views in the palette', () => {
     expect(command('thread:topic')).toBeUndefined();
     expect(command('thread:file')?.title).toBe('File…');
     expect(command('thread:file')?.shortcut?.keys).toEqual(['v']);
+  });
+});
+
+describe('attach to the open draft', () => {
+  it('is offered only while a draft is open, and attaches the selected mail', () => {
+    expect(command('draft:attach-mail')).toBeUndefined();
+    const attach = vi.fn(async () => {});
+    openDraftTarget.value = { attach, canAddRecipients: () => true, addRecipients: vi.fn() };
+
+    command('draft:attach-mail')?.run();
+    expect(attach).toHaveBeenCalledWith({ kind: 'threads', ids: ['thread-1'] });
+
+    openDraftTarget.value = null;
+    expect(command('draft:attach-mail')).toBeUndefined();
   });
 });

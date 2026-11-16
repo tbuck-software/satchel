@@ -5,9 +5,12 @@ import type { WorkflowState } from '@/types/workflow';
 import {
   backendBlockSender,
   backendMoveThreadsToFolder,
+  backendUndoNotSpam,
   backendUndoTrash,
+  type BackendStoppedEarly,
   type BackendTrashReceipt,
 } from '@/services/backend';
+import { translateBackendError } from '@/utils/backendErrors';
 import { useMailboxesStore } from '@/stores/mailboxes';
 import { useThreadsStore } from '@/stores/threads';
 import { useTopicsStore } from '@/stores/topics';
@@ -18,7 +21,7 @@ import { createThreadActionQueue } from './threadActionQueue';
 import { t, tc } from '@/i18n/runtime';
 import { openView } from '@/router/mailViews';
 
-interface StateSnapshot {
+export interface StateSnapshot {
   threadId: string;
   previousState: WorkflowState;
   snoozeUntil?: string;
@@ -31,6 +34,9 @@ interface StateSnapshot {
 const actionQueues = new WeakMap<ReturnType<typeof useThreadsStore>, ReturnType<typeof createThreadActionQueue>>();
 
 const UNDO_TIMEOUT_MS = 9000;
+
+export type { SenderSweepAction, SenderSweepInput } from './senderSweepActions';
+import type { SenderSweepInput } from './senderSweepActions';
 
 function workflowResultMessage(count: number, state: WorkflowState, fallback: string): string {
   switch (state) {
@@ -106,7 +112,7 @@ export function useThreadActions() {
     }
   }
 
-  async function restoreStatesNow(snapshot: StateSnapshot[]) {
+  async function restoreStatesNow(snapshot: StateSnapshot[], reveal = true) {
     if (snapshot.length === 0) return false;
     // Batch only threads whose previous state and wake time both match.
     const groups = new Map<string, { snapshot: StateSnapshot; threadIds: string[]; restoreFrom: Record<string, WorkflowState> }>();
@@ -149,33 +155,40 @@ export function useThreadActions() {
       }
     }
     await refreshLists();
-    await restorePlace(snapshot.filter(entry => restoredIds.has(entry.threadId)).map(entry => entry.threadId));
+    // A sweep restores threads far below the loaded page; loading each one to
+    // put the cursor on it would be one request per thread.
+    if (reveal) {
+      await restorePlace(snapshot.filter(entry => restoredIds.has(entry.threadId)).map(entry => entry.threadId));
+    }
     return true;
   }
 
-  function restoreStates(snapshot: StateSnapshot[]) {
-    return queue.run(snapshot.map((entry) => entry.threadId), () => restoreStatesNow(snapshot));
+  function restoreStates(snapshot: StateSnapshot[], reveal = true) {
+    return queue.run(snapshot.map((entry) => entry.threadId), () => restoreStatesNow(snapshot, reveal));
   }
 
   function showWorkflowUndo(
     snapshot: StateSnapshot[],
     nextState: WorkflowState,
     label: string,
+    options: { reveal?: boolean; message?: (count: number) => string } = {},
   ) {
+    const reveal = options.reveal ?? true;
+    const message = options.message ?? ((count: number) => workflowResultMessage(count, nextState, label));
     snapshot = snapshot.map((entry) => ({ ...entry, expectedState: nextState }));
-    toast.success(workflowResultMessage(snapshot.length, nextState, label), {
+    toast.success(message(snapshot.length), {
       timeout: UNDO_TIMEOUT_MS,
-      groupKey: `workflow:${nextState}`,
+      groupKey: reveal ? `workflow:${nextState}` : `sweep:${nextState}`,
       count: snapshot.length,
-      groupMessage: (count) => workflowResultMessage(count, nextState, label),
+      groupMessage: message,
       action: {
         label: t('thread.actions.undo'),
         present: 'fab',
-        handler: () => restoreStates(snapshot),
+        handler: () => restoreStates(snapshot, reveal),
         batch: {
-          key: 'workflow:restore',
+          key: reveal ? 'workflow:restore' : 'sweep:restore',
           items: snapshot,
-          handler: (items) => restoreStates(items as StateSnapshot[]),
+          handler: (items) => restoreStates(items as StateSnapshot[], reveal),
         },
       },
     });
@@ -192,6 +205,15 @@ export function useThreadActions() {
    */
   async function refreshLists() {
     await Promise.all([threads.refreshHead(), mailboxes.load()]);
+  }
+
+  /** The counts and reason a stopped move's message names. */
+  function stoppedCounts(stopped: BackendStoppedEarly) {
+    return {
+      applied: stopped.applied.length,
+      total: stopped.applied.length + stopped.remaining.length,
+      reason: translateBackendError(stopped.reason_key) ?? '',
+    };
   }
 
   /** Move threads to a workflow state with undo. */
@@ -364,15 +386,20 @@ export function useThreadActions() {
         // The command resolves and queues provider references before changing
         // its local rows. Keep the frontend projection untouched until that
         // remote-first operation succeeds as well.
-        await backendMoveThreadsToFolder({
+        const stopped = await backendMoveThreadsToFolder({
           threadIds: normalizedThreadIds,
           targetFolderId,
         });
         await Promise.all([threads.load(), mailboxes.load()]);
-        toast.success(t('thread.move.moved', {
-          folder: targetLabel || t('thread.move.fallbackFolder'),
-        }));
+        const folder = targetLabel || t('thread.move.fallbackFolder');
+        if (stopped) {
+          toast.warning(t('thread.move.partlyMoved', { ...stoppedCounts(stopped), folder }));
+        } else {
+          toast.success(t('thread.move.moved', { folder }));
+        }
       } catch (error) {
+        // Nothing moved; the lists show that again, whatever they showed meanwhile.
+        await Promise.allSettled([threads.load(), mailboxes.load()]);
         toast.error(t('thread.move.failed', {
           error: error instanceof Error ? error.message : String(error),
         }));
@@ -409,25 +436,36 @@ export function useThreadActions() {
         // instead of after a full reload of a large mailbox.
         receipt = await file(threadIds);
       } catch (err) {
+        // Nothing was filed; the store put the rows back, a refresh confirms them.
+        await Promise.allSettled([refreshLists()]);
         toast.error(err instanceof Error ? err.message : messages.failed);
         return;
       }
 
-      threads.deselectThreads(threadIds);
-      continueTriageAfterFiling(threadIds);
+      // A move a later batch stopped filed only its first batches; the rest
+      // stays listed and selected, and Undo covers exactly what moved.
+      const stopped = receipt.stopped_early;
+      const filed = stopped ? stopped.applied : threadIds;
+      threads.deselectThreads(filed);
+      continueTriageAfterFiling(filed);
 
       if (receipt.permanently_deleted.length > 0) {
         toast.info(tc('thread.result.permanentlyDeleted', receipt.permanently_deleted.length));
       }
-      if (receipt.undo_thread_ids.length === 0) return;
-      const message = messages.result(receipt.undo_thread_ids.length);
+      const message = stopped
+        ? t('thread.result.partlyFiled', stoppedCounts(stopped))
+        : messages.result(receipt.undo_thread_ids.length);
+      if (receipt.undo_thread_ids.length === 0) {
+        if (stopped) toast.warning(message);
+        return;
+      }
       const undoToken = receipt.undo_token;
       if (!undoToken) {
-        toast.info(message, { timeout: UNDO_TIMEOUT_MS });
+        (stopped ? toast.warning : toast.info)(message, { timeout: UNDO_TIMEOUT_MS });
         return;
       }
 
-      toast.success(message, {
+      (stopped ? toast.warning : toast.success)(message, {
         timeout: UNDO_TIMEOUT_MS,
         action: {
           label: t('thread.actions.undo'),
@@ -461,6 +499,71 @@ export function useThreadActions() {
       failed: t('thread.result.spamFailed'),
       result: (count) => tc('thread.result.spammed', count),
     });
+  }
+
+  /**
+   * Not spam teaches the local filter and clears the mark at once. Threads
+   * that sit in Spam go back to the Inbox — one the filter moved itself
+   * through its own move receipt, so it lands exactly where it was.
+   */
+  async function markNotSpam(threadIds: string[]): Promise<void> {
+    const ids = Array.from(new Set(threadIds.map((id) => id.trim()).filter(Boolean)));
+    if (ids.length === 0) return;
+    return queue.run(ids, async () => {
+      let receipt: Awaited<ReturnType<typeof threads.markThreadsNotSpam>>;
+      try {
+        receipt = await threads.markThreadsNotSpam(ids);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : t('thread.result.notSpamFailed'));
+        return;
+      }
+      const moved = receipt.moved_thread_ids.length;
+      const message = moved > 0
+        ? tc('thread.result.notSpamMoved', moved)
+        : tc('thread.result.notSpam', ids.length);
+      if (!receipt.undo_token) {
+        toast.success(message);
+        return;
+      }
+      // Undo unlearns the example and puts what moved back in Spam.
+      toast.success(message, {
+        timeout: UNDO_TIMEOUT_MS,
+        action: {
+          label: t('thread.actions.undo'),
+          present: 'fab',
+          handler: () => queue.run(ids, async () => {
+            try {
+              await backendUndoNotSpam(receipt);
+              await refreshLists();
+              return true;
+            } catch (err) {
+              toast.error(err instanceof Error ? err.message : t('thread.result.notSpamUndoFailed'));
+              return false;
+            }
+          }),
+        },
+      });
+    });
+  }
+
+  /**
+   * File a sender's Inbox mail: all of it, or everything but the newest
+   * thread. Resolves to how many threads were filed. The sweep itself loads
+   * on first use; it is not part of the startup bundle.
+   */
+  async function sweepSender(input: SenderSweepInput): Promise<number> {
+    const { runSenderSweep } = await import('./senderSweepActions');
+    return runSenderSweep({
+      queue,
+      threads,
+      workflow,
+      toast,
+      undoTimeoutMs: UNDO_TIMEOUT_MS,
+      showWorkflowUndo,
+      workflowResultMessage,
+      continueTriageAfterFiling,
+      refreshLists,
+    }, input);
   }
 
   /** Link threads to a topic; only the database receipt authorizes Undo. */
@@ -643,6 +746,7 @@ export function useThreadActions() {
     setRead,
     setMuted,
     markSpam,
+    markNotSpam,
     archive,
     snooze,
     snoozeAt,
@@ -652,6 +756,7 @@ export function useThreadActions() {
     allDone,
     toggleDone,
     blockSender,
+    sweepSender,
     moveToFolder,
     trash,
     setPinned,

@@ -164,6 +164,8 @@ pub struct MessageSearchHitDto {
     pub from_address: String,
     pub date: String,
     pub is_read: bool,
+    /// An unsent draft: it opens in the composer and has no original to attach.
+    pub is_draft: bool,
     /// Thread workflow state ('inbox' | 'todo' | 'waiting' | 'aside' | 'done' | 'snoozed').
     pub workflow_state: String,
     /// Folder type of the hit message ('sent', 'trash', 'spam', …) or ''.
@@ -630,6 +632,7 @@ struct HydratedSearchRow {
     from_address: String,
     date: String,
     is_read: bool,
+    is_draft: bool,
     workflow_state: String,
     folder_type: String,
 }
@@ -672,6 +675,7 @@ async fn hydrate_search_hits(
                 COALESCE(m.from_address, '') as from_address,
                 COALESCE(m.date, '') as date,
                 COALESCE(m.is_read, 0) as is_read,
+                COALESCE(m.is_draft, 0) != 0 as is_draft,
                 COALESCE(t.workflow_state, 'inbox') as workflow_state,
                 COALESCE(fol.folder_type, '') as folder_type",
     );
@@ -729,6 +733,7 @@ async fn hydrate_search_hits(
                     from_address: row.from_address,
                     date: row.date,
                     is_read: row.is_read,
+                    is_draft: row.is_draft,
                     workflow_state: row.workflow_state,
                     folder_type: row.folder_type,
                     rank_cost: ranked.rank_cost,
@@ -765,6 +770,7 @@ async fn search_thread_flag_hits(
                 COALESCE(m.date, '') as date,
                 COALESCE({date_column}, '') as cursor_date,
                 COALESCE(m.is_read, 0) as is_read,
+                COALESCE(m.is_draft, 0) != 0 as is_draft,
                 COALESCE(t.workflow_state, 'inbox') as workflow_state,
                 COALESCE(fol.folder_type, '') as folder_type,
                 0.0 as rank_cost

@@ -34,16 +34,19 @@ const ContactAvatarSettings = defineAsyncComponent(() => import('@/components/se
 const DiagnosticsPane = defineAsyncComponent(() => import('@/components/settings/DiagnosticsPane.vue'));
 const InlineImageBackfill = defineAsyncComponent(() => import('@/components/settings/InlineImageBackfill.vue'));
 const KeybindingEditor = defineAsyncComponent(() => import('@/components/settings/KeybindingEditor.vue'));
+const LabsSettings = defineAsyncComponent(() => import('@/components/settings/LabsSettings.vue'));
 const MobileSyncSettings = defineAsyncComponent(() => import('@/components/settings/MobileSyncSettings.vue'));
 const NotificationSettings = defineAsyncComponent(() => import('@/components/settings/NotificationSettings.vue'));
 const PluginManager = defineAsyncComponent(() => import('@/components/settings/PluginManager.vue'));
-const ProviderFeaturesEditor = defineAsyncComponent(() => import('@/components/settings/ProviderFeaturesEditor.vue'));
 const RemoteImageAllowlist = defineAsyncComponent(() => import('@/components/settings/RemoteImageAllowlist.vue'));
 const RuleBuilder = defineAsyncComponent(() => import('@/components/settings/RuleBuilder.vue'));
+const SweepRulesEditor = defineAsyncComponent(() => import('@/components/settings/SweepRulesEditor.vue'));
 const SignaturesEditor = defineAsyncComponent(() => import('@/components/settings/SignaturesEditor.vue'));
 const SmartFoldersEditor = defineAsyncComponent(() => import('@/components/settings/SmartFoldersEditor.vue'));
 const SmimeManager = defineAsyncComponent(() => import('@/components/settings/SmimeManager.vue'));
 const SourceManager = defineAsyncComponent(() => import('@/components/settings/SourceManager.vue'));
+const SpamFilterSettings = defineAsyncComponent(() => import('@/components/settings/SpamFilterSettings.vue'));
+const TranslationSettings = defineAsyncComponent(() => import('@/components/settings/TranslationSettings.vue'));
 const TemplatesEditor = defineAsyncComponent(() => import('@/components/settings/TemplatesEditor.vue'));
 const SwipeSettings = defineAsyncComponent(() => import('@/components/settings/SwipeSettings.vue'));
 const TrayPreferences = defineAsyncComponent(() => import('@/components/settings/TrayPreferences.vue'));
@@ -66,7 +69,7 @@ const overviewGroups = computed(() => (
       items: group.items.map((item) => ({ ...item, hint: null as string | null })),
     }))
 ));
-const { inDialog, section: locationSection, show: showSection } = useSettingsLocation();
+const { inDialog, section: locationSection, account: locationAccount, show: showSection } = useSettingsLocation();
 const requestedSection = computed(() => {
   const value = locationSection.value;
   if (value === null) return null;
@@ -76,7 +79,11 @@ const requestedSection = computed(() => {
 });
 const showOverview = computed(() => ui.isSinglePane && requestedSection.value === null);
 const activeSection = computed(() => requestedSection.value ?? resolveSettingsSection(undefined));
-const activeLabel = computed(() => t(`settings.sections.${activeSection.value}.label`));
+/** The account whose page is open under Accounts; the list shows otherwise. */
+const openAccount = computed(() => (activeSection.value === 'accounts'
+  ? accounts.emailAccounts.find((account) => account.id === locationAccount.value) ?? null
+  : null));
+const activeLabel = computed(() => openAccount.value?.displayName ?? t(`settings.sections.${activeSection.value}.label`));
 
 function sectionLabel(section: SettingsSection): string {
   return t(`settings.sections.${section}.label`);
@@ -90,15 +97,13 @@ const sectionTones: Record<SettingsSection, string> = {
   general: 'blue', accounts: 'blue', notifications: 'orange',
   composing: 'blue', signatures: 'orange', templates: 'blue', aliases: 'cyan', vacation: 'amber',
   rules: 'purple', 'smart-folders': 'purple', swipes: 'purple',
-  senders: 'red', encryption: 'green',
+  senders: 'red', encryption: 'green', translation: 'cyan',
   calendar: 'green', contacts: 'pink',
-  shortcuts: 'purple', plugins: 'pink', storage: 'cyan', diagnostics: 'amber', about: 'blue',
+  shortcuts: 'purple', plugins: 'pink', storage: 'cyan', diagnostics: 'amber', labs: 'green', about: 'blue',
 };
 
 /** Sections made of several editors get one page header of their own. */
 const COMPOSITE: ReadonlySet<SettingsSection> = new Set(['senders', 'encryption', 'storage']);
-const providerAccounts = computed(() =>
-  accounts.emailAccounts.some((account) => account.provider === 'gmail' || account.provider === 'outlook'));
 
 function openSection(section: SettingsSection) {
   showSection(section, ui.isSinglePane ? 'push' : 'replace');
@@ -192,13 +197,14 @@ onBeforeUnmount(() => unregisterFilter?.());
           v-else-if="activeSection === 'calendar'"
           @manage-accounts="openSection('accounts')"
         />
-        <!-- What comes in and goes out: mail accounts, feeds, webhooks, and the
-             labels Gmail and Outlook keep for an account. -->
+        <!-- What comes in and goes out: mail accounts, feeds and webhooks. An
+             account's own settings (labels, server rules) are on its page. -->
         <template v-else-if="activeSection === 'accounts'">
           <AccountSetup />
-          <section class="settings-subsection"><SourceManager /></section>
-          <section class="settings-subsection"><WebhooksEditor /></section>
-          <section v-if="providerAccounts" class="settings-subsection"><ProviderFeaturesEditor /></section>
+          <template v-if="!openAccount">
+            <section class="settings-subsection"><SourceManager /></section>
+            <section class="settings-subsection"><WebhooksEditor /></section>
+          </template>
         </template>
         <SignaturesEditor v-else-if="activeSection === 'signatures'" />
         <AliasEditor v-else-if="activeSection === 'aliases'" />
@@ -221,15 +227,21 @@ onBeforeUnmount(() => unregisterFilter?.());
           <section class="settings-subsection settings-subsection--untitled"><BackupExport /></section>
         </template>
         <KeybindingEditor v-else-if="activeSection === 'shortcuts'" />
-        <RuleBuilder v-else-if="activeSection === 'rules'" />
+        <template v-else-if="activeSection === 'rules'">
+          <section class="settings-subsection"><RuleBuilder /></section>
+          <section class="settings-subsection"><SweepRulesEditor /></section>
+        </template>
         <PluginManager v-else-if="activeSection === 'plugins'" only="plugins" />
         <SmartFoldersEditor v-else-if="activeSection === 'smart-folders'" />
         <VacationSettings v-else-if="activeSection === 'vacation'" />
         <template v-else-if="activeSection === 'senders'">
+          <section class="settings-subsection"><SpamFilterSettings /></section>
           <section class="settings-subsection"><BlockedSendersEditor /></section>
           <section class="settings-subsection"><RemoteImageAllowlist /></section>
         </template>
+        <TranslationSettings v-else-if="activeSection === 'translation'" />
         <DiagnosticsPane v-else-if="activeSection === 'diagnostics'" />
+        <LabsSettings v-else-if="activeSection === 'labs'" />
       </div>
     </div>
   </section>
@@ -371,12 +383,25 @@ onBeforeUnmount(() => unregisterFilter?.());
 }
 
 /* A readable column, centred in the pane: about 700px of card at any window
-   width, so a row's copy and its control stay within one glance. */
+   width, so a row's copy and its control stay within one glance. Real data
+   (a long address, a sync error, a backup path) breaks inside the column
+   rather than pushing the page wider than the dialog. */
 .settings-view__content {
+  overflow-wrap: anywhere;
   container-type: inline-size;
   width: min(100%, var(--settings-column));
   margin-inline: auto;
   padding: var(--space-2xl) var(--space-2xl) calc(2 * var(--space-2xl));
+}
+
+/* Header rows (title beside its actions) wrap their actions under the title
+   when there is no room, instead of overflowing. */
+.settings-view__content :deep(header) {
+  flex-wrap: wrap;
+}
+
+.settings-view__content :deep(header > *) {
+  min-width: 0;
 }
 
 /* One title per section, whoever renders it: each editor brought its own

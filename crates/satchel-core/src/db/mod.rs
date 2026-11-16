@@ -1,15 +1,20 @@
+pub mod account_quota;
 pub mod account_visibility;
 pub mod accounts;
 pub mod aliases;
+pub mod autocrypt_peers;
 pub mod blocked_senders;
 pub mod body_window;
 pub mod calendar;
+pub mod chats;
 pub mod connection_state;
 pub mod contacts;
 pub mod content_eviction;
 pub mod data_repairs;
 pub mod folders;
 pub mod followups;
+pub mod known_senders;
+pub mod labs;
 pub mod mailboxes;
 pub mod maintenance;
 pub mod message_links;
@@ -20,16 +25,21 @@ pub mod profile_lock;
 pub mod queries;
 pub mod remote_content;
 pub mod sender_preferences;
+pub mod sender_sweep;
+pub mod sent_copies;
+pub mod server_rules;
 pub mod signatures;
 pub mod signed_attachments;
 pub mod smart_folders;
 pub mod smime;
 pub mod storage;
 pub mod sync_quarantine;
+pub mod tasks;
 pub mod templates;
 pub mod threads;
 pub mod tls_exceptions;
 pub mod topics;
+pub mod translation;
 pub mod trash;
 pub mod vacation;
 pub mod webhooks;
@@ -749,6 +759,31 @@ mod tests {
     use sqlx::sqlite::SqlitePoolOptions;
 
     use super::{demo_seed_enabled, init, migrator, profile_lock};
+
+    /// SQLite before 3.54.0 can return uninitialized page-cache memory for a
+    /// database opened beside a `-wal` of another page size
+    /// (RUSTSEC-2026-0459). sqlx 0.8 pins a bundle older than that;
+    /// `vendor/sqlx-sqlite` lifts it. Dropping the patch must fail here, not
+    /// only in the weekly audit.
+    #[tokio::test]
+    async fn the_bundled_sqlite_has_the_wal_page_size_fix() {
+        let pool = SqlitePoolOptions::new()
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        let version: String = sqlx::query_scalar("SELECT sqlite_version()")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let parts: Vec<u32> = version
+            .split('.')
+            .map(|part| part.parse().unwrap())
+            .collect();
+        assert!(
+            parts[0] > 3 || (parts[0] == 3 && parts[1] >= 54),
+            "bundled SQLite {version} predates 3.54.0"
+        );
+    }
 
     #[tokio::test]
     async fn migration_lock_precedes_the_wal_switch() {

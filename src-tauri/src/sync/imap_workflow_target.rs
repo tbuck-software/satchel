@@ -1070,6 +1070,7 @@ mod tests {
             body_html: None,
             is_read: true,
             is_starred: false,
+            workflow_marker: None,
             body_calendar: None,
             smime_encrypted: None,
             smime_signed: None,
@@ -1080,6 +1081,11 @@ mod tests {
             auth_spf: None,
             auth_dkim: None,
             auth_dmarc: None,
+            spam_hint_headers: None,
+            satchel_marks: Vec::new(),
+            chat: None,
+            autocrypt_headers: Vec::new(),
+            autocrypt_eligible: false,
             attachments: Vec::new(),
         }
     }
@@ -1091,11 +1097,13 @@ mod tests {
                 remote_id: "808".into(),
                 is_read: None,
                 is_starred: None,
+                workflow_marker: None,
             },
             RemoteMessageState {
                 remote_id: "909".into(),
                 is_read: None,
                 is_starred: None,
+                workflow_marker: None,
             },
         ];
         assert_eq!(
@@ -1166,6 +1174,7 @@ mod tests {
                 remote_id: uid.clone(),
                 is_read: None,
                 is_starred: None,
+                workflow_marker: None,
             })
             .collect::<Vec<_>>();
         let requests: Requests = Default::default();
