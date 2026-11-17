@@ -43,7 +43,6 @@ import { isOwnEmail } from '@/utils/mailIdentity';
 import { recordFrontendDiagnostic } from '@/utils/diagnostics';
 import { useConnectionStore } from '@/stores/connection';
 import { t } from '@/i18n/runtime';
-import { sanitizeThreadFilename } from '@/utils/threadExport';
 import { createCoalescingRunner, type CoalescingRunner } from '@/utils/coalescingRunner';
 
 function normalizeLineBreaks(input: string): string {
@@ -892,6 +891,7 @@ export const useMessagesStore = defineStore('messages', () => {
 
   async function exportMessage(messageId: string, subject: string): Promise<boolean> {
     if (!backendCommandsAvailable()) throw new Error(t('mail.source.desktopOnly'));
+    const { sanitizeThreadFilename } = await import('@/utils/threadExport');
     const path = await backendChooseSavePath({
       suggestedName: `${sanitizeThreadFilename(subject, t('mail.source.defaultFilename'))}.eml`,
       filterName: t('mail.source.fileType'),
@@ -1235,6 +1235,26 @@ export const useMessagesStore = defineStore('messages', () => {
     await hydrateMessageAttachments(threadId, [messageId], version);
   }
 
+  /** Complete bodies for an export, including collapsed messages, without loading images. */
+  async function messagesForExport(threadId: string, messageIds: string[]): Promise<Message[]> {
+    const version = threadLoadVersions.get(threadId);
+    if (!version) throw new Error(t('errors.messageLoadFailed'));
+    const requested = new Set(messageIds);
+    const missing = (messagesByThread.value[threadId] ?? [])
+      .filter(message => requested.has(message.id) && message.bodyLoaded === false)
+      .map(message => message.id);
+    for (let start = 0; start < missing.length; start += 3) {
+      await hydrateMessageBodies(threadId, missing.slice(start, start + 3), version);
+    }
+    const current = new Map((messagesByThread.value[threadId] ?? []).map(message => [message.id, message]));
+    const result = messageIds.map(id => current.get(id));
+    if (threadLoadVersions.get(threadId) !== version
+      || result.some(message => !message || message.bodyLoaded === false || message.bodyLoadError || message.contentError)) {
+      throw new Error(t('errors.messageLoadFailed'));
+    }
+    return result as Message[];
+  }
+
   /** Bodies and inline images for messages the reader is about to show. */
   async function loadAttachmentsForMessages(threadId: string, messageIds: string[]): Promise<void> {
     const version = threadLoadVersions.get(threadId);
@@ -1280,6 +1300,7 @@ export const useMessagesStore = defineStore('messages', () => {
     markThreadsStale,
     reloadPgpMessages,
     loadAttachmentsForMessages,
+    messagesForExport,
     retryInlineImages,
   };
 });

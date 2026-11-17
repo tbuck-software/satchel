@@ -16,6 +16,7 @@
     "allow-import-mbox",
     "allow-open-external-url",
     "allow-record-frontend-diagnostic",
-    "allow-show-in-folder"
+    "allow-show-in-folder",
+    "clipboard-manager:allow-write-text"
   ]
 }

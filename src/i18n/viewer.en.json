@@ -68,6 +68,17 @@
       "viewInSatchel": "View in Satchel",
       "viewInSatchelNamed": "View {filename} in Satchel"
     },
+    "contextMenu": {
+      "copied": "Copied to clipboard",
+      "copyFailed": "Could not copy to clipboard",
+      "copyLink": "Copy link",
+      "copyLinkText": "Copy link text",
+      "copyMarkdown": "Copy message as Markdown",
+      "copyMessage": "Copy message",
+      "copySelection": "Copy selected text",
+      "label": "Message actions",
+      "openLink": "Open in browser"
+    },
     "document": {
       "frameTitle": "Message content"
     },

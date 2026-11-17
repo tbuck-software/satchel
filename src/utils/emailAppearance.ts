@@ -83,6 +83,14 @@ function contrast(a: RgbColor, b: RgbColor): number {
   return (bright + 0.05) / (dark + 0.05);
 }
 
+/** Button labels keep contrast against their own fill, rather than the reader canvas. */
+export function textColorOnBackground(background: string): string {
+  const parsed = parseCssColor(background);
+  if (!parsed) return '#ffffff';
+  return contrast(parsed, NAMED_COLORS.black!) >= contrast(parsed, NAMED_COLORS.white!)
+    ? '#000000' : '#ffffff';
+}
+
 function mixWithWhite(color: RgbColor, amount: number): RgbColor {
   return {
     r: Math.round(color.r + (255 - color.r) * amount),

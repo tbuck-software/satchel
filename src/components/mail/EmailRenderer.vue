@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import AppButton from '@/components/ui/AppButton.vue';
-import { computed, inject, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, inject, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { Attachment, PgpMessageState } from '@/types/mail';
 import { useImagePolicy } from '@/composables/useImagePolicy';
@@ -12,6 +12,7 @@ import {
   parseMailtoLink,
   type LinkAnchorRect,
   type LinkInteraction,
+  type MailContextInteraction,
 } from '@/utils/externalLinks';
 import { countRemoteMarkdownImages, hasMeaningfulMarkdown } from '@/utils/safeMarkdown';
 import type { QuotePart } from '@/utils/emailQuotes';
@@ -25,11 +26,14 @@ import LinkDestinationPreview, { type LinkPreviewStatus } from './LinkDestinatio
 import PlainTextLinks from './PlainTextLinks.vue';
 import SafeMarkdownBody from './SafeMarkdownBody.vue';
 import IsolatedEmailDocument from './IsolatedEmailDocument.vue';
+import { visibleLinkText } from '@/utils/linkLabel';
 import SegmentedControl from '@/components/ui/SegmentedControl.vue';
 import { IMAGE_GUARD_PHONE_ACTIONS } from './imageGuardActions';
 import { BODY_VIEW_SWITCH } from './bodyViewSwitch';
 import { useUiStore } from '@/stores/ui';
 import { formattingFreeText, isFormattingFreeHtml } from '@/utils/formattingFreeHtml';
+
+const MailContextMenu = defineAsyncComponent(() => import('./MailContextMenu.vue'));
 
 const settings = useSettingsStore();
 const ui = useUiStore();
@@ -82,6 +86,7 @@ type LinkPreviewState = {
   detail?: string;
 };
 const hoveredLink = ref<LinkPreviewState | null>(null);
+const contextMenu = ref<MailContextInteraction | null>(null);
 const linkError = ref<LinkPreviewState | null>(null);
 let linkErrorTimer: ReturnType<typeof setTimeout> | null = null;
 const visibleLinkPreview = computed(() => linkError.value ?? hoveredLink.value);
@@ -116,6 +121,7 @@ watch(
   () => {
     showBlockedImages.value = false;
     quotesExpanded.value = false;
+    contextMenu.value = null;
   },
 );
 
@@ -123,6 +129,7 @@ watch(
   () => props.text,
   () => {
     pendingExternalLink.value = null;
+    contextMenu.value = null;
     hoveredLink.value = null;
     linkError.value = null;
   },
@@ -379,6 +386,29 @@ function requestExternalLink(payload: LinkInteraction) {
   linkOpener.open(payload);
 }
 
+function showContextMenu(payload: MailContextInteraction) {
+  hoveredLink.value = null;
+  linkError.value = null;
+  contextMenu.value = payload;
+}
+
+function onContextMenu(event: MouseEvent) {
+  const target = event.target as Element;
+  if (target.closest('button, input, textarea, [role="menu"]')) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const anchor = target.closest('a');
+  const rect = anchor?.getBoundingClientRect();
+  showContextMenu({
+    x: event.clientX, y: event.clientY,
+    selection: window.getSelection()?.toString() ?? '',
+    link: anchor && rect ? {
+      href: anchor.getAttribute('href') ?? '', label: visibleLinkText(anchor),
+      anchor: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
+    } : null,
+  });
+}
+
 onBeforeUnmount(() => {
   if (linkErrorTimer) clearTimeout(linkErrorTimer);
 });
@@ -395,7 +425,7 @@ const hasPgpSegments = computed(() =>
 </script>
 
 <template>
-  <div class="renderer">
+  <div class="renderer" @contextmenu="onContextMenu">
     <div
       v-if="blockedImagesCount > 0 && !imagesEffectivelyAllowed"
       class="image-guard"
@@ -491,6 +521,7 @@ const hasPgpSegments = computed(() =>
           :frameless="viewMode === 'auto-dark'"
           @open-link="requestExternalLink"
           @link-hover="handleLinkHover"
+          @context-menu="showContextMenu"
         />
       </div>
     </div>
@@ -581,6 +612,7 @@ const hasPgpSegments = computed(() =>
               pass-through-touch-scroll
               @open-link="requestExternalLink"
               @link-hover="handleLinkHover"
+              @context-menu="showContextMenu"
             />
             <SafeMarkdownBody
               v-else-if="hasMeaningfulMarkdown(part.text)"
@@ -601,6 +633,14 @@ const hasPgpSegments = computed(() =>
         </div>
       </details>
     </section>
+    <MailContextMenu
+      v-if="contextMenu"
+      :interaction="contextMenu"
+      :html="props.html"
+      :text="props.text"
+      @close="contextMenu = null"
+      @open-link="requestExternalLink"
+    />
     <ExternalLinkDialog
       :assessment="pendingExternalLink"
       @cancel="linkOpener.cancel"

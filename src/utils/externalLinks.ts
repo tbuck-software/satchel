@@ -94,6 +94,13 @@ export interface LinkInteraction {
   anchor: LinkAnchorRect;
 }
 
+export interface MailContextInteraction {
+  x: number;
+  y: number;
+  link: LinkInteraction | null;
+  selection?: string;
+}
+
 const EMAIL_ADDRESS_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** RFC 6068: `+` is a plus sign here, not the form encoding's space. */

@@ -93,6 +93,31 @@ describe('buildIsolatedDocument', () => {
     expect(original.querySelector('td')!.getAttribute('bgcolor')).toBe('white');
   });
 
+  it('keeps a neutral table-cell button distinct from the auto-dark canvas', () => {
+    const html = '<table><tr><td bgcolor="#141413" style="border:none;border-radius:10px;'
+      + 'cursor:auto;mso-padding-alt:14px 36px;background:#141413;">'
+      + '<a href="https://example.test/login" style="text-decoration:none;line-height:20px;'
+      + 'color:white;font-size:18px;display:inline-block;padding:14px 36px;">Sign in</a>'
+      + '</td></tr></table>';
+    const doc = parse(buildIsolatedDocument(html, true));
+    const cell = doc.querySelector('td')!;
+    expect(cell.style.backgroundColor).toBe('rgb(20, 20, 19)');
+    expect(cell.style.borderRadius).toBe('10px');
+    expect(doc.querySelector('a')!.style.padding).toBe('14px 36px');
+  });
+
+  it('keeps dark labels on light buttons and leaves surrounding neutral panels adapted', () => {
+    const html = '<table style="background:#fff"><tr><td><p>Surrounding content</p>'
+      + '<a href="https://example.test/login" style="background:#fff;color:#111;padding:12px;border-radius:8px">'
+      + '<span style="color:#111">Sign in</span></a></td></tr></table>';
+    const doc = parse(buildIsolatedDocument(html, true));
+    expect(doc.querySelector('table')!.style.background).toBe('var(--satchel-email-canvas)');
+    const link = doc.querySelector('a')!;
+    expect(link.style.backgroundColor).toBe('rgb(255, 255, 255)');
+    expect(link.style.color).toBe('rgb(0, 0, 0)');
+    expect(link.querySelector('span')!.style.color).toBe('rgb(0, 0, 0)');
+  });
+
   /**
    * Mail is full of tables pinned to a desktop width. Left alone they force the
    * reading pane to scroll sideways.

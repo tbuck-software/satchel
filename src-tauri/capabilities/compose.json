@@ -13,6 +13,7 @@
     "core:window:allow-set-focus",
     "dialog:default",
     "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-text",
     "fs:allow-read-file",
     "fs:allow-write-file",
     "allow-app-commands",

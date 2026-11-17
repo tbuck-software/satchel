@@ -8,6 +8,8 @@ const harness = vi.hoisted(() => ({
   messagesError: null as string | null,
   loadMessages: vi.fn().mockResolvedValue(undefined),
   exportMessage: vi.fn().mockResolvedValue(false),
+  messagesForExport: vi.fn(),
+  copyText: vi.fn(),
 }));
 
 vi.mock('@/stores/connection', () => ({
@@ -22,6 +24,7 @@ vi.mock('@/stores/messages', () => ({
   useMessagesStore: () => ({
     getByThread: () => harness.messages,
     exportMessage: harness.exportMessage,
+    messagesForExport: harness.messagesForExport,
     isLoading: () => harness.messagesLoading,
     loadByThread: harness.loadMessages,
     openThread: harness.loadMessages,
@@ -108,6 +111,7 @@ vi.mock('@/services/backend', () => ({
   backendSupportsNativeCommands: vi.fn(() => true),
 }));
 vi.mock('@/utils/perf', () => ({ perfStart: () => undefined }));
+vi.mock('@/services/clipboard', () => ({ writeClipboardText: harness.copyText }));
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
 import ThreadView from './ThreadView.vue';
@@ -136,9 +140,29 @@ beforeEach(() => {
   harness.messagesLoading = false;
   harness.messagesError = null;
   harness.loadMessages.mockResolvedValue(undefined);
+  harness.messagesForExport.mockImplementation(async (_threadId, ids: string[]) =>
+    harness.messages.filter(message => ids.includes(message.id as string)));
 });
 
 describe('reader load failure', () => {
+  it('waits for complete bodies before copying Markdown from the toolbar', async () => {
+    const preview = { id: 'old', from: { email: 'sender@example.test' }, to: [],
+      bodyText: 'Need h…', bodyLoaded: false, isDraft: false, isRead: true,
+      timestamp: '2026-08-13T18:00:00Z', attachments: [] };
+    harness.messages = [preview];
+    harness.messagesForExport.mockResolvedValue([{ ...preview, bodyLoaded: true,
+      bodyHtml: '<p>Complete footer</p><a href="https://example.test/login">Sign in</a>' }]);
+    const wrapper = render();
+    await flushPromises();
+    wrapper.getComponent({ name: 'ThreadToolbar' }).vm.$emit('copy-markdown', 'conversation');
+    await flushPromises();
+    expect(harness.messagesForExport).toHaveBeenCalledWith('thread-1', ['old']);
+    expect(harness.copyText).toHaveBeenCalledWith(expect.stringContaining('Complete footer'));
+    expect(harness.copyText).toHaveBeenCalledWith(expect.stringContaining('[Sign in](https://example.test/login)'));
+    expect(harness.copyText).not.toHaveBeenCalledWith(expect.stringContaining('Need h…'));
+    wrapper.unmount();
+  });
+
   it('routes the existing EML menu action to the complete original export', async () => {
     harness.messages = [{ id: 'original-message', from: { email: 'sender@example.test' }, to: [],
       bodyText: 'Display text only', bodyHtml: '<p>Original is richer</p>', bodyLoaded: true,

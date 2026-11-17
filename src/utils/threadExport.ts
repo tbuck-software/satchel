@@ -1,4 +1,5 @@
 import type { Message } from '@/types/mail';
+import { emailBodyForExport } from '@/utils/emailExport';
 
 export type ThreadExportScope = 'latest' | 'conversation';
 export type ThreadExportFormat = 'markdown' | 'text';
@@ -57,7 +58,7 @@ export function renderThreadMarkdown(
       `**${options.labels.to}:** ${formatThreadParticipantLine(message, 'to')}  `,
       ...(cc ? [`**${options.labels.cc}:** ${cc}  `] : []),
       '',
-      message.bodyText ?? '',
+      emailBodyForExport(message.bodyHtml, message.bodyText ?? '', 'markdown'),
     ].join('\n');
   });
   return [`# ${subject}`, '', ...sections].join('\n\n').trimEnd() + '\n';
@@ -77,7 +78,7 @@ export function renderThreadText(
       ...(cc ? [`${options.labels.cc}: ${cc}`] : []),
       `${options.labels.date}: ${options.formatDate(new Date(message.timestamp))}`,
       '',
-      message.bodyText ?? '',
+      emailBodyForExport(message.bodyHtml, message.bodyText ?? '', 'text'),
     ].join('\n');
   });
   return [subject, '='.repeat(Math.min(72, Math.max(8, subject.length))), '', ...sections]

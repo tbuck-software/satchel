@@ -40,6 +40,7 @@ async function setMail(page: Page, bodyHtml: string, id?: string) {
  */
 async function mailLinkPoint(page: Page, label: string) {
   const frame = page.locator('iframe.satchel-email-document');
+  await expect(page.locator('.satchel-email-hotspot').first()).toBeVisible();
   const frameBox = await frame.boundingBox();
   const rect = await frame.evaluate((element, name) => {
     const doc = (element as HTMLIFrameElement).contentDocument;
@@ -60,6 +61,57 @@ async function renderMail(page: Page, bodyHtml: string) {
   return frame.contentFrame();
 }
 
+test('copies the exact button URL and complete message through the mail context menu', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: async (text: string) => { document.documentElement.dataset.copiedText = text; } },
+    });
+  });
+  const url = 'https://example.test/login?token=fixture%2Bvalue&next=%2Finbox#finish';
+  await renderMail(page, `<p>Complete introduction.</p><a href="${url}">Sign in</a><p>Complete footer.</p>`);
+  const point = await mailLinkPoint(page, 'Sign in');
+  await page.mouse.click(point.x, point.y, { button: 'right' });
+  await page.getByRole('menuitem', { name: 'Copy link', exact: true }).click();
+  await expect.poll(() => page.locator('html').getAttribute('data-copied-text')).toBe(url);
+  await page.mouse.click(point.x, point.y, { button: 'right' });
+  await page.getByRole('menuitem', { name: 'Copy message as Markdown', exact: true }).click();
+  const copied = await page.locator('html').getAttribute('data-copied-text');
+  expect(copied).toContain(`[Sign in](${url})`);
+  expect(copied).toContain('Complete introduction.');
+  expect(copied).toContain('Complete footer.');
+  await page.mouse.click(point.x, point.y, { button: 'right' });
+  await page.getByRole('menuitem', { name: 'Copy link text', exact: true }).click();
+  await expect.poll(() => page.locator('html').getAttribute('data-copied-text')).toBe('Sign in');
+  await page.mouse.click(point.x, point.y, { button: 'right' });
+  await page.getByRole('menuitem', { name: 'Copy message', exact: true }).click();
+  const plain = await page.locator('html').getAttribute('data-copied-text');
+  expect(plain).toContain(`Sign in (${url})`);
+  expect(plain).toContain('Complete footer.');
+  await page.mouse.click(point.x, point.y, { button: 'right' });
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu', { name: 'Message actions' })).toHaveCount(0);
+  await page.locator('iframe.satchel-email-document').evaluate(element => {
+    const doc = (element as HTMLIFrameElement).contentDocument!;
+    const range = doc.createRange();
+    range.selectNodeContents(doc.querySelector('p')!);
+    const selection = doc.defaultView!.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+  });
+  await page.mouse.click(point.x, point.y, { button: 'right' });
+  await page.getByRole('menuitem', { name: 'Copy selected text', exact: true }).click();
+  await expect.poll(() => page.locator('html').getAttribute('data-copied-text')).toBe('Complete introduction.');
+});
+
+test('opening a link from the context menu keeps the destination protection', async ({ page }) => {
+  await renderMail(page, '<a href="https://localhost/login">Sign in</a>');
+  const point = await mailLinkPoint(page, 'Sign in');
+  await page.mouse.click(point.x, point.y, { button: 'right' });
+  await page.getByRole('menuitem', { name: 'Open in browser', exact: true }).click();
+  await expect(page.getByRole('alertdialog', { name: 'Check the link before opening' })).toBeVisible();
+});
+
 test('blends sender canvas backgrounds into the dark reader while retaining coloured panels', async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('satchel.theme', 'dark'));
   const mail = await renderMail(page, `
@@ -75,6 +127,28 @@ test('blends sender canvas backgrounds into the dark reader while retaining colo
     expect(await mail.locator(selector).evaluate((element) => getComputedStyle(element).backgroundColor)).toBe(canvas);
   }
   expect(await mail.locator('.banner').evaluate((element) => getComputedStyle(element).backgroundColor)).toBe('rgb(23, 76, 112)');
+});
+
+test('retains neutral button fills and readable labels on the dark canvas', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('satchel.theme', 'dark'));
+  const mail = await renderMail(page, `
+    <table width="100%" bgcolor="#ffffff"><tr><td>
+      <table><tr><td id="dark-button" bgcolor="#141413"
+        style="border:none;border-radius:10px;cursor:auto;mso-padding-alt:14px 36px;background:#141413">
+        <a href="https://example.test/login" style="color:white;display:inline-block;padding:14px 36px">Sign in</a>
+      </td></tr></table>
+      <a id="light-button" href="https://example.test/help" style="background:white;color:black;padding:12px;border-radius:8px"><span style="color:black">Help</span></a>
+    </td></tr></table>
+  `);
+  const dark = mail.locator('#dark-button');
+  expect(await dark.evaluate(element => getComputedStyle(element).backgroundColor)).toBe('rgb(20, 20, 19)');
+  expect(await dark.evaluate(element => getComputedStyle(element).borderRadius)).toBe('10px');
+  expect(await dark.evaluate(element => getComputedStyle(element).outlineStyle)).toBe('solid');
+  const signIn = mail.getByRole('link', { name: 'Sign in' });
+  expect(await signIn.evaluate(element => getComputedStyle(element).color)).toBe('rgb(255, 255, 255)');
+  expect(await signIn.evaluate(element => getComputedStyle(element).padding)).toBe('14px 36px');
+  expect(await mail.locator('#light-button').evaluate(element => getComputedStyle(element).backgroundColor)).toBe('rgb(255, 255, 255)');
+  expect(await mail.locator('#light-button span').evaluate(element => getComputedStyle(element).color)).toBe('rgb(0, 0, 0)');
 });
 
 test('evaluates sender media queries against the message pane width', async ({ page }) => {

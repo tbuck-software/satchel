@@ -23,6 +23,7 @@ import { useAttachmentActions } from '@/composables/useAttachmentActions';
 import { perfStart } from '@/utils/perf';
 import { scheduleIdleWork } from '@/utils/idleWork';
 import { saveTextExport } from '@/utils/saveTextExport';
+import { writeClipboardText } from '@/services/clipboard';
 import { showInFolderAction } from '@/utils/showInFolderAction';
 import ErrorState from '@/components/ui/ErrorState.vue';
 import AppBanner from '@/components/ui/AppBanner.vue';
@@ -926,12 +927,6 @@ async function printThread(scope: 'latest' | 'conversation') {
   }
 }
 
-function messagesAsMarkdown(scope: 'latest' | 'conversation') {
-  const currentThread = thread.value;
-  if (!currentThread) return '';
-  return renderThreadMarkdown(currentThread.subject, threadMessages(), scope, threadExportOptions());
-}
-
 function threadExportOptions() {
   return {
     labels: {
@@ -946,10 +941,13 @@ function threadExportOptions() {
 }
 
 async function copyMarkdown(scope: 'latest' | 'conversation') {
-  const content = messagesAsMarkdown(scope);
-  if (!content) return;
+  const currentThread = thread.value;
+  if (!currentThread) return;
   try {
-    await navigator.clipboard.writeText(content);
+    const selected = selectedMessages(scope);
+    const complete = await messagesStore.messagesForExport(currentThread.id, selected.map(message => message.id));
+    const content = renderThreadMarkdown(currentThread.subject, complete, 'conversation', threadExportOptions());
+    await writeClipboardText(content);
     toast.success(scope === 'latest'
       ? t('thread.export.copiedLatest')
       : t('thread.export.copiedConversation'));
@@ -1007,8 +1005,9 @@ async function exportThread(format: 'eml' | 'markdown' | 'text') {
       }
       return;
     }
+    const complete = await messagesStore.messagesForExport(currentThread.id, threadMessages().map(message => message.id));
     const options = buildThreadExportDescriptor(
-      format, currentThread.subject, threadMessages(), threadExportOptions(),
+      format, currentThread.subject, complete, threadExportOptions(),
     );
     const saved = await saveTextExport(options.filename, options.content, options.mime, options.extension);
     if (saved) {

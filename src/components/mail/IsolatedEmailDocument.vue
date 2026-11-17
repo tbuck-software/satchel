@@ -5,7 +5,7 @@ let lastClickedFrame: HTMLIFrameElement | null = null;
 
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import type { LinkInteraction } from '@/utils/externalLinks';
+import type { LinkInteraction, MailContextInteraction } from '@/utils/externalLinks';
 import { visibleLinkText } from '@/utils/linkLabel';
 import { buildEmailCsp } from '@/utils/emailCsp';
 
@@ -44,6 +44,7 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   'open-link': [payload: LinkInteraction];
   'link-hover': [payload: LinkInteraction | null];
+  'context-menu': [payload: MailContextInteraction];
 }>();
 
 /**
@@ -164,6 +165,12 @@ const shellCss = `
     color-scheme: dark;
     color: var(--satchel-email-ink) !important;
     background: var(--satchel-email-canvas) !important;
+  }
+
+  /* Dark neutral buttons still need an edge against a dark reader canvas. */
+  .satchel-email-body[data-satchel-auto-dark="on"] [data-satchel-action-fill="on"] {
+    outline: 1px solid color-mix(in srgb, var(--satchel-email-ink) 35%, transparent);
+    outline-offset: -1px;
   }
 
   .satchel-email-body[data-satchel-auto-dark="on"][data-satchel-simple="on"] [style*="border"] {
@@ -345,6 +352,18 @@ function onFrameClick(event: Event) {
   emit('open-link', linkInteraction(anchor));
 }
 
+function onFrameContextMenu(event: MouseEvent) {
+  event.preventDefault();
+  const rect = frameRef.value?.getBoundingClientRect();
+  const anchor = linkFromEvent(event);
+  emit('context-menu', {
+    x: (rect?.left ?? 0) + event.clientX,
+    y: (rect?.top ?? 0) + event.clientY,
+    link: anchor ? linkInteraction(anchor) : null,
+    selection: frameRef.value?.contentWindow?.getSelection()?.toString() ?? '',
+  });
+}
+
 /**
  * Mirror every mail link as a transparent target in *this* document.
  *
@@ -408,6 +427,13 @@ function hotspotInteraction(hotspot: LinkHotspot): LinkInteraction {
       bottom: offsetTop + hotspot.top + hotspot.height,
     },
   };
+}
+
+function hotspotContextMenu(event: MouseEvent, hotspot: LinkHotspot) {
+  emit('context-menu', {
+    x: event.clientX, y: event.clientY, link: hotspotInteraction(hotspot),
+    selection: frameRef.value?.contentWindow?.getSelection()?.toString() ?? '',
+  });
 }
 
 function onFrameMouseOver(event: Event) {
@@ -547,6 +573,7 @@ function disconnectFrameDocument() {
   frameResizeObserver?.disconnect();
   frameResizeObserver = null;
   frameDocument?.removeEventListener('click', onFrameClick);
+  frameDocument?.removeEventListener('contextmenu', onFrameContextMenu);
   frameDocument?.removeEventListener('mouseover', onFrameMouseOver);
   frameDocument?.removeEventListener('mouseout', onFrameMouseOut as EventListener);
   frameDocument?.removeEventListener('keydown', onFrameKeyDown);
@@ -563,6 +590,7 @@ function bindFrameDocument(doc: Document) {
   // Values that changed while the document was still navigating.
   applyPresentation(doc);
   doc.addEventListener('click', onFrameClick);
+  doc.addEventListener('contextmenu', onFrameContextMenu);
   doc.addEventListener('mouseover', onFrameMouseOver);
   doc.addEventListener('mouseout', onFrameMouseOut as EventListener);
   doc.addEventListener('keydown', onFrameKeyDown);
@@ -701,6 +729,7 @@ onBeforeUnmount(() => {
         @mouseenter="emit('link-hover', hotspotInteraction(hotspot))"
         @mouseleave="emit('link-hover', null)"
         @click="emit('open-link', hotspotInteraction(hotspot))"
+        @contextmenu.prevent.stop="hotspotContextMenu($event, hotspot)"
       />
     </div>
   </div>

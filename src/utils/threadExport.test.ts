@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import type { Message } from '@/types/mail';
 import {
@@ -34,6 +35,22 @@ function message(id: string, overrides: Partial<Message> = {}): Message {
 }
 
 describe('thread export formatting', () => {
+  it('copies the complete HTML body and button targets instead of the text preview', () => {
+    const mail = message('login', {
+      bodyText: 'Sign in. Need h…',
+      bodyHtml: '<h1>Sign in</h1><p>Use the button below.</p>'
+        + '<p><a href="https://example.test/login?token=fixture&amp;next=%2Finbox">Sign in</a></p>'
+        + '<p>Need help? Contact support.</p><blockquote>Earlier message in full.</blockquote>',
+    });
+    const markdown = renderThreadMarkdown('Login', [mail], 'latest', { labels, formatDate });
+    expect(markdown).toContain('[Sign in](https://example.test/login?token=fixture&next=%2Finbox)');
+    expect(markdown).toContain('Need help? Contact support.');
+    expect(markdown).toContain('> Earlier message in full.');
+    expect(markdown).not.toContain('Need h…');
+    expect(renderThreadText('Login', [mail], 'latest', { labels, formatDate }))
+      .toContain('Need help? Contact support.');
+  });
+
   it('selects only the store-last message for latest exports, including a trailing draft', () => {
     const messages = [message('first'), message('latest'), message('draft', { isDraft: true })];
 

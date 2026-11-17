@@ -4,9 +4,31 @@ import {
   readableDarkModeTextColor,
   responsiveEmailTableWidth,
   rewriteCssColorsForDark,
+  textColorOnBackground,
 } from '@/utils/emailAppearance';
 import { assessExternalLink, parseMailtoLink } from '@/utils/externalLinks';
 import { visibleLinkText } from '@/utils/linkLabel';
+
+/** A neutral fill under one padded link is a button, not the mail's canvas. */
+function neutralActionFills(doc: Document): Map<HTMLElement, string> {
+  const fills = new Map<HTMLElement, string>();
+  for (const link of Array.from(doc.querySelectorAll<HTMLAnchorElement>('a[href]'))) {
+    const cell = link.closest('td');
+    for (const surface of [link, cell]) {
+      if (!surface) continue;
+      const fill = surface.style.backgroundColor || surface.getAttribute('bgcolor') || '';
+      if (darkModeBackgroundColor(fill) !== 'var(--satchel-email-canvas)') continue;
+      if (surface !== link && (
+        surface.querySelectorAll('a[href]').length !== 1
+        || visibleLinkText(surface) !== visibleLinkText(link)
+        || !(surface.style.borderRadius || link.style.padding)
+      )) continue;
+      fills.set(surface, fill);
+      break;
+    }
+  }
+  return fills;
+}
 
 /**
  * Prepare sanitized mail HTML for display inside the isolated document.
@@ -59,6 +81,7 @@ export function buildIsolatedDocument(
   const designedLayout = isDesignedEmailMarkup(doc.body?.innerHTML ?? html);
 
   if (autoDark) {
+    const actionFills = neutralActionFills(doc);
     for (const style of Array.from(doc.querySelectorAll('style'))) {
       style.textContent = rewriteCssColorsForDark(style.textContent ?? '');
     }
@@ -78,6 +101,16 @@ export function buildIsolatedDocument(
           element.style.backgroundColor = mappedBackground;
         }
         element.removeAttribute('bgcolor');
+      }
+    }
+    // Restore the button's own palette after the canvas pass, including labels
+    // inside spans. A black label on a white button must stay black in dark mode.
+    for (const [surface, fill] of actionFills) {
+      surface.style.setProperty('background-color', fill, 'important');
+      surface.setAttribute('data-satchel-action-fill', 'on');
+      const ink = textColorOnBackground(fill);
+      for (const element of [surface, ...Array.from(surface.querySelectorAll<HTMLElement>('*'))]) {
+        element.style.setProperty('color', ink, 'important');
       }
     }
   }

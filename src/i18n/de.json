@@ -1618,6 +1618,17 @@
       "title": "Authentifizierung",
       "unavailable": "Nicht verfügbar"
     },
+    "contextMenu": {
+      "copied": "In die Zwischenablage kopiert",
+      "copyFailed": "Kopieren in die Zwischenablage fehlgeschlagen",
+      "copyLink": "Link kopieren",
+      "copyLinkText": "Linktext kopieren",
+      "copyMarkdown": "Nachricht als Markdown kopieren",
+      "copyMessage": "Nachricht kopieren",
+      "copySelection": "Ausgewählten Text kopieren",
+      "label": "Nachrichtenaktionen",
+      "openLink": "Im Browser öffnen"
+    },
     "document": {
       "frameTitle": "E-Mail-Inhalt"
     },

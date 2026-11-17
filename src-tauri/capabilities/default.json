@@ -24,6 +24,7 @@
     "dialog:default",
     "dialog:allow-open",
     "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-text",
     "fs:allow-read-file",
     "fs:allow-write-file",
     "fs:allow-write-text-file",

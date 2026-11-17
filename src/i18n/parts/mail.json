@@ -346,6 +346,17 @@
         },
         "text": "Text",
         "textTitle": "Plain text"
+      },
+      "contextMenu": {
+        "label": "Message actions",
+        "copyLink": "Copy link",
+        "openLink": "Open in browser",
+        "copyLinkText": "Copy link text",
+        "copyMessage": "Copy message",
+        "copyMarkdown": "Copy message as Markdown",
+        "copied": "Copied to clipboard",
+        "copyFailed": "Could not copy to clipboard",
+        "copySelection": "Copy selected text"
       }
     },
     "viewer": {
@@ -711,6 +722,17 @@
         },
         "text": "Text",
         "textTitle": "Reiner Text"
+      },
+      "contextMenu": {
+        "label": "Nachrichtenaktionen",
+        "copyLink": "Link kopieren",
+        "openLink": "Im Browser öffnen",
+        "copyLinkText": "Linktext kopieren",
+        "copyMessage": "Nachricht kopieren",
+        "copyMarkdown": "Nachricht als Markdown kopieren",
+        "copied": "In die Zwischenablage kopiert",
+        "copyFailed": "Kopieren in die Zwischenablage fehlgeschlagen",
+        "copySelection": "Ausgewählten Text kopieren"
       }
     },
     "viewer": {

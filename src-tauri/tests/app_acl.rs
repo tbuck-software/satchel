@@ -308,6 +308,7 @@ fn narrow_windows_have_only_the_resolved_commands_they_need() {
             "plugin:window|close",
             "plugin:window|set_focus",
             "plugin:dialog|save",
+            "plugin:clipboard-manager|write_text",
             "plugin:fs|write_file",
             "plugin:fs|open",
             "plugin:fs|write",
