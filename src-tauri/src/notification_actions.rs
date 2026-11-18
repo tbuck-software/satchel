@@ -125,7 +125,7 @@ struct BackgroundMailSyncResult {
     error: Option<String>,
 }
 
-/// Run a bounded Inbox refresh from WorkManager after Android reclaimed the UI
+/// Run a bounded Inbox refresh from WorkManager independently of the UI
 /// process. The JSON return keeps Android notification rendering native: the
 /// headless Rust runtime never needs a Tauri `AppHandle` or WebView.
 #[allow(non_snake_case)]
@@ -250,6 +250,9 @@ async fn open_background_database(database_path: &Path) -> Result<BackgroundData
     let profile = database_path
         .parent()
         .ok_or_else(|| "Satchel database path has no profile directory".to_string())?;
+    // WorkManager has its own process and never runs Tauri's setup hook.
+    #[cfg(debug_assertions)]
+    crate::load_debug_profile_env(profile);
     crate::db::apply_pending_restore(profile)?;
     let open = crate::db::profile_lock::hold_open(profile).await?;
     let options = SqliteConnectOptions::new()

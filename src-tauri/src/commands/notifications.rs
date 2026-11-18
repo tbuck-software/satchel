@@ -295,7 +295,7 @@ pub fn android_delivery_outcome(response: &serde_json::Value) -> MailDeliveryOut
     match response.get("reason").and_then(serde_json::Value::as_str) {
         Some(reason::PERMISSION_DENIED) => MailDeliveryOutcome::Suppressed(reason_note(
             reason::PERMISSION_DENIED,
-            "Android POST_NOTIFICATIONS permission refused",
+            "Android mail notifications blocked by permission or notification settings",
         )),
         Some(other) => MailDeliveryOutcome::Suppressed(reason_note(
             reason::DISPATCH_ERROR,

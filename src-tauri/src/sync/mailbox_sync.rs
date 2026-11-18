@@ -1199,6 +1199,18 @@ pub(crate) async fn sync_mailboxes(
 
     for account_id in account_ids {
         let result = account_run_exclusive(&account_id, ACCOUNT_SYNC_TIMEOUT, async {
+        #[cfg(target_os = "android")]
+        let cross_process_lease = match CrossProcessSyncLease::acquire(pool, &account_id).await? {
+            Some(lease) => lease,
+            None => {
+                tracing::debug!(
+                    account_id = %account_id,
+                    "mailbox sync is already running in another Android process"
+                );
+                return Ok(());
+            }
+        };
+
         // Re-reading under the lock prevents a concurrent run from restoring a
         // stale cursor.
         let Some(mut account) = sqlx::query_as::<_, MailAccountRow>(
@@ -1232,18 +1244,6 @@ pub(crate) async fn sync_mailboxes(
             .flatten()
             .map(|(status, error, since)| (status.as_deref() == Some("error"), error, since))
             .unwrap_or_default();
-
-        #[cfg(target_os = "android")]
-        let cross_process_lease = match CrossProcessSyncLease::acquire(pool, &account.id).await? {
-            Some(lease) => lease,
-            None => {
-                tracing::debug!(
-                    account_id = %account.id,
-                    "mailbox sync is already running in another Android process"
-                );
-                return Ok(());
-            }
-        };
 
         let sync_started_at = chrono::Utc::now().to_rfc3339();
         let _ = sqlx::query(

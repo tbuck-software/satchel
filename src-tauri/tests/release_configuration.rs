@@ -12,12 +12,15 @@ fn dotenv_entry_points_are_debug_only() {
         "#[cfg(debug_assertions)]\n    let _ = dotenvy::dotenv();",
         "#[cfg(debug_assertions)]\n            load_app_support_env(app);",
         "#[cfg(debug_assertions)]\nfn load_app_support_env",
+        "#[cfg(debug_assertions)]\nfn load_debug_profile_env",
     ] {
         assert!(
             source.contains(guarded),
             "unguarded dotenv entry point: {guarded}"
         );
     }
+    assert!(read("src/notification_actions.rs")
+        .contains("#[cfg(debug_assertions)]\n    crate::load_debug_profile_env(profile);"));
 }
 
 #[test]

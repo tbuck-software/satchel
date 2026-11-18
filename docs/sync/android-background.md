@@ -5,7 +5,7 @@
 The foreground process keeps its provider connections alive while Android
 allows it to run. `SatchelSyncService` supplies the persistent foreground
 notification. It returns `START_NOT_STICKY`; periodic work is the recovery path
-when that process stops.
+when the live connection stalls or the process stops.
 
 `BackgroundMailSyncWorkScheduler` registers unique periodic work named
 `satchel-background-mail-sync-v1`. It requests a 15-minute interval, a connected
@@ -19,12 +19,17 @@ Constraints and system scheduling can delay or skip a run. See Android's
 During Doze, background network access and WorkManager jobs are deferred until
 maintenance windows. See the [Doze restrictions](https://developer.android.com/training/monitoring-device-state/doze-standby#restrictions).
 
-`BackgroundMailSyncWorker` skips provider work if the main process is serving
-mail. Otherwise its separate process opens the profile under the database lock,
+`BackgroundMailSyncWorker` runs even while the main process has service priority.
+Android can give the WorkManager host process service priority even after the
+mail UI has exited. The SQLite lease
+for each account excludes overlapping inbox fetches, and the notification
+outbox atomically claims pending rows across both processes.
+The worker opens the profile under the database lock,
 refreshes active inboxes, applies a bounded mobile storage-budget pass, and
 delivers pending native notifications. Notification acknowledgements record
-whether Android actually displayed each message. Incomplete refreshes request
-up to five retries; the next periodic run remains scheduled.
+whether the worker posted a message or Android notification settings blocked
+it. Incomplete refreshes request up to five retries. The next periodic run
+remains scheduled.
 
 The storage target is 500 MB of active SQLite pages. Each pass releases at most
 64 recoverable bodies. Reusable pages remain in the database file for later

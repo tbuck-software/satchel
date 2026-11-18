@@ -1,8 +1,8 @@
 //! Mail notifications on mobile: display, dismissal and tap routing.
 //!
 //! Nothing here talks to a server. Notifications are produced locally by the
-//! in-process sync (Android additionally by `BackgroundMailSyncWorker` when the
-//! main process is gone); this module only hands them to the platform and
+//! in-process sync (Android additionally by `BackgroundMailSyncWorker` on its
+//! periodic schedule); this module only hands them to the platform and
 //! carries a tap back to the frontend.
 
 use serde::Serialize;

@@ -1,18 +1,17 @@
 package de.tbuck.satchel.background
 
-import android.app.ActivityManager
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.os.Process
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
+import androidx.work.ListenableWorker.Result
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
@@ -170,9 +169,8 @@ internal object NotificationActionFeedback {
 /**
  * Durable safety net for the local foreground connection.
  *
- * The live Tauri process remains the fast path. WorkManager only opens the
- * mailbox itself after Android has reclaimed or cached that process, so a
- * sleeping phone still catches up without racing the normal account workers.
+ * The keepalive service can outlive a working mail connection. The Rust
+ * account leases serialize actual inbox fetches across both processes.
  */
 object BackgroundMailSyncWorkScheduler {
   private const val PERIODIC_NAME = "satchel-background-mail-sync-v1"
@@ -224,75 +222,71 @@ object BackgroundMailSyncNative {
 
 class BackgroundMailSyncWorker(context: Context, params: WorkerParameters) :
   RemoteCoroutineWorker(context, params) {
-  override suspend fun doRemoteWork(): Result {
-    if (mainProcessIsServingMail()) {
-      return Result.success()
-    }
+  override suspend fun doRemoteWork(): Result = runBackgroundMailSync(
+    applicationContext, runAttemptCount,
+  )
+}
 
-    val database = applicationContext.dataDir.resolve("satchel/satchel.db")
-    return runCatching {
-      val response = JSONObject(
-        BackgroundMailSyncNative.syncMail(applicationContext, database.absolutePath),
-      )
-      val notifications = response.optJSONArray("notifications")
-      // What Android did with each mail, not what we asked it to do. Posting
-      // every event id unseen recorded a notification refused for a missing
-      // POST_NOTIFICATIONS permission as delivered, and nothing retried it.
-      val acknowledgements = JSONArray()
-      if (notifications != null) {
-        for (index in 0 until notifications.length()) {
-          val notification = notifications.getJSONObject(index)
-          val reason = SatchelNotifications.showMail(
-            applicationContext,
-            notification.getString("eventId"),
-            notification.optString("threadId", "").trim().takeIf(String::isNotEmpty),
-            notification.getString("accountId"),
-            notification.getString("accountLabel"),
-            notification.getString("sender"),
-            notification.getString("subject"),
-            notification.getString("preview"),
-            notification.optBoolean("sound", true),
-          )
-          acknowledgements.put(
-            JSONObject()
-              .put("eventId", notification.getString("eventId"))
-              .put("shown", reason == null)
-              .put("reason", reason),
-          )
-        }
-      }
-      if (acknowledgements.length() > 0) {
-        val acknowledgementError = BackgroundMailSyncNative.acknowledgeNotifications(
+internal fun runBackgroundMailSync(
+  applicationContext: Context,
+  runAttemptCount: Int,
+  syncMail: (Context, String) -> String = { context, path -> BackgroundMailSyncNative.syncMail(context, path) },
+  acknowledge: (Context, String, String) -> String? = { context, path, entries ->
+    BackgroundMailSyncNative.acknowledgeNotifications(context, path, entries)
+  },
+): Result {
+  val database = applicationContext.dataDir.resolve("satchel/satchel.db")
+  return runCatching {
+    val response = JSONObject(
+      syncMail(applicationContext, database.absolutePath),
+    )
+    val notifications = response.optJSONArray("notifications")
+    // What Android did with each mail, not what we asked it to do. Posting
+    // every event id unseen recorded a notification refused for a missing
+    // POST_NOTIFICATIONS permission as delivered, and nothing retried it.
+    val acknowledgements = JSONArray()
+    if (notifications != null) {
+      for (index in 0 until notifications.length()) {
+        val notification = notifications.getJSONObject(index)
+        val reason = SatchelNotifications.showMail(
           applicationContext,
-          database.absolutePath,
-          acknowledgements.toString(),
+          notification.getString("eventId"),
+          notification.optString("threadId", "").trim().takeIf(String::isNotEmpty),
+          notification.getString("accountId"),
+          notification.getString("accountLabel"),
+          notification.getString("sender"),
+          notification.getString("subject"),
+          notification.getString("preview"),
+          notification.optBoolean("sound", true),
         )
-        check(acknowledgementError == null) {
-          acknowledgementError ?: "Notification acknowledgement failed"
-        }
+        acknowledgements.put(
+          JSONObject()
+            .put("eventId", notification.getString("eventId"))
+            .put("shown", reason == null)
+            .put("reason", reason),
+        )
       }
-      if (response.optBoolean("retry", false)) {
-        Log.w(TAG, "Headless mail sync incomplete: ${response.optString("error", "provider error")}")
-        if (runAttemptCount < 5) Result.retry() else Result.success()
-      } else {
-        Result.success()
+    }
+    if (acknowledgements.length() > 0) {
+      val acknowledgementError = acknowledge(
+        applicationContext,
+        database.absolutePath,
+        acknowledgements.toString(),
+      )
+      check(acknowledgementError == null) {
+        acknowledgementError ?: "Notification acknowledgement failed"
       }
-    }.getOrElse { error ->
-      Log.e(TAG, "Headless mail sync failed", error)
+    }
+    if (response.optBoolean("retry", false)) {
+      Log.w(TAG, "Headless mail sync incomplete: ${response.optString("error", "provider error")}")
       if (runAttemptCount < 5) Result.retry() else Result.success()
+    } else {
+      Result.success()
     }
-  }
-
-  private fun mainProcessIsServingMail(): Boolean {
-    val activityManager = applicationContext.getSystemService(ActivityManager::class.java)
-    return activityManager.runningAppProcesses.orEmpty().any { process ->
-      process.pid != Process.myPid() &&
-        process.processName == applicationContext.packageName &&
-        process.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_SERVICE
-    }
-  }
-
-  companion object {
-    private const val TAG = "SatchelBackgroundMail"
+  }.getOrElse { error ->
+    Log.e(TAG, "Headless mail sync failed", error)
+    if (runAttemptCount < 5) Result.retry() else Result.success()
   }
 }
+
+private const val TAG = "SatchelBackgroundMail"

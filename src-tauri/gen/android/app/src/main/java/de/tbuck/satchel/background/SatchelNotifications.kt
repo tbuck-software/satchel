@@ -122,6 +122,10 @@ object SatchelNotifications {
   ): String? {
     ensureChannel(context)
     if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return REASON_PERMISSION_DENIED
+    val manager = NotificationManagerCompat.from(context)
+    if (!manager.areNotificationsEnabled() ||
+      manager.getNotificationChannel(CHANNEL_ID)?.importance == NotificationManager.IMPORTANCE_NONE
+    ) return REASON_PERMISSION_DENIED
     val safeAccountId = accountId.trim().take(512).ifEmpty { "default" }
     val safeAccountLabel = accountLabel.trim().take(128).ifEmpty { "Satchel" }
     val safeSender = sender.trim().take(128).ifEmpty { "Satchel" }
@@ -173,7 +177,6 @@ object SatchelNotifications {
         .addAction(R.drawable.ic_notification, NativeUiStrings.get(context, NativeUiStrings.READ), backgroundActionIntent(context, eventId, threadId, ACTION_READ))
         .addAction(R.drawable.ic_notification, NativeUiStrings.get(context, NativeUiStrings.REPLY), replyActionIntent(context, eventId, threadId))
     }
-    val manager = NotificationManagerCompat.from(context)
     // The message id is the notification tag. Unlike a 32-bit hash, this
     // cannot make two different messages overwrite one another.
     manager.notify(eventId, 0, notification.build())

@@ -1166,12 +1166,17 @@ pub(crate) fn exit_now(app: &tauri::AppHandle) {
 
 #[cfg(debug_assertions)]
 fn load_app_support_env(app: &tauri::App) {
-    if let Ok(path) = app
-        .path()
-        .resolve("satchel/.env", tauri::path::BaseDirectory::AppData)
-    {
-        let _ = dotenvy::from_path(path);
+    if let Ok(profile) = utils::profile_dir(app.handle()) {
+        load_debug_profile_env(&profile);
     }
+}
+
+#[cfg(debug_assertions)]
+fn load_debug_profile_env(profile: &std::path::Path) {
+    static LOAD: std::sync::Once = std::sync::Once::new();
+    LOAD.call_once(|| {
+        let _ = dotenvy::from_path(profile.join(".env"));
+    });
 }
 
 fn handle_open_with_args(app: &tauri::AppHandle, argv: &[String]) {
