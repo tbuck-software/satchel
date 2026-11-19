@@ -220,6 +220,9 @@ async fn rewrap_secrets(
                 .await
                 .map_err(|e| e.to_string())?;
         if exists == 0 {
+            if table == "accounts" {
+                return Err("backend.errors.restoreDatabaseInvalid".into());
+            }
             continue;
         }
         let rows = sqlx::query_as::<_, (i64, String, String)>(&format!(
@@ -302,8 +305,30 @@ pub async fn stage_restore(
         // does not know about.
         let backup_schema = schema_version(&pool).await?;
         let app_schema = crate::db::latest_migration_version();
+        if backup_schema == 0 {
+            return Err("backend.errors.restoreDatabaseInvalid".into());
+        }
         if backup_schema > app_schema {
             return Err(schema_too_new(backup_schema, app_schema));
+        }
+        // Use the startup migrator, including its checksum and dirty-version
+        // checks. This private copy needs neither a migration lock nor WAL.
+        if let Err(error) = crate::db::run_migrations(&pool).await {
+            tracing::warn!(%error, "restore database could not be migrated");
+            return Err("backend.errors.restoreDatabaseInvalid".into());
+        }
+        for statement in [
+            "SELECT id, provider, is_active FROM accounts LIMIT 0",
+            "SELECT key, value, updated_at FROM app_settings LIMIT 0",
+            "SELECT id, account_id, uidvalidity FROM folders LIMIT 0",
+            "SELECT id, account_id, workflow_state FROM threads LIMIT 0",
+            "SELECT id, account_id, folder_id, thread_id, original_source FROM messages LIMIT 0",
+            "SELECT rowid FROM messages_fts LIMIT 0",
+        ] {
+            if let Err(error) = sqlx::query(statement).execute(&pool).await {
+                tracing::warn!(%error, "restore database schema is incomplete");
+                return Err("backend.errors.restoreDatabaseInvalid".into());
+            }
         }
         // `PRAGMA integrity_check` says nothing about an external-content FTS5
         // table. A search index that no longer matches its messages would be
@@ -477,50 +502,35 @@ mod tests {
             )
             .await
             .unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
         // Include every protected column, using deliberately different secrets.
-        for (table, id_column, columns) in [
-            ("accounts", "id", vec!["config"]),
-            ("pgp_keys", "id", vec!["armored_key", "passphrase"]),
-            (
-                "smime_certificates",
-                "id",
-                vec!["pem_private_key_encrypted"],
-            ),
-            (
-                "oauth_flow_sessions",
-                "state",
-                vec!["encrypted_code_verifier"],
-            ),
-            (
-                "translation_engine_keys",
-                "engine",
-                vec!["encrypted_api_key"],
-            ),
+        for statement in [
+            "INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+             VALUES ('row-1', 'Backup', 'backup@example.test', 'imap', '', '', '', '')",
+            "INSERT INTO pgp_keys (id, label, key_type, fingerprint, armored_key, created_at, updated_at)
+             VALUES ('row-1', 'Backup', 'private', 'test', '', '', '')",
+            "INSERT INTO smime_certificates (id, label, cert_type, fingerprint, pem_certificate, created_at, updated_at)
+             VALUES ('row-1', 'Backup', 'private', 'test', '', '', '')",
+            "INSERT INTO oauth_flow_sessions (state, account_id, provider, encrypted_code_verifier, created_at, expires_at)
+             VALUES ('row-1', 'row-1', 'gmail', '', '', '')",
+            "INSERT INTO translation_engine_keys (engine, encrypted_api_key, updated_at)
+             VALUES ('row-1', '', '')",
         ] {
-            sqlx::query(&format!(
-                "CREATE TABLE {table} ({id_column} TEXT, {})",
-                columns
-                    .iter()
-                    .map(|c| format!("{c} TEXT"))
-                    .collect::<Vec<_>>()
-                    .join(",")
-            ))
-            .execute(&pool)
-            .await
-            .unwrap();
-            sqlx::query(&format!(
-                "INSERT INTO {table} ({id_column}) VALUES ('row-1')"
-            ))
-            .execute(&pool)
-            .await
-            .unwrap();
-            for column in columns {
-                sqlx::query(&format!("UPDATE {table} SET {column} = ?"))
-                    .bind(crypto::encrypt_aead_with_key(column, key, test_context(column)).unwrap())
-                    .execute(&pool)
-                    .await
-                    .unwrap();
-            }
+            sqlx::query(statement).execute(&pool).await.unwrap();
+        }
+        for (table, column) in [
+            ("accounts", "config"),
+            ("pgp_keys", "armored_key"),
+            ("pgp_keys", "passphrase"),
+            ("smime_certificates", "pem_private_key_encrypted"),
+            ("oauth_flow_sessions", "encrypted_code_verifier"),
+            ("translation_engine_keys", "encrypted_api_key"),
+        ] {
+            sqlx::query(&format!("UPDATE {table} SET {column} = ?"))
+                .bind(crypto::encrypt_aead_with_key(column, key, test_context(column)).unwrap())
+                .execute(&pool)
+                .await
+                .unwrap();
         }
         pool.close().await;
     }
@@ -600,14 +610,6 @@ mod tests {
             .await
             .unwrap();
         sqlx::query(
-            "CREATE TABLE _sqlx_migrations (
-                version BIGINT PRIMARY KEY, description TEXT, installed_on TEXT,
-                success BOOLEAN, checksum BLOB, execution_time BIGINT)",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-        sqlx::query(
             "INSERT INTO _sqlx_migrations
              (version, description, installed_on, success, checksum, execution_time)
              VALUES (?, 'test', '2026-01-01', 1, X'00', 0)",
@@ -642,18 +644,76 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn restore_rejects_a_changed_migration_checksum_before_publication() {
+        let directory = tempfile::tempdir().unwrap();
+        let profile = directory.path().join("profile");
+        let source = directory.path().join("backup.db");
+        backup_file(&source, &[7; 32]).await;
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(SqliteConnectOptions::new().filename(&source))
+            .await
+            .unwrap();
+        sqlx::query("UPDATE _sqlx_migrations SET checksum = X'00' WHERE version = 1")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+
+        let error = stage_restore(&profile, &source, &[[7; 32]], Some(&[9; 32]))
+            .await
+            .expect_err("a changed applied migration must not be staged");
+        assert_eq!(error, "backend.errors.restoreDatabaseInvalid");
+        assert!(!restore_pending(&profile));
+    }
+
+    #[tokio::test]
     async fn restore_accepts_a_backup_without_a_manifest() {
         let directory = tempfile::tempdir().unwrap();
         let profile = directory.path().join("profile");
         let source = directory.path().join("backup.db");
         backup_file(&source, &[7; 32]).await;
-        set_schema_version(&source, crate::db::latest_migration_version()).await;
         assert!(read_backup_manifest(directory.path()).is_none());
 
         stage_restore(&profile, &source, &[[7; 32]], Some(&[9; 32]))
             .await
             .expect("a backup predating manifests still restores");
         assert!(restore_pending(&profile));
+    }
+
+    #[tokio::test]
+    async fn restore_migrates_the_staging_copy_without_changing_the_backup() {
+        use sqlx::migrate::Migrate;
+        use sqlx::Connection;
+
+        let directory = tempfile::tempdir().unwrap();
+        let profile = directory.path().join("profile");
+        let source = directory.path().join("old-backup.db");
+        let mut old = sqlx::SqliteConnection::connect_with(
+            &SqliteConnectOptions::new()
+                .filename(&source)
+                .create_if_missing(true),
+        )
+        .await
+        .unwrap();
+        let migrations = sqlx::migrate!("./src/db/migrations");
+        old.ensure_migrations_table().await.unwrap();
+        old.apply(migrations.iter().next().unwrap()).await.unwrap();
+        old.close().await.unwrap();
+        let source_hash = file_hash(&source).unwrap();
+
+        stage_restore(&profile, &source, &[], None).await.unwrap();
+        assert!(apply_pending_restore(&profile, None).unwrap());
+        let restored = SqlitePoolOptions::new()
+            .connect_with(SqliteConnectOptions::new().filename(profile.join(DATABASE)))
+            .await
+            .unwrap();
+        assert_eq!(
+            schema_version(&restored).await.unwrap(),
+            crate::db::latest_migration_version(),
+        );
+        assert_eq!(file_hash(&source).unwrap(), source_hash);
+        restored.close().await;
     }
 
     #[test]

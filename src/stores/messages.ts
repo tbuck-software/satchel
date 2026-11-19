@@ -1241,7 +1241,8 @@ export const useMessagesStore = defineStore('messages', () => {
     if (!version) throw new Error(t('errors.messageLoadFailed'));
     const requested = new Set(messageIds);
     const missing = (messagesByThread.value[threadId] ?? [])
-      .filter(message => requested.has(message.id) && message.bodyLoaded === false)
+      // A failed request settles the reader's spinner but a new export can retry it.
+      .filter(message => requested.has(message.id) && !message.contentError && (message.bodyLoaded === false || message.bodyLoadError))
       .map(message => message.id);
     for (let start = 0; start < missing.length; start += 3) {
       await hydrateMessageBodies(threadId, missing.slice(start, start + 3), version);

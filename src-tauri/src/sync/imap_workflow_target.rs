@@ -411,11 +411,21 @@ pub(crate) async fn reconcile_exact_imap_workflow_target(
         Some(current_target_uidvalidity),
     )
     .await?;
-    for affected_thread_id in reset_threads
-        .iter()
-        .chain(snapshot_changes.relocated_threads.iter())
-    {
+    for affected_thread_id in &reset_threads {
         refresh_provider_thread_projection(pool, affected_thread_id).await?;
+    }
+    let updated = snapshot_changes
+        .flag_threads
+        .into_iter()
+        .chain(snapshot_changes.relocated_threads)
+        .chain(reset_threads)
+        .collect::<HashSet<_>>();
+    if !updated.is_empty() {
+        state
+            .events
+            .publish(crate::events::bus::AppEvent::ThreadsUpdated(
+                updated.into_iter().collect(),
+            ));
     }
 
     let target_result = finalize_persisted_imap_workflow_target_projection(
@@ -1334,8 +1344,8 @@ mod tests {
              (id, account_id, subject, snippet, last_message_date, created_at, updated_at)
              VALUES ('thread', 'account', 'stale', 'stale', '2026-12-01', '2026-01-01', '2026-01-01')",
             "INSERT INTO messages
-             (id, account_id, folder_id, thread_id, from_address, to_addresses, subject, snippet, date, created_at, updated_at)
-             VALUES ('inbox-message', 'account', 'inbox', 'thread', 'old@example.com', '[]', 'stale', 'stale', '2026-12-01', '2026-01-01', '2026-01-01')",
+             (id, account_id, folder_id, thread_id, remote_id, from_address, to_addresses, subject, snippet, date, created_at, updated_at)
+             VALUES ('inbox-message', 'account', 'inbox', 'thread', '1', 'old@example.com', '[]', 'stale', 'stale', '2026-12-01', '2026-01-01', '2026-01-01')",
             "INSERT INTO messages
              (id, account_id, folder_id, thread_id, from_address, to_addresses, subject, snippet, date, created_at, updated_at)
              VALUES ('sent-message', 'account', 'sent', 'thread', 'me@example.com', '[]', 'kept', 'kept body', '2026-01-02', '2026-01-01', '2026-01-01')",
@@ -1343,8 +1353,8 @@ mod tests {
              (id, account_id, subject, snippet, last_message_date, created_at, updated_at)
              VALUES ('orphan', 'account', 'orphan', 'orphan', '2026-01-03', '2026-01-01', '2026-01-01')",
             "INSERT INTO messages
-             (id, account_id, folder_id, thread_id, from_address, to_addresses, subject, snippet, date, created_at, updated_at)
-             VALUES ('orphan-message', 'account', 'inbox', 'orphan', 'old@example.com', '[]', 'orphan', 'orphan', '2026-01-03', '2026-01-01', '2026-01-01')",
+             (id, account_id, folder_id, thread_id, remote_id, from_address, to_addresses, subject, snippet, date, created_at, updated_at)
+             VALUES ('orphan-message', 'account', 'inbox', 'orphan', '2', 'old@example.com', '[]', 'orphan', 'orphan', '2026-01-03', '2026-01-01', '2026-01-01')",
             "INSERT INTO tags (id, name) VALUES ('tag', 'Tag')",
             "INSERT INTO thread_tags (thread_id, tag_id) VALUES ('orphan', 'tag')",
             "INSERT INTO workflow_events

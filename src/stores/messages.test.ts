@@ -181,13 +181,17 @@ describe('messages store', () => {
     expect(downloadAttachmentMock).not.toHaveBeenCalled();
   });
 
-  it('rejects an incomplete export when a collapsed body cannot be loaded', async () => {
+  it('rejects an incomplete export and reloads the failed body on retry', async () => {
     previewMock.mockResolvedValue(['old', 'middle', 'latest'].map(id => backendMessage({ id })) as never);
-    bodiesMock.mockImplementation(async ids => ids.map(id => ({ ...inlineBody(''), id })));
+    bodiesMock.mockImplementation(async ids => ids.map(id => ({
+      ...inlineBody('<p>Complete body</p>'), id, body_text: `Complete ${id}`,
+    })));
     const store = useMessagesStore();
     await store.loadByThread('th-live');
     bodiesMock.mockRejectedValueOnce(new Error('Offline'));
     await expect(store.messagesForExport('th-live', ['old', 'middle', 'latest'])).rejects.toThrow();
+    const result = await store.messagesForExport('th-live', ['old', 'middle', 'latest']);
+    expect(result.map(message => message.bodyText)).toEqual(['Complete old', 'Complete middle', 'Complete latest']);
   });
 
   it('reprocesses cached PGP bodies after keys change, including older expanded mail', async () => {

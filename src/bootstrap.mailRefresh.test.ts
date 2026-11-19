@@ -7,7 +7,7 @@ import { createMemoryHistory, createRouter } from 'vue-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAppBootstrap } from '@/bootstrap';
 import { listen } from '@tauri-apps/api/event';
-import { backendRunImapSync } from '@/services/backend';
+import { backendGetThreads, backendListThreads, backendRunImapSync } from '@/services/backend';
 import { useMailboxesStore } from '@/stores/mailboxes';
 import { useMessagesStore } from '@/stores/messages';
 import { useThreadsStore } from '@/stores/threads';
@@ -49,6 +49,7 @@ vi.mock('@/services/backend', async (importOriginal) => {
       failures: [],
     }),
     backendListThreads: resolving({ threads: [], next_cursor: null, has_more: false }),
+    backendGetThreads: resolving([]),
     backendListCachedThreads: resolving(null),
     backendListSmartInboxSummary: resolving(null),
     backendListContacts: resolving([]),
@@ -186,6 +187,27 @@ describe('mail event coalescing', () => {
     await vi.advanceTimersByTimeAsync(100);
     expect(refreshThreads).toHaveBeenCalledTimes(1);
     expect(refreshThreads.mock.calls[0]![0]).toHaveLength(300);
+    wrapper.unmount();
+  });
+
+  it('refreshes the visible read and star state on a thread event alone', async () => {
+    const { wrapper } = await bootApp();
+    const threads = useThreadsStore();
+    const row = {
+      id: 't1', account_id: 'acc', subject: 'Meeting', snippet: '', participants: [],
+      last_message_date: '2026-11-18T00:00:00Z', message_count: 1, unread_count: 1,
+      is_starred: false, workflow_state: 'inbox', tags: [], mailbox_names: '["INBOX"]',
+    };
+    vi.mocked(backendListThreads).mockResolvedValueOnce({ threads: [row], next_cursor: null, has_more: false } as never);
+    await threads.load();
+    expect(threads.visibleThreads[0]).toMatchObject({ id: 't1', unreadCount: 1, isStarred: false });
+
+    vi.mocked(backendGetThreads).mockResolvedValueOnce([{ ...row, unread_count: 0, is_starred: true }] as never);
+    const onUpdated = vi.mocked(listen).mock.calls.find(([event]) => event === 'thread:updated')![1];
+    vi.useFakeTimers();
+    onUpdated({ event: 'thread:updated', id: 1, payload: { thread_ids: ['t1'] } });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(threads.visibleThreads[0]).toMatchObject({ id: 't1', unreadCount: 0, isStarred: true });
     wrapper.unmount();
   });
 

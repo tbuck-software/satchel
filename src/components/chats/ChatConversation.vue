@@ -46,12 +46,17 @@ const { ask: prompt } = usePrompt();
 const meta = ref<ChatMeta | null>(null);
 const metaFailed = ref(false);
 const sending = ref(false);
-const drafts = new Map<string, string>();
-const draft = ref('');
 const scroller = ref<HTMLElement | null>(null);
 const composer = ref<InstanceType<typeof ChatComposer> | null>(null);
 
 const threadId = computed(() => props.thread.id);
+const draft = computed({
+  get: () => chatsStore.drafts.get(threadId.value) ?? '',
+  set: (text: string) => {
+    if (text) chatsStore.drafts.set(threadId.value, text);
+    else chatsStore.drafts.delete(threadId.value);
+  },
+});
 const messages = computed(() => messagesStore.getByThread(threadId.value));
 const loading = computed(() => messagesStore.isLoading(threadId.value) && messages.value.length === 0);
 
@@ -149,11 +154,7 @@ async function open(id: string) {
   }
 }
 
-watch(threadId, (id, previous) => {
-  if (previous) drafts.set(previous, draft.value);
-  draft.value = drafts.get(id) ?? '';
-  void open(id);
-}, { immediate: true });
+watch(threadId, (id) => { void open(id); }, { immediate: true });
 
 watch(() => messages.value.length, scrollToEnd);
 
@@ -263,6 +264,7 @@ const RETRY_ERRORS = new Set(['backend.errors.pgpSigningKeyUnavailable', 'backen
 
 async function send(text: string) {
   const id = threadId.value;
+  const submittedDraft = draft.value;
   sending.value = true;
   try {
     let choices = await prepareSend();
@@ -279,8 +281,7 @@ async function send(text: string) {
       if (!choices) return;
       result = await chatsStore.send(id, text, choices);
     }
-    drafts.delete(id);
-    if (id === threadId.value) draft.value = '';
+    if (chatsStore.drafts.get(id) === submittedDraft) chatsStore.drafts.delete(id);
     if (result.status === 'queued' || result.status === 'delivery_unknown') {
       toast.info(t('chats.composer.queued'));
     }

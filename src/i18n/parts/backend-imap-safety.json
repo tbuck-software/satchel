@@ -6,6 +6,7 @@
         "imapUidValidityMissing": "The IMAP folder \"{folder}\" has no verified mailbox identity. Sync the folder before trying this action again.",
         "imapMixedUidValidity": "This action contains messages from different versions of the IMAP folder \"{folder}\". Sync the folder and try again.",
         "imapMutationInvalidRef": "This queued IMAP action has an incomplete message identity. Sync the folder and try again.",
+        "imapMoveCopyNeedsReview": "The server may have copied the messages to the destination. Check both folders before trying to move them again.",
         "imapDraftUidWithoutValidity": "This older draft in \"{folder}\" has no verified server identity. Its server copy was left untouched."
       }
     },
@@ -20,6 +21,7 @@
         "imapUidValidityMissing": "Für den IMAP-Ordner \"{folder}\" fehlt eine bestätigte Postfachkennung. Synchronisiere den Ordner, bevor du die Aktion erneut versuchst.",
         "imapMixedUidValidity": "Diese Aktion enthält Nachrichten aus verschiedenen Versionen des IMAP-Ordners \"{folder}\". Synchronisiere den Ordner und versuche es erneut.",
         "imapMutationInvalidRef": "Für diese vorgemerkte IMAP-Aktion ist die Nachrichtenkennung unvollständig. Synchronisiere den Ordner und versuche es erneut.",
+        "imapMoveCopyNeedsReview": "Der Server hat die Nachrichten möglicherweise in den Zielordner kopiert. Prüfe beide Ordner, bevor du sie erneut verschiebst.",
         "imapDraftUidWithoutValidity": "Für diesen älteren Entwurf in \"{folder}\" fehlt eine bestätigte Serverkennung. Seine Serverkopie wurde nicht verändert."
       }
     },

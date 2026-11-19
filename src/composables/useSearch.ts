@@ -73,6 +73,9 @@ function locationLabel(folderType: string, workflowState: string): string {
 }
 
 function warningText(warning: BackendSearchWarning): string {
+  if (warning.operator === 'candidate_limit') {
+    return t('search.warning.candidateLimit', { date: warning.value.slice(0, 10), cutoff: warning.value });
+  }
   if (warning.operator === 'before' || warning.operator === 'after') {
     return t('search.warning.date', { operator: warning.operator, value: warning.value });
   }

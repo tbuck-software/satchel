@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useConfirm } from '@/composables/useConfirm';
+import { useInviteSeriesConfirm } from '@/composables/useInviteSeriesConfirm';
 import type { BackendCalendarInvite } from '@/types/calendar';
 import { useInvitesStore } from '@/stores/invites';
 import { icsDescriptionToText } from '@/utils/inviteText';
 import { parseCalendarBoundary } from '@/utils/calendarDates';
-import { inviteAcceptsResponse } from '@/utils/inviteMethods';
+import { inviteAcceptsResponse, isWholeInviteSeries } from '@/utils/inviteMethods';
 import { useLinkOpener } from '@/composables/useLinkOpener';
 import AppButton from '@/components/ui/AppButton.vue';
 import ExternalLinkDialog from './ExternalLinkDialog.vue';
@@ -17,7 +17,7 @@ const props = defineProps<{
 }>();
 
 const { locale, t } = useI18n();
-const { ask } = useConfirm();
+const confirmSeries = useInviteSeriesConfirm();
 const invitesStore = useInvitesStore();
 const responding = ref<'accepted' | 'declined' | 'tentative' | null>(null);
 const responseError = ref('');
@@ -28,9 +28,8 @@ const status = computed(() => props.invite.rsvp_status);
 const cancelled = computed(() => (props.invite.cancelled ?? 0) === 1);
 // A PUBLISH announces an event and asks for no answer.
 const answerable = computed(() => inviteAcceptsResponse(props.invite));
-const recurring = computed(() => Boolean(props.invite.recurring));
 const occurrence = computed(() => Boolean(props.invite.recurrence_id));
-const wholeSeries = computed(() => recurring.value && !occurrence.value);
+const wholeSeries = computed(() => isWholeInviteSeries(props.invite));
 const unboundedSeries = computed(
   () => wholeSeries.value && Boolean(props.invite.recurrence_unbounded),
 );
@@ -126,14 +125,7 @@ const notesOverflow = computed(
 
 async function respond(response: 'accepted' | 'declined' | 'tentative') {
   if (responding.value !== null) return;
-  if (unboundedSeries.value) {
-    const confirmed = await ask({
-      title: t('mail.invite.unboundedSeriesTitle'),
-      body: t('mail.invite.unboundedSeriesConfirm'),
-      confirmLabel: t('mail.invite.unboundedSeriesAction'),
-    });
-    if (!confirmed) return;
-  }
+  if (unboundedSeries.value && !await confirmSeries()) return;
   responseError.value = '';
   responding.value = response;
   try {

@@ -80,6 +80,27 @@ test.describe('desktop', () => {
     await page.goto('/inbox');
     await expect(page.getByText('Message from Lena Brandt', { exact: true }).first()).toBeVisible();
   });
+
+  test('keeps unsent replies separate when switching chats', async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem('satchel.mock.labs', JSON.stringify({ chats: true })));
+    await page.goto('/');
+    await sidebarChats(page).click();
+    const lena = page.locator('[data-chat-row]', { hasText: 'Lena Brandt' });
+    const family = page.locator('[data-chat-row]', { hasText: 'Familie' });
+    const input = page.locator('[data-chat-input]');
+    await lena.click();
+    await input.fill('Entwurf für Lena');
+    await family.click();
+    await expect(family).toHaveAttribute('aria-current', 'true');
+    await expect(input).toHaveValue('');
+    await input.fill('Entwurf für die Familie');
+    await lena.click();
+    await expect(lena).toHaveAttribute('aria-current', 'true');
+    await expect(input).toHaveValue('Entwurf für Lena');
+    await family.click();
+    await expect(family).toHaveAttribute('aria-current', 'true');
+    await expect(input).toHaveValue('Entwurf für die Familie');
+  });
 });
 
 test.describe('locked own key', () => {

@@ -10,7 +10,7 @@ use std::{collections::BTreeMap, fs, path::Path};
 
 pub const PUBLICATION_FAILED: &str = "backend.errors.backupPublicationFailed";
 
-const COMPLETED: &str = "satchel-backup-complete.json";
+pub const COMPLETED: &str = "satchel-backup-complete.json";
 const PENDING_COMPLETION: &str = ".satchel-backup-complete.pending";
 const STAGING_PREFIX: &str = ".satchel-backup-";
 
@@ -204,32 +204,45 @@ fn small_regular_file(path: &Path) -> Option<Vec<u8>> {
 /// Metadata only: no database reads, integrity scans or keychain access. Old,
 /// incomplete and altered backups are preserved without consuming a slot.
 pub fn retention_eligible(path: &Path) -> bool {
-    let check = || -> Option<()> {
-        if !is_backup_directory(path) || !is_publication_name(path.file_name()?.to_str()?) {
-            return None;
+    is_backup_directory(path)
+        && path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| {
+                is_publication_name(name) && verify_completion(path, Some(name)).is_some()
+            })
+}
+
+/// A document is unpacked under a private temporary name. Its stored
+/// publication name must be valid, but need not equal that temporary name.
+pub fn portable_backup_is_complete(path: &Path) -> bool {
+    verify_completion(path, None).is_some()
+}
+
+fn verify_completion(path: &Path, expected_name: Option<&str>) -> Option<()> {
+    let completion: Completion =
+        serde_json::from_slice(&small_regular_file(&path.join(COMPLETED))?).ok()?;
+    if completion.version != 1
+        || !is_publication_name(&completion.name)
+        || expected_name.is_some_and(|name| name != completion.name)
+    {
+        return None;
+    }
+    let manifest_bytes = small_regular_file(&path.join(BACKUP_MANIFEST))?;
+    let manifest: BackupManifest = serde_json::from_slice(&manifest_bytes).ok()?;
+    if chrono::DateTime::parse_from_rfc3339(&manifest.created_at).is_err()
+        || {
+            use sha2::Digest;
+            crate::utils::hex::lower_hex(&sha2::Sha256::digest(&manifest_bytes))
+                != completion.manifest_hash
         }
-        let completion: Completion =
-            serde_json::from_slice(&small_regular_file(&path.join(COMPLETED))?).ok()?;
-        if completion.version != 1 || path.file_name()?.to_str()? != completion.name {
-            return None;
-        }
-        let manifest_bytes = small_regular_file(&path.join(BACKUP_MANIFEST))?;
-        let manifest: BackupManifest = serde_json::from_slice(&manifest_bytes).ok()?;
-        if chrono::DateTime::parse_from_rfc3339(&manifest.created_at).is_err()
-            || {
-                use sha2::Digest;
-                crate::utils::hex::lower_hex(&sha2::Sha256::digest(&manifest_bytes))
-                    != completion.manifest_hash
-            }
-            || !completion.files.contains_key("satchel.db")
-            || !completion.files.contains_key(MASTER_KEY_FILES[0])
-            || inventory(path)? != completion.files
-        {
-            return None;
-        }
-        Some(())
-    };
-    check().is_some()
+        || !completion.files.contains_key("satchel.db")
+        || !completion.files.contains_key(MASTER_KEY_FILES[0])
+        || inventory(path)? != completion.files
+    {
+        return None;
+    }
+    Some(())
 }
 
 #[cfg(test)]

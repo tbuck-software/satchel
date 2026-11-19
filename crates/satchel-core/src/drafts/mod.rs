@@ -33,7 +33,36 @@ static REMOTE_DRAFT_SYNC_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 #[derive(Debug, Serialize, Deserialize)]
 struct QueuedDraftSync {
     input: DraftInput,
-    revision: String,
+    revision: UploadRevision,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+enum UploadRevision {
+    Local(i64),
+    LegacyTimestamp(String),
+}
+
+/// Whether the editor still owns this draft's contents. Use the write
+/// transaction that would replace or delete the row so saving and ingest
+/// cannot race past the check.
+pub async fn has_pending_upload(
+    tx: &mut Transaction<'_, Sqlite>,
+    account_id: &str,
+    draft_id: &str,
+) -> Result<bool, String> {
+    sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM sync_queue
+         WHERE account_id = ? AND action_type = ?
+           AND status IN ('pending', 'scheduled', 'sending', 'failed')
+           AND json_valid(payload) AND json_extract(payload, '$.input.id') = ?)",
+    )
+    .bind(account_id)
+    .bind(ACTION_SYNC_DRAFT)
+    .bind(draft_id)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(|error| error.to_string())
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -148,6 +177,7 @@ struct DraftRow {
     updated_at: String,
     draft_send_options_json: Option<String>,
     draft_revision: i64,
+    provider_draft_revision: i64,
 }
 
 #[derive(Debug, FromRow)]
@@ -199,7 +229,7 @@ impl From<DraftRow> for DraftDto {
             signature_override_text: row.signature_override_text,
             signature_override_html: row.signature_override_html,
             updated_at: row.updated_at,
-            revision: row.draft_revision,
+            revision: row.draft_revision + row.provider_draft_revision,
             send_options: row
                 .draft_send_options_json
                 .as_deref()
@@ -432,7 +462,7 @@ async fn save_draft_in_transaction(
         .map_err(DraftError::unexpected)?;
 
     let row = sqlx::query_as::<_, DraftRow>(
-        "SELECT id, account_id, thread_id, to_addresses, cc_addresses, bcc_addresses, subject, body_text, body_html, from_address, from_name, reply_to, scheduled_for, draft_attachments_json, signature_id, signature_variant, signature_override_text, signature_override_html, updated_at, draft_send_options_json, draft_revision
+        "SELECT id, account_id, thread_id, to_addresses, cc_addresses, bcc_addresses, subject, body_text, body_html, from_address, from_name, reply_to, scheduled_for, draft_attachments_json, signature_id, signature_variant, signature_override_text, signature_override_html, updated_at, draft_send_options_json, draft_revision, provider_draft_revision
          FROM messages WHERE id = ?",
     )
     .bind(&id)
@@ -445,7 +475,7 @@ async fn save_draft_in_transaction(
     remote_input.thread_id = thread_id;
     let payload = serde_json::to_value(QueuedDraftSync {
         input: remote_input,
-        revision: now.clone(),
+        revision: UploadRevision::Local(row.draft_revision),
     })
     .map_err(DraftError::unexpected)?;
     // Only the newest not-yet-started upload matters. This also removes an
@@ -525,7 +555,7 @@ fn draft_send_options(input: &OutgoingMessageInput) -> serde_json::Value {
     })
 }
 
-/// Refuses a save from an editor that did not see the latest revision. Runs
+/// Refuses a write from an editor that did not see the latest revision. Runs
 /// before `ensure_draft_not_queued`, so a stale editor cannot cancel a failed send.
 async fn ensure_draft_revision(
     tx: &mut Transaction<'_, Sqlite>,
@@ -533,7 +563,8 @@ async fn ensure_draft_revision(
     expected: i64,
 ) -> DraftResult<()> {
     let current: Option<i64> = sqlx::query_scalar(
-        "SELECT m.draft_revision FROM messages m JOIN folders f ON f.id = m.folder_id
+        "SELECT m.draft_revision + m.provider_draft_revision
+         FROM messages m JOIN folders f ON f.id = m.folder_id
          WHERE m.id = ? AND m.is_draft = 1 AND LOWER(TRIM(f.folder_type)) <> 'trash'",
     )
     .bind(id)
@@ -650,6 +681,15 @@ pub async fn enqueue_send_with_draft(
     queue: &SyncQueue,
     action: &QueuedAction,
 ) -> DraftResult<()> {
+    enqueue_send_with_draft_revision(pool, queue, action, None).await
+}
+
+pub async fn enqueue_send_with_draft_revision(
+    pool: &SqlitePool,
+    queue: &SyncQueue,
+    action: &QueuedAction,
+    expected_revision: Option<i64>,
+) -> DraftResult<()> {
     let payload: SendActionPayload =
         serde_json::from_value(action.payload.clone()).map_err(DraftError::unexpected)?;
     let mut tx = pool
@@ -657,6 +697,9 @@ pub async fn enqueue_send_with_draft(
         .await
         .map_err(DraftError::unexpected)?;
     if let Some(id) = payload.input.draft_id.as_deref() {
+        if let Some(expected) = expected_revision {
+            ensure_draft_revision(&mut tx, id, expected).await?;
+        }
         ensure_draft_not_queued(&mut tx, id).await?;
         let input = draft_input_for_send(
             &action.account_id,
@@ -756,7 +799,7 @@ async fn sync_draft_remotely(
     queue: &SyncQueue,
     input: DraftInput,
     id: String,
-    revision: String,
+    revision: UploadRevision,
 ) -> Result<(), String> {
     // Provider calls are serialized, but this lock never delays a local write.
     // A newer local revision supersedes a queued upload before it starts.
@@ -764,20 +807,29 @@ async fn sync_draft_remotely(
         .get_or_init(|| Mutex::new(()))
         .lock()
         .await;
-    let current: Option<(String, String, Option<String>, Option<String>)> = sqlx::query_as(
-        "SELECT account_id, updated_at, remote_draft_id, remote_id
+    let current: Option<(String, String, i64, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT account_id, updated_at, draft_revision, remote_draft_id, remote_id
          FROM messages WHERE id = ? AND is_draft = 1",
     )
     .bind(&id)
     .fetch_optional(pool)
     .await
     .map_err(|error| error.to_string())?;
-    let Some((account_id, updated_at, existing_remote_draft_id, existing_remote_message_id)) =
-        current
+    let Some((
+        account_id,
+        updated_at,
+        draft_revision,
+        existing_remote_draft_id,
+        existing_remote_message_id,
+    )) = current
     else {
         return Ok(());
     };
-    if account_id != input.account_id || updated_at != revision {
+    let current_revision = match revision {
+        UploadRevision::Local(expected) => draft_revision == expected,
+        UploadRevision::LegacyTimestamp(expected) => updated_at == expected,
+    };
+    if account_id != input.account_id || !current_revision {
         return Ok(());
     }
     // A delete that was already sending during A -> B -> A can fail after the
@@ -888,7 +940,7 @@ pub async fn list(pool: &SqlitePool) -> Result<Vec<DraftDto>, String> {
 
 async fn draft_list_snapshot(pool: &SqlitePool) -> Result<Vec<ReferencedDraftRow>, String> {
     sqlx::query_as::<_, ReferencedDraftRow>(
-        "SELECT m.id, m.account_id, m.thread_id, m.to_addresses, m.cc_addresses, m.bcc_addresses, m.subject, m.body_text, m.body_html, m.from_address, m.from_name, m.reply_to, m.scheduled_for, m.draft_attachments_json, m.signature_id, m.signature_variant, m.signature_override_text, m.signature_override_html, m.updated_at, m.draft_send_options_json, m.draft_revision,
+        "SELECT m.id, m.account_id, m.thread_id, m.to_addresses, m.cc_addresses, m.bcc_addresses, m.subject, m.body_text, m.body_html, m.from_address, m.from_name, m.reply_to, m.scheduled_for, m.draft_attachments_json, m.signature_id, m.signature_variant, m.signature_override_text, m.signature_override_html, m.updated_at, m.draft_send_options_json, m.draft_revision, m.provider_draft_revision,
                 m.id AS message_id, m.folder_id, m.remote_id, m.remote_uidvalidity,
                 m.created_at, a.provider, COALESCE(f.remote_id, f.full_path) AS source_folder,
                 f.uidvalidity AS folder_uidvalidity
@@ -987,7 +1039,7 @@ async fn load_draft_inner(
     id: &str,
 ) -> Result<Option<DraftDto>, String> {
     let row = sqlx::query_as::<_, ReferencedDraftRow>(
-        "SELECT m.id, m.account_id, m.thread_id, m.to_addresses, m.cc_addresses, m.bcc_addresses, m.subject, m.body_text, m.body_html, m.from_address, m.from_name, m.reply_to, m.scheduled_for, m.draft_attachments_json, m.signature_id, m.signature_variant, m.signature_override_text, m.signature_override_html, m.updated_at, m.draft_send_options_json, m.draft_revision,
+        "SELECT m.id, m.account_id, m.thread_id, m.to_addresses, m.cc_addresses, m.bcc_addresses, m.subject, m.body_text, m.body_html, m.from_address, m.from_name, m.reply_to, m.scheduled_for, m.draft_attachments_json, m.signature_id, m.signature_variant, m.signature_override_text, m.signature_override_html, m.updated_at, m.draft_send_options_json, m.draft_revision, m.provider_draft_revision,
                 m.id AS message_id, m.folder_id, m.remote_id, m.remote_uidvalidity,
                 m.created_at, a.provider, COALESCE(f.remote_id, f.full_path) AS source_folder,
                 f.uidvalidity AS folder_uidvalidity
@@ -1114,6 +1166,11 @@ async fn hydrate_imported_draft_attachments(
     }
 
     let mut tx = reference.begin_write(write).await?;
+    // Outlook can edit a draft in place while its attachments are being read.
+    // The bytes just fetched must belong to the revision whose cache we write.
+    ensure_draft_revision(&mut tx, draft_id, draft.revision)
+        .await
+        .map_err(|error| error.to_string())?;
     let serialized = serde_json::to_string(&attachments).map_err(|err| err.to_string())?;
     sqlx::query(
         "UPDATE messages SET draft_attachments_json = ?, updated_at = ?
@@ -3276,6 +3333,47 @@ mod queued_send_tests {
             .await
             .unwrap();
         assert_eq!(queue.list_mail_outbox(&pool).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn stale_send_cannot_replace_a_newer_or_removed_draft() {
+        let (pool, queue) = fixture().await;
+        let action = action(Some("shared-draft"));
+        let mut input = draft_input_for_send("a", &action_input(&action), None).unwrap();
+        let (first, _) = save(&pool, &queue, &input).await.unwrap();
+        input.expected_revision = Some(first.revision);
+        input.body = "Newer editor content".into();
+        let (second, _) = save(&pool, &queue, &input).await.unwrap();
+
+        assert!(matches!(
+            enqueue_send_with_draft_revision(&pool, &queue, &action, Some(first.revision)).await,
+            Err(DraftError::ChangedElsewhere)
+        ));
+        assert!(queue.list_mail_outbox(&pool).await.unwrap().is_empty());
+        let stored = load_draft_inner(&pool, &pool, "shared-draft")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.body, input.body);
+        assert_eq!(stored.revision, second.revision);
+
+        enqueue_send_with_draft_revision(&pool, &queue, &action, Some(second.revision))
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM messages WHERE id = 'shared-draft'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        queue.mark_completed(&pool, &action.id).await.unwrap();
+        assert!(matches!(
+            enqueue_send_with_draft_revision(&pool, &queue, &action, Some(second.revision)).await,
+            Err(DraftError::GoneElsewhere)
+        ));
+        assert!(queue.list_mail_outbox(&pool).await.unwrap().is_empty());
+        assert!(load_draft_inner(&pool, &pool, "shared-draft")
+            .await
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]

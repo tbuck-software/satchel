@@ -364,6 +364,22 @@ function seedMeasurementThreads() {
     { name: 'Tom', email: 'tom@satchel.dev' },
     { name: 'Jonas Weber', email: 'jonas@partner.example' },
   ];
+  if (searchNumber('mockHtmlOnlyPrint', 1)) {
+    const list = messages['th-1'];
+    const first = list?.[0];
+    const thread = threads.find(thread => thread.id === 'th-1');
+    if (first && thread) {
+      list.unshift({
+        ...first,
+        id: 'm-print-html',
+        timestamp: new Date(Date.parse(first.timestamp) - 60_000).toISOString(),
+        bodyText: '',
+        bodyHtml: '<p>Full text of the first reply, stored only as HTML.</p>',
+        attachments: [],
+      });
+      thread.messageCount += 1;
+    }
+  }
   if (longCount > 0) {
     const id = 'th-long';
     const list: Message[] = Array.from({ length: longCount }, (_, index) => {
@@ -478,7 +494,7 @@ if (typeof window !== 'undefined') {
     .__satchelMockCommands = commandCounts;
 }
 
-const drafts: BackendDraft[] = mockDrafts.map((draft) => ({ ...draft }));
+const drafts: BackendDraft[] = mockDrafts.map((draft) => ({ ...draft, revision: draft.revision ?? 0 }));
 const queuedDrafts = new Map<string, BackendDraft>();
 for (const item of outbox.filter((entry) => entry.status === 'scheduled')) {
   const draft = drafts.find((entry) => entry.account_id === item.account_id && entry.subject === item.subject);
@@ -934,7 +950,7 @@ const tasks: BackendTask[] = [
 const mockSeriesStep = new Map<string, number>([['task-seed-6', 7]]);
 /** The due date a series moved on from, for `undo_task_advance`. */
 const mockAdvancedFrom = new Map<string, string | null>();
-const deletedRemoteTasks = new Map<string, BackendTask>();
+const deletedTasks = new Map<string, BackendTask>();
 
 function taskListDto(list: Omit<BackendTaskList, 'open_count'>): BackendTaskList {
   return { ...list, open_count: tasks.filter((task) => task.list_id === list.id && !task.completed_at).length };
@@ -1701,7 +1717,7 @@ const handlers: Record<string, Handler> = {
     return {
       platform, mobile, tray: !mobile, autostart: !mobile, single_instance: !mobile, plugins: !mobile,
       native_crypto: !mobile, background_sync: mobile, contacts: true, file_associations: !mobile,
-      deep_links: mobile, push: mobile,
+      deep_links: mobile, push: mobile, directory_backup: false, document_backup: false,
     };
   },
   get_app_update_preferences: () => ({ channel: appUpdateChannel, supported: true }),
@@ -2446,6 +2462,10 @@ const handlers: Record<string, Handler> = {
     const copies = [...((scope.cc as string[] | undefined) ?? []), ...((scope.bcc as string[] | undefined) ?? [])];
     if (recipients.length === 0 && copies.length === 0) throw new Error('missing recipient');
 
+    if ((typeof scope.draft_id === 'string') !== (typeof payload.expectedRevision === 'number')) {
+      throw new Error('backend.errors.draftChangedElsewhere');
+    }
+    assertDraftRevision(scope.draft_id, payload.expectedRevision);
     assertDraftNotQueued(scope.draft_id);
     const scheduledFor = (scope.scheduled_for as string | null) ?? null;
     const messageId = nextId('msg');
@@ -2951,7 +2971,7 @@ const handlers: Record<string, Handler> = {
   delete_task: (payload) => {
     const task = mockTaskById(payload.id);
     tasks.splice(tasks.indexOf(task), 1);
-    if (mockTaskList(task.list_id).provider !== 'local') deletedRemoteTasks.set(task.id, task);
+    deletedTasks.set(task.id, task);
   },
   undo_task_advance: (payload) => {
     const task = mockTaskById(payload.id);
@@ -2961,9 +2981,9 @@ const handlers: Record<string, Handler> = {
     return touchTask(task, { due_at: due });
   },
   restore_task: (payload) => {
-    const task = deletedRemoteTasks.get(String(payload.id));
+    const task = deletedTasks.get(String(payload.id));
     if (!task) throw new Error('backend.errors.taskNotFound');
-    deletedRemoteTasks.delete(task.id);
+    deletedTasks.delete(task.id);
     tasks.push(task);
     return touchTask(task, {});
   },
@@ -2991,9 +3011,9 @@ const handlers: Record<string, Handler> = {
     }
   },
   sync_tasks: () => {
-    const pushed = tasks.filter((task) => task.pending).length + deletedRemoteTasks.size;
+    const pushed = tasks.filter((task) => task.pending).length + deletedTasks.size;
     for (const task of tasks) task.pending = false;
-    deletedRemoteTasks.clear();
+    deletedTasks.clear();
     const lists = taskLists.filter((list) => list.provider !== 'local');
     for (const list of lists) list.last_synced_at = new Date().toISOString();
     return {

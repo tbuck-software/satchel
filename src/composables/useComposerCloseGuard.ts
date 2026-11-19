@@ -15,6 +15,7 @@ interface ComposerCloseGuardOptions {
   supportsBackend: boolean;
   initialized: Ref<boolean>;
   currentState: () => ComposerDraftState;
+  hasSavedDraft: () => boolean;
   persistDraft: (options: { silent?: boolean }) => Promise<string | null>;
   finishDraftPersistence: () => void;
   closeDraftWithoutSaving: () => Promise<void>;
@@ -56,8 +57,9 @@ export function useComposerCloseGuard(options: ComposerCloseGuardOptions) {
   }
 
   function shouldConfirmClose() {
-    if (!options.initialized.value || !hasMeaningfulContent()) return false;
-    return currentSnapshot() !== baseline.value;
+    return options.initialized.value
+      && currentSnapshot() !== baseline.value
+      && (options.hasSavedDraft() || hasMeaningfulContent());
   }
 
   async function closeWithoutSaving() {

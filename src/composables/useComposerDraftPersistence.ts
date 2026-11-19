@@ -135,6 +135,14 @@ export function useComposerDraftPersistence(options: ComposerDraftPersistenceOpt
     );
   }
 
+  /** Sending and saving both resolve a revision conflict through the same recovery UI. */
+  function recordDraftConflict(error: unknown): boolean {
+    const key = backendErrorKey(error);
+    if (!key || !CONFLICT_KEYS.has(key)) return false;
+    saveError.value = { kind: 'conflict', message: translateBackendError(error) ?? key };
+    return true;
+  }
+
   async function saveOnce(): Promise<DraftSaveOutcome> {
     changes.settle();
     const input = options.buildInput();
@@ -174,13 +182,13 @@ export function useComposerDraftPersistence(options: ComposerDraftPersistenceOpt
       };
     } catch (error) {
       console.warn('draft save failed', error);
-      const key = backendErrorKey(error);
-      const message = translateBackendError(error)
-        ?? (error instanceof Error ? error.message : String(error));
-      saveError.value = {
-        kind: key && CONFLICT_KEYS.has(key) ? 'conflict' : 'failed',
-        message,
-      };
+      if (!recordDraftConflict(error)) {
+        saveError.value = {
+          kind: 'failed',
+          message: translateBackendError(error)
+            ?? (error instanceof Error ? error.message : String(error)),
+        };
+      }
       return { id: null, remoteError: null, error: saveError.value };
     }
   }
@@ -309,6 +317,7 @@ export function useComposerDraftPersistence(options: ComposerDraftPersistenceOpt
     dirty,
     hasUnsavedChanges,
     saveError,
+    recordDraftConflict,
     saveAsNewDraft,
     persist,
     startAutosave,

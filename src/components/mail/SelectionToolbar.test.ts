@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const harness = vi.hoisted(() => ({
   ids: ['one', 'two', 'three'],
+  canTrash: vi.fn(() => true),
   archive: vi.fn(), toggleDone: vi.fn(), allDone: vi.fn(() => false), trash: vi.fn(), setRead: vi.fn(), openPicker: vi.fn(), openReminder: vi.fn(),
 }));
 vi.mock('@/stores/threads', () => ({ useThreadsStore: () => ({
@@ -16,9 +17,17 @@ vi.mock('@/composables/useThreadActions', () => ({ useThreadActions: () => harne
 vi.mock('@/composables/useShortcutHints', () => ({ useShortcutHints: () => ({ hint: () => null }) }));
 import SelectionToolbar from './SelectionToolbar.vue';
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  harness.canTrash.mockReturnValue(true);
+});
 
 describe('selection toolbar', () => {
+  it('hides Delete when the selection cannot be deleted', () => {
+    harness.canTrash.mockReturnValue(false);
+    const wrapper = mount(SelectionToolbar, { props: { busy: false } });
+    expect(wrapper.find('button[aria-label=Delete]').exists()).toBe(false);
+  });
   it('offers common actions before the overflow and files through the existing picker', async () => {
     const wrapper = mount(SelectionToolbar, { props: { busy: false } });
     const buttons = wrapper.findAll('.selection-actions button');

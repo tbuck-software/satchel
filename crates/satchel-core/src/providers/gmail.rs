@@ -59,13 +59,57 @@ mod cost {
     pub const DRAFTS_LIST: f64 = 5.0;
     pub const DRAFTS_GET: f64 = 5.0;
     pub const MESSAGES_GET: f64 = 20.0;
-    pub const MESSAGES_TRASH: f64 = 20.0;
     pub const ATTACHMENTS_GET: f64 = 20.0;
     pub const DRAFTS_CREATE: f64 = 10.0;
     pub const DRAFTS_DELETE: f64 = 10.0;
     pub const DRAFTS_UPDATE: f64 = 15.0;
     pub const BATCH_MODIFY: f64 = 50.0;
     pub const MESSAGES_SEND: f64 = 100.0;
+}
+
+const BATCH_MODIFY_MAX_IDS: usize = 1000;
+pub(crate) const GMAIL_PERMANENT_DELETE_UNAVAILABLE: &str =
+    "backend.errors.gmailPermanentDeleteUnavailable";
+
+async fn batch_modify_labels(
+    client: &reqwest::Client,
+    token: &str,
+    ids: &[String],
+    add_labels: &[String],
+    remove_labels: &[String],
+    operation: &str,
+) -> crate::sync::errors::SyncResult<()> {
+    // Both operations set membership to a desired value, so retries can
+    // replay chunks that succeeded before a later request failed.
+    for chunk in ids.chunks(BATCH_MODIFY_MAX_IDS) {
+        let payload = serde_json::json!({
+            "ids": chunk,
+            "addLabelIds": add_labels,
+            "removeLabelIds": remove_labels,
+        });
+        let response = send_with_rate_limit_retry(
+            || {
+                client
+                    .post(format!("{}/messages/batchModify", gmail_api_base()))
+                    .bearer_auth(token)
+                    .json(&payload)
+            },
+            operation,
+            cost::BATCH_MODIFY,
+        )
+        .await?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(crate::sync::errors::http_failure(
+                "gmail",
+                operation,
+                status.as_u16(),
+                &body,
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// What a request is for, which decides how much of the budget it may take.
@@ -1347,27 +1391,15 @@ impl GmailProvider {
             }
         }
         if let Some(snoozed) = snoozed {
-            for chunk in ids.chunks(1000) {
-                let payload = serde_json::json!({
-                    "ids": chunk,
-                    "addLabelIds": [],
-                    "removeLabelIds": [snoozed, label.id],
-                });
-                let response = send_with_rate_limit_retry(
-                    || {
-                        client
-                            .post(format!("{}/messages/batchModify", gmail_api_base()))
-                            .bearer_auth(token)
-                            .json(&payload)
-                    },
-                    "wake label cleanup",
-                    cost::BATCH_MODIFY,
-                )
-                .await?;
-                if !response.status().is_success() {
-                    return Err(format!("wake label cleanup returned {}", response.status()).into());
-                }
-            }
+            batch_modify_labels(
+                client,
+                token,
+                &ids,
+                &[],
+                &[snoozed.to_string(), label.id.clone()],
+                "wake label cleanup",
+            )
+            .await?;
         }
         let response = send_with_rate_limit_retry(
             || {
@@ -2110,37 +2142,19 @@ impl MailProvider for GmailProvider {
             return Ok(());
         }
 
-        let payload = serde_json::json!({
-            "ids": _messages.iter().map(|message| message.remote_id.clone()).collect::<Vec<_>>(),
-            "addLabelIds": add_labels,
-            "removeLabelIds": remove_labels,
-        });
-
-        let client = crate::utils::http::client();
-        let response = send_with_rate_limit_retry(
-            || {
-                client
-                    .post(format!("{}/messages/batchModify", gmail_api_base()))
-                    .bearer_auth(&token)
-                    .json(&payload)
-            },
+        let ids = _messages
+            .iter()
+            .map(|message| message.remote_id.clone())
+            .collect::<Vec<_>>();
+        batch_modify_labels(
+            &crate::utils::http::client(),
+            &token,
+            &ids,
+            &add_labels,
+            &remove_labels,
             "set_flags",
-            cost::BATCH_MODIFY,
         )
-        .await?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(crate::sync::errors::http_failure(
-                "gmail",
-                "set_flags",
-                status.as_u16(),
-                &body,
-            ));
-        }
-
-        Ok(())
+        .await
     }
 
     async fn move_messages(
@@ -2160,37 +2174,19 @@ impl MailProvider for GmailProvider {
 
         let (add_labels, remove_labels) = gmail_move_label_changes(_messages, target);
 
-        let payload = serde_json::json!({
-            "ids": _messages.iter().map(|message| message.remote_id.clone()).collect::<Vec<_>>(),
-            "addLabelIds": add_labels,
-            "removeLabelIds": remove_labels,
-        });
-
-        let client = crate::utils::http::client();
-        let response = send_with_rate_limit_retry(
-            || {
-                client
-                    .post(format!("{}/messages/batchModify", gmail_api_base()))
-                    .bearer_auth(&token)
-                    .json(&payload)
-            },
+        let ids = _messages
+            .iter()
+            .map(|message| message.remote_id.clone())
+            .collect::<Vec<_>>();
+        batch_modify_labels(
+            &crate::utils::http::client(),
+            &token,
+            &ids,
+            &add_labels,
+            &remove_labels,
             "move_messages",
-            cost::BATCH_MODIFY,
         )
-        .await?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(crate::sync::errors::http_failure(
-                "gmail",
-                "move_messages",
-                status.as_u16(),
-                &body,
-            ));
-        }
-
-        Ok(())
+        .await
     }
 
     async fn set_workflow_marker(
@@ -2239,34 +2235,15 @@ impl MailProvider for GmailProvider {
         if add_labels.is_empty() && remove_labels.is_empty() {
             return Ok(applied);
         }
-        for chunk in ids.chunks(1000) {
-            let payload = serde_json::json!({
-                "ids": chunk,
-                "addLabelIds": add_labels,
-                "removeLabelIds": remove_labels,
-            });
-            let response = send_with_rate_limit_retry(
-                || {
-                    client
-                        .post(format!("{}/messages/batchModify", gmail_api_base()))
-                        .bearer_auth(&token)
-                        .json(&payload)
-                },
-                "set_workflow_marker",
-                cost::BATCH_MODIFY,
-            )
-            .await?;
-            if !response.status().is_success() {
-                let status = response.status();
-                let body = response.text().await.unwrap_or_default();
-                return Err(crate::sync::errors::http_failure(
-                    "gmail",
-                    "set_workflow_marker",
-                    status.as_u16(),
-                    &body,
-                ));
-            }
-        }
+        batch_modify_labels(
+            &client,
+            &token,
+            &ids,
+            &add_labels,
+            &remove_labels,
+            "set_workflow_marker",
+        )
+        .await?;
         Self::delete_expired_wake_labels(&client, &token, &labels, chrono::Utc::now()).await;
         Ok(applied)
     }
@@ -2560,48 +2537,16 @@ impl MailProvider for GmailProvider {
 
     async fn delete_messages(
         &self,
-        _messages: &[MessageRef],
+        messages: &[MessageRef],
     ) -> crate::sync::errors::SyncResult<()> {
-        let token = self.access_token().await?;
-        if _messages.is_empty() {
+        if messages.is_empty() {
             return Ok(());
         }
-
-        // messages.trash instead of batchDelete: batchDelete needs the full
-        // https://mail.google.com/ scope (we only request gmail.modify → 403 on
-        // every delete) and would bypass Trash irreversibly. Trash matches what
-        // a mail client's "delete" means and is recoverable for 30 days.
-        let client = crate::utils::http::client();
-        for message in _messages {
-            let response = send_with_rate_limit_retry(
-                || {
-                    client
-                        .post(format!(
-                            "{}/messages/{}/trash",
-                            gmail_api_base(),
-                            message.remote_id
-                        ))
-                        .bearer_auth(&token)
-                },
-                "delete_messages",
-                cost::MESSAGES_TRASH,
-            )
-            .await?;
-
-            let status = response.status();
-            // Already gone (deleted elsewhere) is success for our purposes.
-            if !status.is_success() && status.as_u16() != 404 {
-                let body = response.text().await.unwrap_or_default();
-                return Err(crate::sync::errors::http_failure(
-                    "gmail",
-                    "delete_messages",
-                    status.as_u16(),
-                    &body,
-                ));
-            }
-        }
-
-        Ok(())
+        // Gmail's permanent-delete operation requires the full mail scope.
+        // The app uses gmail.modify, which allows moves into Trash.
+        Err(crate::sync::errors::SyncError::Permanent(
+            GMAIL_PERMANENT_DELETE_UNAVAILABLE.into(),
+        ))
     }
 }
 

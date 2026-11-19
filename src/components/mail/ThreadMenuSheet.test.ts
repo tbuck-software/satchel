@@ -23,9 +23,9 @@ function messageMenu(overrides: Partial<MessageMenu> = {}): MessageMenu {
   };
 }
 
-function render(message: MessageMenu | null, props: { isStarred?: boolean; isAside?: boolean } = {}) {
+function render(message: MessageMenu | null, props: { isStarred?: boolean; isAside?: boolean; canDelete?: boolean } = {}) {
   return mount(ThreadMenuSheet, {
-    props: { open: true, isStarred: false, isAside: false, message, ...props },
+    props: { open: true, isStarred: false, isAside: false, canDelete: true, message, ...props },
     global: transition,
   });
 }
@@ -69,6 +69,10 @@ describe('ThreadMenuSheet', () => {
       .toEqual(['Reply all', 'Forward', 'Add to topic', 'Show source', 'Collapse message']);
     // Forward once: the thread group no longer has its own.
     expect(wrapper.findAll('.menu-item').filter((item) => item.text() === 'Forward')).toHaveLength(1);
+  });
+
+  it('omits Delete when the provider cannot delete the conversation', () => {
+    expect(rows(render(null, { canDelete: false }), 'This conversation')).toEqual(['Pin', 'Set aside']);
   });
 
   it('leaves out reply all for a two-person conversation and the reply commands where replying is off', () => {

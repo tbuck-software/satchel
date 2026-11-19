@@ -32,37 +32,6 @@ pub use satchel_core::sync::queue::ACTION_SEND_MESSAGE;
 
 pub use satchel_core::drafts::send_queue::{build_send_action, SendActionPayload};
 
-/// Build a send action whose queue id and Message-ID are stable for one
-/// logical operation. Re-enqueuing the same operation can therefore neither
-/// create a second pending row nor resend after the first row was completed:
-/// `execute_send_action` recognizes the persisted Message-ID on recovery.
-pub fn build_idempotent_send_action(
-    account_id: String,
-    input: OutgoingMessageInput,
-    idempotency_key: &str,
-) -> Result<QueuedAction, String> {
-    use sha2::{Digest, Sha256};
-
-    let digest = Sha256::digest(idempotency_key.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    let payload = SendActionPayload {
-        account_id: account_id.clone(),
-        input,
-        draft_reference: None,
-        scheduled_for: None,
-        message_id_header: Some(format!("<calendar-rsvp-{digest}@satchel.local>")),
-    };
-    let payload_value =
-        serde_json::to_value(&payload).map_err(|err| format!("encode send payload: {err}"))?;
-    let mut action = QueuedAction::new(account_id, ACTION_SEND_MESSAGE, payload_value);
-    action.id = format!("calendar-rsvp-{digest}");
-    // Unlike send_message, this caller does not execute the action inline.
-    action.status = "pending".into();
-    Ok(action)
-}
-
 #[derive(Debug, sqlx::FromRow)]
 struct AccountRow {
     pub id: String,

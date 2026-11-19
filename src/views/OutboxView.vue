@@ -199,7 +199,8 @@ async function retry(item: BackendOutboxItem) {
 }
 
 function canRetry(item: BackendOutboxItem): boolean {
-  return outboxActionCanBeRetried(item.action_type, item.status, item.submission_started_at);
+  return item.last_error !== 'backend.errors.imapMoveCopyNeedsReview'
+    && outboxActionCanBeRetried(item.action_type, item.status, item.submission_started_at);
 }
 
 /**

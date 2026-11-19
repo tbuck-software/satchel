@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n';
 import type { Message } from '@/types/mail';
+import { emailBodyForExport } from '@/utils/emailExport';
 
 const props = defineProps<{
   active: boolean;
@@ -31,7 +32,7 @@ const { t } = useI18n();
           <div>{{ props.formatDate(message.timestamp) }}</div>
           <div>{{ t('common.to') }}: {{ props.recipientLine(message) }}</div>
         </header>
-        <pre>{{ message.bodyText ?? '' }}</pre>
+        <pre>{{ emailBodyForExport(message.bodyHtml, message.bodyText ?? '', 'text') }}</pre>
       </article>
     </section>
   </Teleport>

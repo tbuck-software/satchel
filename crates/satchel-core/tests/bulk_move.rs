@@ -328,20 +328,32 @@ async fn insert_flags(
 async fn scenario_pool() -> SqlitePool {
     let pool = pool().await;
     seed(&pool, 28).await;
-    for (id, account, remote, kind, uidvalidity) in [
-        ("imap-b-spam", "imap-b", "Junk", "spam", Some(11)),
-        ("gmail-trash", "gmail", "TRASH", "trash", None),
+    let imap_trash =
+        satchel_core::db::folders::resolve_provider_folder_id(&pool, "imap-a", "Trash")
+            .await
+            .unwrap();
+    for (id, account, name, remote, kind, uidvalidity) in [
+        ("imap-b-spam", "imap-b", "Junk", "Junk", "spam", Some(11)),
+        ("gmail-trash", "gmail", "TRASH", "TRASH", "trash", None),
+        (
+            imap_trash.as_str(),
+            "imap-a",
+            "Papierkorb",
+            "Trash",
+            "trash",
+            Some(12),
+        ),
     ] {
         sqlx::query(
             "INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, uidvalidity, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, '2026-01-01', '2026-01-01')",
         )
-        .bind(id).bind(account).bind(remote).bind(remote).bind(kind).bind(remote).bind(uidvalidity)
+        .bind(id).bind(account).bind(name).bind(remote).bind(kind).bind(remote).bind(uidvalidity)
         .execute(&pool).await.unwrap();
     }
     for (thread, account) in [
         ("spam-1", "imap-b"),
-        ("trashed-1", "gmail"),
+        ("trashed-1", "imap-a"),
         ("empty-1", "imap-a"),
     ] {
         sqlx::query(
@@ -354,8 +366,20 @@ async fn scenario_pool() -> SqlitePool {
         ("spam-1-m0", "imap-b", "imap-b-spam", "spam-1", "501"),
         ("spam-1-m1", "imap-b", "imap-b-spam", "spam-1", "502"),
         ("spam-1-m2", "imap-b", "imap-b-inbox", "spam-1", "503"),
-        ("trashed-1-m0", "gmail", "gmail-trash", "trashed-1", "gt0"),
-        ("trashed-1-m1", "gmail", "gmail-trash", "trashed-1", "gt1"),
+        (
+            "trashed-1-m0",
+            "imap-a",
+            imap_trash.as_str(),
+            "trashed-1",
+            "601",
+        ),
+        (
+            "trashed-1-m1",
+            "imap-a",
+            imap_trash.as_str(),
+            "trashed-1",
+            "602",
+        ),
     ] {
         sqlx::query(
             "INSERT INTO messages (id, account_id, folder_id, thread_id, from_address, to_addresses, subject, date, remote_id, created_at, updated_at)

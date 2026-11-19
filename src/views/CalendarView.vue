@@ -9,7 +9,8 @@ import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
 import { backendErrorKey } from '@/utils/backendErrors';
-import { inviteAcceptsResponse } from '@/utils/inviteMethods';
+import { useInviteSeriesConfirm } from '@/composables/useInviteSeriesConfirm';
+import { inviteAcceptsResponse, isWholeInviteSeries } from '@/utils/inviteMethods';
 import {
   addDays,
   addMonths,
@@ -54,6 +55,7 @@ const accounts = useAccountsStore();
 const calendarUi = useCalendarUiStore();
 const toast = useToast();
 const { ask } = useConfirm();
+const confirmSeries = useInviteSeriesConfirm();
 
 const viewMode = computed(() => calendarUi.viewMode);
 const ui = useUiStore();
@@ -218,7 +220,18 @@ function quickMore(title: string) {
   quick.value = null;
 }
 
+async function confirmInviteResponse(inviteId: string) {
+  const invite = invites.items.find((entry) => entry.id === inviteId);
+  if (!invite || !isWholeInviteSeries(invite) || !invite.recurrence_unbounded) return true;
+  const shown = selected.value;
+  selected.value = null;
+  if (await confirmSeries()) return true;
+  selected.value = shown;
+  return false;
+}
+
 async function respond(item: CalendarItem, response: 'accepted' | 'declined' | 'tentative') {
+  if (!await confirmInviteResponse(item.id)) return;
   const labels = {
     accepted: t('calendar.toast.accepted'),
     declined: t('calendar.toast.declined'),
@@ -234,6 +247,7 @@ async function respond(item: CalendarItem, response: 'accepted' | 'declined' | '
 }
 
 async function respondUndated(inviteId: string, response: 'accepted' | 'declined' | 'tentative') {
+  if (!await confirmInviteResponse(inviteId)) return;
   try {
     await invites.respond(inviteId, response);
     toast.success(t('calendar.toast.rsvpSent'));
@@ -433,13 +447,13 @@ function onKeydown(event: KeyboardEvent) {
         <span class="calendar__undated-title">{{ invite.summary || $t('calendar.event.untitled') }}</span>
         <span class="calendar__undated-actions">
           <AppButton variant="primary" size="sm" @click="respondUndated(invite.id, 'accepted')">
-            {{ $t('calendar.rsvp.accept') }}
+            {{ $t(isWholeInviteSeries(invite) ? 'mail.invite.acceptSeries' : 'calendar.rsvp.accept') }}
           </AppButton>
           <AppButton variant="soft" size="sm" @click="respondUndated(invite.id, 'tentative')">
-            {{ $t('calendar.rsvp.maybe') }}
+            {{ $t(isWholeInviteSeries(invite) ? 'mail.invite.maybeSeries' : 'calendar.rsvp.maybe') }}
           </AppButton>
           <AppButton variant="danger" size="sm" @click="respondUndated(invite.id, 'declined')">
-            {{ $t('calendar.rsvp.decline') }}
+            {{ $t(isWholeInviteSeries(invite) ? 'mail.invite.declineSeries' : 'calendar.rsvp.decline') }}
           </AppButton>
         </span>
       </div>

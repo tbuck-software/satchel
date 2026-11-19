@@ -362,6 +362,7 @@ pub async fn send_chat_message(
         chat.account_id.clone(),
         outgoing,
         crate::commands::messages::SendMode::Immediate,
+        None,
     )
     .await
 }

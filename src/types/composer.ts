@@ -37,6 +37,8 @@ export interface BackendSendMessagePayload {
   fromName?: string | null;
   replyTo?: string | null;
   draftId?: string | null;
+  /** The saved revision from which this message was composed. */
+  expectedRevision?: number | null;
   scheduledFor?: string | null;
   followUpAt?: string | null;
   smimeSignWithCertId?: string | null;

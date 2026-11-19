@@ -96,6 +96,7 @@ vi.mock('@/composables/useComposerDraftPersistence', () => ({
       draftId: ref<string | null>('draft-1'),
       serverRevision: ref<number | null>(null),
       saveError: ref(null),
+      recordDraftConflict: vi.fn(() => false),
       saveAsNewDraft: vi.fn().mockResolvedValue(null),
       persist: vi.fn().mockResolvedValue(null),
       startAutosave: harness.startAutosave,

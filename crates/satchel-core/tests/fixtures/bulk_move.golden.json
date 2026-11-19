@@ -1604,18 +1604,20 @@
         "type": "remote_mutation"
       },
       {
-        "account": "gmail",
+        "account": "imap-a",
         "id": "q28",
         "payload": {
           "kind": "delete",
           "refs": [
             {
-              "remote_id": "gt0",
-              "source_folder": "TRASH"
+              "remote_id": "601",
+              "source_folder": "Trash",
+              "source_uidvalidity": 12
             },
             {
-              "remote_id": "gt1",
-              "source_folder": "TRASH"
+              "remote_id": "602",
+              "source_folder": "Trash",
+              "source_uidvalidity": 12
             }
           ]
         },
@@ -4606,18 +4608,20 @@
         "type": "remote_mutation"
       },
       {
-        "account": "gmail",
+        "account": "imap-a",
         "id": "q28",
         "payload": {
           "kind": "delete",
           "refs": [
             {
-              "remote_id": "gt0",
-              "source_folder": "TRASH"
+              "remote_id": "601",
+              "source_folder": "Trash",
+              "source_uidvalidity": 12
             },
             {
-              "remote_id": "gt1",
-              "source_folder": "TRASH"
+              "remote_id": "602",
+              "source_folder": "Trash",
+              "source_uidvalidity": 12
             }
           ]
         },

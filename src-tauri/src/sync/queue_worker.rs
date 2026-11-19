@@ -1,4 +1,6 @@
 //! Tauri adapters for the Core queue scheduler and its notifications.
+#[cfg(target_os = "android")]
+use crate::sync::leases::CrossProcessSyncLease;
 use crate::sync::{
     leases::sync_run_lock,
     outbox::{execute_send_action, ACTION_SEND_MESSAGE},
@@ -111,18 +113,39 @@ struct TauriExecutor {
     app: AppHandle,
 }
 
+struct MailboxMutationPermit {
+    _local: tokio::sync::OwnedMutexGuard<()>,
+    #[cfg(target_os = "android")]
+    _cross_process: Option<CrossProcessSyncLease>,
+}
+
 #[async_trait]
 impl ActionExecutor for TauriExecutor {
-    type Permit = Option<tokio::sync::OwnedMutexGuard<()>>;
+    type Permit = Option<MailboxMutationPermit>;
 
     async fn try_acquire(&self, action: &QueuedAction) -> Result<Option<Self::Permit>, String> {
         if !queued_action_needs_sync_permit(&self.pool, action).await? {
             return Ok(Some(None));
         }
-        Ok(sync_run_lock(&action.account_id)
-            .try_lock_owned()
-            .ok()
-            .map(Some))
+        let Ok(local) = sync_run_lock(&action.account_id).try_lock_owned() else {
+            return Ok(None);
+        };
+        #[cfg(target_os = "android")]
+        let cross_process = if action.action_type == ACTION_SYNC_DRAFT {
+            let Some(lease) =
+                CrossProcessSyncLease::acquire(&self.pool, &action.account_id).await?
+            else {
+                return Ok(None);
+            };
+            Some(lease)
+        } else {
+            None
+        };
+        Ok(Some(Some(MailboxMutationPermit {
+            _local: local,
+            #[cfg(target_os = "android")]
+            _cross_process: cross_process,
+        })))
     }
 
     async fn execute(&self, action: &QueuedAction) -> SyncResult<()> {
@@ -212,6 +235,12 @@ async fn queued_action_needs_sync_permit(
     pool: &SqlitePool,
     action: &crate::sync::queue::QueuedAction,
 ) -> Result<bool, String> {
+    // Serialize the upload against the mailbox's fetch-and-ingest pass. An
+    // envelope fetched before the upload must arrive while the queue still
+    // owns the local revision.
+    if action.action_type == ACTION_SYNC_DRAFT {
+        return Ok(true);
+    }
     if action.action_type != ACTION_REMOTE_MUTATION
         || !matches!(
             serde_json::from_value::<RemoteMutationPayload>(action.payload.clone()),

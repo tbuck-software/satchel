@@ -275,6 +275,7 @@
       },
       "title": "Search",
       "warning": {
+        "candidateLimit": "This broad search ranks matches dated {date} or later. Add before:{cutoff} to search older mail.",
         "date": "“{operator}:{value}” is ignored – give the date as YYYY-MM-DD or relative (7d, 2w, yesterday).",
         "unknown": "“{operator}:{value}” is ignored – unknown value."
       },
@@ -605,6 +606,7 @@
       },
       "title": "Suche",
       "warning": {
+        "candidateLimit": "Diese Suche berücksichtigt Treffer ab dem {date}. Mit before:{cutoff} findest du ältere Nachrichten.",
         "date": "„{operator}:{value}\" wird ignoriert – Datum bitte als JJJJ-MM-TT oder relativ (7d, 2w, gestern).",
         "unknown": "„{operator}:{value}\" wird ignoriert – unbekannter Wert."
       },

@@ -434,6 +434,28 @@ describe('CalendarView', () => {
     expect(harness.toast.success).toHaveBeenCalledWith('Acceptance sent.');
   });
 
+  it.each([false, true])('requires consent for a whole unbounded series (undated %s)', async (undated) => {
+    harness.invites!.items = [makeInvite({
+      recurring: 1, recurrence_unbounded: 1, ...(undated ? { starts_at: null, ends_at: null } : {}),
+    })];
+    const confirms = answerConfirms(false);
+    try {
+      const wrapper = render();
+      if (undated) {
+        await wrapper.get('.calendar__undated-actions button').trigger('click');
+      } else {
+        await wrapper.get('[data-test="select-item"]').trigger('click');
+        await wrapper.get('[data-test="respond"]').trigger('click');
+      }
+      await flushPromises();
+      expect(confirms.asked).toHaveBeenCalledOnce();
+      expect(harness.invites!.respond).not.toHaveBeenCalled();
+      if (!undated) expect(wrapper.find('[data-test="event-details"]').exists()).toBe(true);
+    } finally {
+      confirms.stop();
+    }
+  });
+
   describe('deleting an event', () => {
     let confirms: DialogStub<ConfirmRequest, boolean>;
 

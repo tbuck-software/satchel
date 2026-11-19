@@ -1,7 +1,7 @@
 import type { BackendCalendarEvent, BackendCalendarInvite } from '@/services/backend';
 import { currentLocale, d, t } from '@/i18n/runtime';
 import { parseCalendarBoundary } from './calendarDates';
-import { inviteAcceptsResponse } from './inviteMethods';
+import { inviteAcceptsResponse, isWholeInviteSeries } from './inviteMethods';
 export { parseCalendarBoundary, toDateInput } from './calendarDates';
 
 /**
@@ -46,6 +46,7 @@ export interface CalendarItem {
   color: string | null;
   /** Invites only: false when Accept/Maybe/Decline do not apply (PUBLISH, cancelled). */
   respondable?: boolean;
+  wholeSeries?: boolean;
   /** The provider does not let this account change the event. */
   readOnly?: boolean;
   /** One occurrence of a recurring series: changes apply to it alone. */
@@ -136,6 +137,7 @@ export function itemFromInvite(invite: BackendCalendarInvite): CalendarItem | nu
     status,
     source: null,
     respondable: inviteAcceptsResponse(invite),
+    wholeSeries: isWholeInviteSeries(invite),
   };
 }
 

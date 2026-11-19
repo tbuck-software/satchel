@@ -18,6 +18,7 @@ import {
   backendListBackups,
   backendPruneBackups,
   backendRestoreBackup,
+  backendRuntimeCapabilities,
   backendSupportsNativeCommands,
   type BackendBackupEntry,
   type BackendCredentialsStatus,
@@ -52,6 +53,7 @@ let unlistenImport: (() => void) | null = null;
 onMounted(async () => {
   void accounts.load();
   void loadCredentialsStatus();
+  void loadBackupCapabilities();
   if (!backendSupportsNativeCommands()) return;
   unlistenImport = await listenToBackend<BackendImportProgress>('import:progress', (payload) => {
     importProgress.value = payload.running ? payload : null;
@@ -130,6 +132,21 @@ const backupDir = ref('');
 const backups = ref<BackendBackupEntry[]>([]);
 const credentials = ref<BackendCredentialsStatus | null>(null);
 const backupStatus = ref('');
+const directoryBackup = ref(false);
+const documentBackup = ref(false);
+const backupUnavailable = ref(false);
+const BACKUP_DOCUMENT_EXTENSION = 'tar';
+
+async function loadBackupCapabilities() {
+  try {
+    const capabilities = await backendRuntimeCapabilities();
+    directoryBackup.value = capabilities.directory_backup;
+    documentBackup.value = capabilities.document_backup;
+  } catch {
+    backupUnavailable.value = true;
+  }
+  backupUnavailable.value ||= !directoryBackup.value && !documentBackup.value;
+}
 const BACKUPS_TO_KEEP = 5;
 
 /**
@@ -170,28 +187,21 @@ async function refreshBackups() {
   backups.value = await backendListBackups(backupDir.value);
 }
 
-/** A folder the backend will let the backup be written into. */
-async function chooseBackupTarget(): Promise<string | null> {
-  const selected = await backendChooseDirectory(backupDir.value);
-  if (!selected) return null;
-  backupDir.value = selected;
-  return selected;
-}
-
-async function createBackupNow() {
+async function createBackupNow(document = false) {
   if (!canCreateBackup.value) return;
-  if (!backendSupportsNativeCommands()) {
-    backupStatus.value = t('settings.backup.databaseDesktopOnly');
-    return;
-  }
   busy.value = true;
   backupStatus.value = '';
   try {
-    const dir = await chooseBackupTarget();
-    if (!dir) return;
-    const entry = await backendCreateBackup(dir, {
+    const target = document ? await backendChooseSavePath({
+      suggestedName: `satchel-backup-${new Date().toISOString().slice(0, 10)}.${BACKUP_DOCUMENT_EXTENSION}`,
+      filterName: t('settings.backup.backupDocument'),
+      extensions: [BACKUP_DOCUMENT_EXTENSION],
+    }) : await pickBackupDir();
+    if (!target) return;
+    const entry = await backendCreateBackup(target, {
       passphrase: backupPassphrase.value,
       acknowledgeUnprotectedKey: acknowledgeUnprotectedKey.value,
+      ...(document ? { document: true } : {}),
     });
     const keyNote = entry.master_key_files === 0
       ? t('settings.backup.missingMasterKeyWarning')
@@ -205,7 +215,7 @@ async function createBackupNow() {
     });
     // The opt-out is per backup: the next one asks again.
     acknowledgeUnprotectedKey.value = false;
-    await refreshBackups();
+    if (!document) await refreshBackups();
   } catch (err) {
     backupStatus.value = err instanceof Error ? err.message : String(err);
   } finally {
@@ -214,10 +224,6 @@ async function createBackupNow() {
 }
 
 async function showBackups() {
-  if (!backendSupportsNativeCommands()) {
-    backupStatus.value = t('settings.backup.databaseDesktopOnly');
-    return;
-  }
   busy.value = true;
   backupStatus.value = '';
   try {
@@ -232,10 +238,26 @@ async function showBackups() {
   }
 }
 
-async function restoreBackup(entry: BackendBackupEntry) {
+async function restoreBackupFile() {
+  busy.value = true;
+  backupStatus.value = '';
+  try {
+    const path = await backendChooseOpenFile({
+      filterName: t('settings.backup.backupDocument'),
+      extensions: [BACKUP_DOCUMENT_EXTENSION],
+    });
+    if (path) await restoreBackup(path, t('settings.backup.backupDocument'), true);
+  } catch (err) {
+    backupStatus.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function restoreBackup(path: string, name: string, document = false) {
   const ok = await ask({
     title: t('settings.backup.restoreConfirmTitle'),
-    body: t('settings.backup.restoreConfirm', { name: entry.name }),
+    body: t('settings.backup.restoreConfirm', { name }),
     confirmLabel: t('settings.backup.restoreConfirmAction'),
     tone: 'danger',
   });
@@ -243,7 +265,9 @@ async function restoreBackup(entry: BackendBackupEntry) {
   busy.value = true;
   backupStatus.value = '';
   try {
-    const staged = await backendRestoreBackup(entry.path, restorePassphrase.value);
+    const staged = document
+      ? await backendRestoreBackup(path, restorePassphrase.value, true)
+      : await backendRestoreBackup(path, restorePassphrase.value);
     backupStatus.value = t('settings.backup.restoreStaged', {
       messages: staged.message_count,
       accounts: staged.account_count,
@@ -532,7 +556,8 @@ async function importPlatformNow() {
           {{ $t('settings.backup.discardRestore') }}
         </AppButton>
       </p>
-      <div class="setting-group">
+      <p v-if="backupUnavailable" class="hint">{{ $t('settings.backup.databaseUnavailable') }}</p>
+      <div v-else class="setting-group">
         <label class="setting-row setting-row--stacked">
           <span class="setting-info">
             <span class="setting-label">{{ $t('settings.backup.keyPassphrase') }}</span>
@@ -572,10 +597,13 @@ async function importPlatformNow() {
             <span v-if="!canCreateBackup" class="setting-hint">{{ $t('settings.backup.needsPassphrase') }}</span>
           </div>
           <div class="actions">
-            <AppButton variant="primary" size="sm" :disabled="busy || !canCreateBackup" @click="createBackupNow">
+            <AppButton v-if="directoryBackup" variant="primary" size="sm" :disabled="busy || !canCreateBackup" @click="createBackupNow()">
               {{ $t('settings.backup.createDatabaseBackup') }}
             </AppButton>
-            <AppButton variant="secondary" size="sm" :disabled="busy" @click="showBackups">
+            <AppButton v-if="documentBackup" :variant="directoryBackup ? 'secondary' : 'primary'" size="sm" :disabled="busy || !canCreateBackup" @click="createBackupNow(true)">
+              {{ $t(directoryBackup ? 'settings.backup.saveBackupFile' : 'settings.backup.createDatabaseBackup') }}
+            </AppButton>
+            <AppButton v-if="directoryBackup" variant="secondary" size="sm" :disabled="busy" @click="showBackups">
               {{ $t('settings.backup.showBackups') }}
             </AppButton>
             <AppButton v-if="backups.length > BACKUPS_TO_KEEP" variant="danger" size="sm" :disabled="busy" @click="pruneOldBackups">
@@ -586,11 +614,16 @@ async function importPlatformNow() {
       </div>
     </section>
 
-    <label v-if="anyBackupWrapped" class="field">
+    <label v-if="anyBackupWrapped || documentBackup" class="field">
       <span>{{ $t('settings.backup.restorePassphrase') }}</span>
       <input v-model="restorePassphrase" type="password" autocomplete="off" />
     </label>
-    <p v-if="anyBackupWrapped" class="hint">{{ $t('settings.backup.restorePassphraseHint') }}</p>
+    <p v-if="anyBackupWrapped || documentBackup" class="hint">{{ $t('settings.backup.restorePassphraseHint') }}</p>
+    <div v-if="documentBackup" class="actions">
+      <AppButton variant="secondary" size="sm" :disabled="busy" @click="restoreBackupFile">
+        {{ $t('settings.backup.restoreBackupFile') }}
+      </AppButton>
+    </div>
 
     <ul v-if="backups.length" class="backups">
       <li v-for="entry in backups" :key="entry.path">
@@ -609,7 +642,7 @@ async function importPlatformNow() {
             </span>
           </small>
         </div>
-        <AppButton size="sm" :disabled="busy" @click="restoreBackup(entry)">
+        <AppButton size="sm" :disabled="busy" @click="restoreBackup(entry.path, entry.name)">
           {{ $t('settings.backup.restore') }}
         </AppButton>
       </li>

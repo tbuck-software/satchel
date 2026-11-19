@@ -14,6 +14,7 @@ pub mod contacts;
 pub mod crash;
 pub mod diagnostics;
 pub mod diagnostics_report;
+mod document_io;
 pub mod draft_editors;
 pub mod draft_flush;
 pub mod drafts;

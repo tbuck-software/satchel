@@ -112,18 +112,19 @@ export async function backendChooseOpenFile(input: {
 }
 
 /**
- * VACUUM INTO a timestamped folder below `targetDir`, master key included.
+ * Export a consistent database and master key to a chosen folder or document.
  * Without a passphrase the key is written bare, which the backend only accepts
  * against an explicit acknowledgement.
  */
 export async function backendCreateBackup(
   targetDir: string,
-  options: { passphrase?: string; acknowledgeUnprotectedKey?: boolean } = {},
+  options: { passphrase?: string; acknowledgeUnprotectedKey?: boolean; document?: boolean } = {},
 ): Promise<BackendBackupEntry> {
   return invoke<BackendBackupEntry>('create_backup', {
     targetDir,
     passphrase: options.passphrase || null,
     acknowledgeUnprotectedKey: options.acknowledgeUnprotectedKey ?? false,
+    ...(options.document ? { document: true } : {}),
   });
 }
 
@@ -137,10 +138,12 @@ export async function backendListBackups(dir: string): Promise<BackendBackupEntr
 export async function backendRestoreBackup(
   path: string,
   passphrase?: string,
+  document = false,
 ): Promise<BackendRestoreStaged> {
   return invoke<BackendRestoreStaged>('restore_backup', {
     path,
     passphrase: passphrase || null,
+    ...(document ? { document: true } : {}),
   });
 }
 

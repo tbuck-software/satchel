@@ -328,6 +328,10 @@ async fn run_once(
     let _ = checkpoint_pool;
     if should_run("maintenance.last_cleanup_at", CLEANUP_INTERVAL_HOURS, pool).await {
         let removed = prune_then_clean_trash(pool).await?;
+        satchel_core::db::tasks::TaskRepository::new(pool)
+            .prune_deleted()
+            .await
+            .map_err(|error| error.to_string())?;
         if removed > 0 {
             info!(
                 target: "satchel::maintenance",

@@ -144,34 +144,11 @@ export const useTasksStore = defineStore('tasks', () => {
     void refreshLists();
   }
 
-  /**
-   * Undo a delete. A local task is gone for good once deleted, so undo
-   * creates it again; a remote one whose deletion has not been pushed yet is
-   * restored in place.
-   */
   async function restore(task: Task) {
-    const list = lists.value.find((item) => item.id === task.list_id);
-    let restored: Task;
-    if (list && list.provider !== 'local') {
-      try {
-        restored = await loader.mutate(() => backendRestoreTask(task.id));
-      } catch {
-        restored = await recreate(task);
-      }
-    } else {
-      restored = await recreate(task);
-    }
+    const restored = await loader.mutate(() => backendRestoreTask(task.id));
     put(restored);
     void refreshLists();
     return restored;
-  }
-
-  function recreate(task: Task) {
-    return loader.mutate(() => backendCreateTask({
-      listId: task.list_id,
-      threadId: task.thread_id,
-      fields: fieldsOf(task),
-    }));
   }
 
   async function createList(name: string) {

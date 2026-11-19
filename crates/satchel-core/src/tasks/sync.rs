@@ -347,14 +347,14 @@ async fn push_list(
                     .await
                 {
                     Ok(()) | Err(RemoteError::Gone) => {
-                        repo.remove(&task.id).await?;
+                        repo.confirm_remote_delete(&task.id).await?;
                         Ok(())
                     }
                     Err(error) => Err(error),
                 }
             }
             (true, None) => {
-                repo.remove(&task.id).await?;
+                repo.confirm_remote_delete(&task.id).await?;
                 Ok(())
             }
             (false, remote_id) => {

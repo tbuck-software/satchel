@@ -72,6 +72,7 @@ vi.mock('@/composables/useDraftActions', () => ({
 }));
 vi.mock('@/composables/useThreadActions', () => ({
   useThreadActions: () => ({
+    canTrash: () => true,
     setRead: vi.fn().mockResolvedValue(true),
     setMuted: vi.fn().mockResolvedValue(true),
     markSpam: vi.fn().mockResolvedValue(true),

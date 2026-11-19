@@ -267,16 +267,16 @@ pub async fn undo_task_advance(
     Ok(task)
 }
 
-/// Undo a deletion that has not reached the server yet.
+/// Restore the task and push it again if the server already deleted it.
 #[tauri::command]
 pub async fn restore_task(
+    app: tauri::AppHandle,
     pool: tauri::State<'_, SqlitePool>,
     id: String,
 ) -> CommandResult<TaskRecord> {
-    TaskRepository::new(pool.inner())
-        .undelete(&id)
-        .await
-        .map_err(Into::into)
+    let task = TaskRepository::new(pool.inner()).undelete(&id).await?;
+    push_soon(&app, pool.inner(), &task.list_id).await;
+    Ok(task)
 }
 
 fn list_name(name: &str) -> CommandResult<&str> {

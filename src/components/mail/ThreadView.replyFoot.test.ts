@@ -75,7 +75,7 @@ vi.mock('@/composables/useDraftActions', () => ({
   useDraftActions: () => ({ discard: harness.discard, isBusy: () => false }),
 }));
 vi.mock('@/composables/useThreadActions', () => ({
-  useThreadActions: () => ({ setRead: vi.fn().mockResolvedValue(true) }),
+  useThreadActions: () => ({ canTrash: () => true, setRead: vi.fn().mockResolvedValue(true) }),
 }));
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: vi.fn(), info: vi.fn(), error: vi.fn() }),

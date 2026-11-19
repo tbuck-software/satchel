@@ -6,6 +6,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use wasmtime::component::{Component, Linker};
 use wasmtime::{Cache, CacheConfig, Config, Engine, Store, StoreLimits, StoreLimitsBuilder};
 use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
@@ -173,6 +174,12 @@ fn required_capability(command: &str) -> Result<Option<PluginCapability>, String
         })
 }
 
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct ComponentArtifact {
+    path: PathBuf,
+    checked_digest: Option<[u8; 32]>,
+}
+
 pub struct PluginRuntime {
     pub limits: PluginRuntimeLimits,
     engine: Engine,
@@ -186,8 +193,7 @@ pub struct PluginRuntime {
     /// Directories the host permits plugins in. `None` until the app names
     /// them, which is the only reason `default_plugin_dirs` still exists.
     plugin_dirs: Mutex<Option<Vec<PathBuf>>>,
-    component_paths: Mutex<HashMap<String, Option<PathBuf>>>,
-    components: Mutex<HashMap<PathBuf, Arc<Component>>>,
+    components: Mutex<HashMap<ComponentArtifact, Arc<Component>>>,
     unsupported_message_transforms: Mutex<HashSet<String>>,
     unsupported_event_handlers: Mutex<HashSet<String>>,
     audit_log: Mutex<Vec<PluginAuditRecord>>,
@@ -251,7 +257,6 @@ impl PluginRuntime {
             execution_lock: Mutex::new(()),
             registry: Mutex::new(None),
             plugin_dirs: Mutex::new(None),
-            component_paths: Mutex::new(HashMap::new()),
             components: Mutex::new(HashMap::new()),
             unsupported_message_transforms: Mutex::new(HashSet::new()),
             unsupported_event_handlers: Mutex::new(HashSet::new()),
@@ -407,7 +412,7 @@ impl PluginRuntime {
             .registry
             .lock()
             .map_err(|_| "plugin registry cache poisoned".to_string())? = None;
-        self.component_paths
+        self.components
             .lock()
             .map_err(|_| "plugin component cache poisoned".to_string())?
             .clear();
@@ -436,8 +441,8 @@ impl PluginRuntime {
 
     pub fn prewarm_message_transform_plugins(&self) -> Result<(), String> {
         for plugin_id in self.enabled_message_transform_plugins()? {
-            if let Some(component_path) = self.resolve_component_path(&plugin_id)? {
-                let _ = self.load_component(&component_path)?;
+            if let Some(artifact) = self.resolve_component_artifact(&plugin_id)? {
+                let _ = self.load_component(&artifact)?;
             }
         }
 
@@ -480,10 +485,10 @@ impl PluginRuntime {
             if self.ensure_capability(&plugin.id, "handle-event").is_err() {
                 continue;
             }
-            let Some(component_path) = self.resolve_component_path(&plugin.id)? else {
+            let Some(artifact) = self.resolve_component_artifact(&plugin.id)? else {
                 continue;
             };
-            match self.execute_component(&component_path, "handle-event", &encoded) {
+            match self.execute_component(&artifact, "handle-event", &encoded) {
                 Ok(_) => delivered += 1,
                 Err(err) if is_command_not_implemented_error(&err) => {
                     self.unsupported_event_handlers
@@ -499,13 +504,13 @@ impl PluginRuntime {
 
     pub fn execute(&self, plugin_id: &str, command: &str, payload: &str) -> Result<String, String> {
         self.ensure_capability(plugin_id, command)?;
-        let Some(component_path) = self.resolve_component_path(plugin_id)? else {
+        let Some(artifact) = self.resolve_component_artifact(plugin_id)? else {
             return Err(format!(
                 "no Wasm component available for plugin `{plugin_id}`"
             ));
         };
 
-        let output = self.execute_component(&component_path, command, payload)?;
+        let output = self.execute_component(&artifact, command, payload)?;
         validate_plugin_output(plugin_id, &output)?;
         Ok(output)
     }
@@ -526,21 +531,20 @@ impl PluginRuntime {
 
         self.ensure_capability(plugin_id, "transform-message")?;
 
-        if let Some(component_path) = self.resolve_component_path(plugin_id)? {
+        if let Some(artifact) = self.resolve_component_artifact(plugin_id)? {
             let payload = serde_json::to_string(input)
                 .map_err(|err| format!("plugin payload encode failed: {err}"))?;
-            let output =
-                match self.execute_component(&component_path, "transform-message", &payload) {
-                    Ok(output) => output,
-                    Err(err) if is_command_not_implemented_error(&err) => {
-                        self.unsupported_message_transforms
-                            .lock()
-                            .map_err(|_| "plugin transform cache poisoned".to_string())?
-                            .insert(plugin_id.to_string());
-                        return Ok(MessageTransformOutput::default());
-                    }
-                    Err(err) => return Err(err),
-                };
+            let output = match self.execute_component(&artifact, "transform-message", &payload) {
+                Ok(output) => output,
+                Err(err) if is_command_not_implemented_error(&err) => {
+                    self.unsupported_message_transforms
+                        .lock()
+                        .map_err(|_| "plugin transform cache poisoned".to_string())?
+                        .insert(plugin_id.to_string());
+                    return Ok(MessageTransformOutput::default());
+                }
+                Err(err) => return Err(err),
+            };
             // Same gate the `execute` path runs, plus the structural rules:
             // this output lands in the message DTO, where a forged signature
             // verdict is indistinguishable from a real one.
@@ -660,39 +664,25 @@ impl PluginRuntime {
         Ok(())
     }
 
-    fn resolve_component_path(&self, plugin_id: &str) -> Result<Option<PathBuf>, String> {
-        if let Some(cached) = self
-            .component_paths
-            .lock()
-            .map_err(|_| "plugin component cache poisoned".to_string())?
-            .get(plugin_id)
-            .cloned()
-        {
-            return Ok(cached);
-        }
-
-        let resolved = self
-            .registry()?
-            .list()
-            .into_iter()
-            .find(|plugin| plugin.id == plugin_id)
-            .and_then(|plugin| plugin.component_path);
-
-        self.component_paths
-            .lock()
-            .map_err(|_| "plugin component cache poisoned".to_string())?
-            .insert(plugin_id.to_string(), resolved.clone());
-
-        Ok(resolved)
+    fn resolve_component_artifact(
+        &self,
+        plugin_id: &str,
+    ) -> Result<Option<ComponentArtifact>, String> {
+        Ok(self.registry()?.get(plugin_id).and_then(|plugin| {
+            plugin.component_path.map(|path| ComponentArtifact {
+                path,
+                checked_digest: plugin.component_digest,
+            })
+        }))
     }
 
     fn execute_component(
         &self,
-        component_path: &PathBuf,
+        artifact: &ComponentArtifact,
         command: &str,
         payload: &str,
     ) -> Result<String, String> {
-        let component = self.load_component(component_path)?;
+        let component = self.load_component(artifact)?;
         // Serialize executions. The epoch deadline below is engine-global
         // state, so two concurrent executions would share (and corrupt) each
         // other's timeout; one at a time keeps it correct.
@@ -758,7 +748,8 @@ impl PluginRuntime {
         drop(timeout_cancel);
         let _ = timeout_timer.join();
 
-        let logical_plugin_id = component_path
+        let logical_plugin_id = artifact
+            .path
             .parent()
             .and_then(|path| path.parent())
             .and_then(|path| path.file_name())
@@ -782,32 +773,40 @@ impl PluginRuntime {
         }
     }
 
-    fn load_component(&self, component_path: &PathBuf) -> Result<Arc<Component>, String> {
+    fn load_component(&self, artifact: &ComponentArtifact) -> Result<Arc<Component>, String> {
         if let Some(component) = self
             .components
             .lock()
             .map_err(|_| "plugin component cache poisoned".to_string())?
-            .get(component_path)
+            .get(artifact)
             .cloned()
         {
             return Ok(component);
         }
 
-        let component = Arc::new(Component::from_file(&self.engine, component_path).map_err(
-            |err| {
-                format!(
-                    "component load failed for {}: {err}",
-                    component_path.display()
-                )
-            },
-        )?);
+        let path = &artifact.path;
+        let bytes = std::fs::read(path)
+            .map_err(|err| format!("component read failed for {}: {err}", path.display()))?;
+        if let Some(expected) = artifact.checked_digest {
+            let actual: [u8; 32] = Sha256::digest(&bytes).into();
+            if actual != expected {
+                return Err(format!(
+                    "plugin component changed since verification: {}",
+                    path.display()
+                ));
+            }
+        }
+        let component = Arc::new(
+            Component::new(&self.engine, &bytes)
+                .map_err(|err| format!("component load failed for {}: {err}", path.display()))?,
+        );
 
         let mut cache = self
             .components
             .lock()
             .map_err(|_| "plugin component cache poisoned".to_string())?;
         let entry = cache
-            .entry(component_path.clone())
+            .entry(artifact.clone())
             .or_insert_with(|| Arc::clone(&component));
 
         Ok(Arc::clone(entry))
@@ -1092,7 +1091,14 @@ Hallo Alex,\n- - nicht einrücken\nbis bald\n\
         let payload = serde_json::to_string(&sample_input(CLEARSIGNED, false)).unwrap();
 
         let raw = runtime
-            .execute_component(&path, "transform-message", &payload)
+            .execute_component(
+                &ComponentArtifact {
+                    path: path.clone(),
+                    checked_digest: None,
+                },
+                "transform-message",
+                &payload,
+            )
             .expect("component should execute");
         let output: MessageTransformOutput =
             serde_json::from_str(&raw).expect("component output should decode");
@@ -1122,7 +1128,14 @@ Hallo Alex,\n- - nicht einrücken\nbis bald\n\
                 let path = path.clone();
                 let payload = payload.clone();
                 std::thread::spawn(move || {
-                    runtime.execute_component(&path, "transform-message", &payload)
+                    runtime.execute_component(
+                        &ComponentArtifact {
+                            path: path.clone(),
+                            checked_digest: None,
+                        },
+                        "transform-message",
+                        &payload,
+                    )
                 })
             })
             .collect();
@@ -1152,7 +1165,14 @@ Hallo Alex,\n- - nicht einrücken\nbis bald\n\
         for (has_key, expected) in [(false, "encrypted_no_key"), (true, "key_available_locked")] {
             let payload = serde_json::to_string(&sample_input(ENCRYPTED, has_key)).unwrap();
             let raw = runtime
-                .execute_component(&path, "transform-message", &payload)
+                .execute_component(
+                    &ComponentArtifact {
+                        path: path.clone(),
+                        checked_digest: None,
+                    },
+                    "transform-message",
+                    &payload,
+                )
                 .expect("component should execute");
             let output: MessageTransformOutput = serde_json::from_str(&raw).unwrap();
             assert_eq!(output.pgp_state.as_deref(), Some(expected));
@@ -1168,7 +1188,14 @@ Hallo Alex,\n- - nicht einrücken\nbis bald\n\
         let runtime = PluginRuntime::default();
 
         let err = runtime
-            .execute_component(&path, "does-not-exist", "{}")
+            .execute_component(
+                &ComponentArtifact {
+                    path: path.clone(),
+                    checked_digest: None,
+                },
+                "does-not-exist",
+                "{}",
+            )
             .expect_err("unknown command must fail");
         // The caller relies on this shape to cache "plugin can't do this".
         assert!(
@@ -1183,7 +1210,14 @@ Hallo Alex,\n- - nicht einrücken\nbis bald\n\
             return;
         };
         let runtime = PluginRuntime::default();
-        let _ = runtime.execute_component(&path, "does-not-exist", "{}");
+        let _ = runtime.execute_component(
+            &ComponentArtifact {
+                path: path.clone(),
+                checked_digest: None,
+            },
+            "does-not-exist",
+            "{}",
+        );
 
         let metrics = runtime.metrics().expect("metrics readable");
         assert!(
@@ -1206,9 +1240,33 @@ Hallo Alex,\n- - nicht einrücken\nbis bald\n\
             };
             let runtime = PluginRuntime::default();
             runtime
-                .load_component(&path)
+                .load_component(&ComponentArtifact {
+                    path,
+                    checked_digest: None,
+                })
                 .unwrap_or_else(|err| panic!("{plugin_dir} failed to load: {err}"));
         }
+    }
+
+    #[test]
+    fn a_checked_component_rejects_changed_bytes_at_first_load() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("component.wasm");
+        let checked = b"\0asm\x0d\0\x01\0";
+        let artifact = ComponentArtifact {
+            path: path.clone(),
+            checked_digest: Some(Sha256::digest(checked).into()),
+        };
+        let runtime = PluginRuntime::default();
+        std::fs::write(&path, b"replacement bytes").unwrap();
+        let error = runtime
+            .load_component(&artifact)
+            .err()
+            .expect("changed component");
+        assert!(error.contains("changed since verification"));
+
+        std::fs::write(path, checked).unwrap();
+        assert!(runtime.load_component(&artifact).is_ok());
     }
 
     // ---- The native fallback used when no component is built ----

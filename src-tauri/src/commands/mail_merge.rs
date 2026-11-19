@@ -481,11 +481,16 @@ pub enum MailMergeJobAction {
 /// Answers with the job as it is afterwards; `None` once it is deleted.
 #[tauri::command]
 pub async fn control_mail_merge_job(
+    state: State<'_, AppState>,
     pool: State<'_, SqlitePool>,
     id: String,
     action: MailMergeJobAction,
 ) -> CommandResult<Option<MailMergeJobSummary>> {
-    control_mail_merge_job_inner(pool.inner(), &id, action).await
+    let job = control_mail_merge_job_inner(pool.inner(), &id, action).await?;
+    if matches!(action, MailMergeJobAction::Resume) {
+        state.queue.wake_worker();
+    }
+    Ok(job)
 }
 
 pub(crate) async fn control_mail_merge_job_inner(

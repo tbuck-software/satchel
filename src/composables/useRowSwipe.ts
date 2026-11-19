@@ -23,6 +23,7 @@ export const SWIPE_LONG_COMMIT_OFFSET_PX = 184;
 export function useRowSwipe(options: {
   /** Extra guard for starting a gesture (leaving rows, selection mode, …). */
   enabled?: () => boolean;
+  actionEnabled?: (action: SwipeActionId) => boolean;
   /** Label shown in the revealed track for the currently armed candidate. */
   actionLabel: (action: SwipeActionId | null) => string;
   /** Runs after the surface has settled onto its commit offset. */
@@ -62,7 +63,8 @@ export function useRowSwipe(options: {
   });
   const swipeCandidateAction = computed<SwipeActionId | null>(() => {
     const slot = swipeCandidateSlot.value;
-    return slot ? settings.swipeActions[slot] : null;
+    const action = slot ? settings.swipeActions[slot] : null;
+    return action && options.actionEnabled?.(action) !== false ? action : null;
   });
   const swipeAction = computed<SwipeActionId | null>(() => {
     if (swipeDistance.value < SWIPE_SHORT_TRIGGER_PX) return null;

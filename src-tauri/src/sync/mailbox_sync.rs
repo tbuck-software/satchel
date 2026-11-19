@@ -3,6 +3,7 @@ use std::{
     sync::Arc,
 };
 
+use futures::TryStreamExt;
 use satchel_core::db::sync_quarantine::SyncQuarantineRepository;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
@@ -394,6 +395,7 @@ impl ImapSyncState {
 #[derive(Debug, Default)]
 struct SnapshotProgress {
     changed: HashSet<String>,
+    flags_changed: HashSet<String>,
     /// Threads whose workflow followed a server marker. Kept apart from
     /// `changed`: folder reconciliation would put a snoozed Inbox thread
     /// straight back into the Inbox.
@@ -476,6 +478,7 @@ async fn reconcile_folder_snapshot(
             (
                 SnapshotProgress {
                     changed: changes.relocated_threads,
+                    flags_changed: changes.flag_threads,
                     markers_applied,
                     ..SnapshotProgress::default()
                 },
@@ -553,68 +556,27 @@ async fn reconcile_gmail_snapshot(
     state: &mut ImapSyncState,
     queue: &SyncQueue,
 ) -> Result<SnapshotProgress, String> {
-    let present = serde_json::to_string(&states.iter().map(|s| &s.remote_id).collect::<Vec<_>>())
-        .map_err(|error| error.to_string())?;
-    let mut after = String::new();
+    let folder = context.folder_remote_id;
+    let candidates = gmail_snapshot_candidates(
+        pool,
+        &context.account.id,
+        context.folder_id,
+        states,
+        state.resolved_snapshot_copies.get(folder),
+        state.snapshot_resolutions.get(folder),
+    )
+    .await?;
     let mut progress = SnapshotProgress::default();
-    loop {
-        let resolved = state
-            .resolved_snapshot_copies
-            .get(context.folder_remote_id)
-            .cloned()
-            .unwrap_or_default();
-        let resolved_json = serde_json::to_string(&resolved).map_err(|error| error.to_string())?;
-        let owed = state
-            .snapshot_resolutions
-            .entry(context.folder_remote_id.to_string())
-            .or_default();
-        let owed_json = serde_json::to_string(&*owed).map_err(|error| error.to_string())?;
-        let absent: Vec<String> = sqlx::query_scalar(
-            "SELECT remote_id FROM (
-                SELECT remote_id FROM messages
-                WHERE account_id = ? AND folder_id = ?
-                  AND remote_id NOT IN (SELECT value FROM json_each(?))
-                  AND remote_id NOT IN (SELECT value FROM json_each(?))
-                UNION SELECT value FROM json_each(?)
-                UNION SELECT q.remote_id FROM sync_quarantine q
-                WHERE q.account_id = ? AND q.attempts < ? AND EXISTS (
-                    SELECT 1 FROM messages m WHERE m.account_id = q.account_id
-                    AND m.remote_id = q.remote_id AND m.folder_id = ?
-                )
-             ) WHERE remote_id > ? ORDER BY remote_id LIMIT 100",
-        )
-        .bind(&context.account.id)
-        .bind(context.folder_id)
-        .bind(&present)
-        .bind(&resolved_json)
-        .bind(&owed_json)
-        .bind(&context.account.id)
-        // An exhausted target refuses every lookup's result. Its source folder
-        // still finds it absent, so only retry work joins every snapshot.
-        .bind(satchel_core::db::sync_quarantine::MAX_INGEST_ATTEMPTS)
-        .bind(context.folder_id)
-        .bind(&after)
-        .fetch_all(pool)
-        .await
-        .map_err(|error| error.to_string())?;
-        let Some(last) = absent.last() else {
-            break;
-        };
-        after = last.clone();
+    for absent in candidates.chunks(100) {
         // Persist before lookup/ingest. Do not lose the identity when a later
         // folder/backfill stores a partial replacement before this is retried.
-        owed.extend(absent.iter().cloned());
+        state
+            .snapshot_resolutions
+            .entry(folder.to_string())
+            .or_default()
+            .extend(absent.iter().cloned());
         persist_sync_cursors(pool, &context.account.id, state, queue, None).await?;
-        resolve_owed_ids(
-            pool,
-            provider,
-            context,
-            state,
-            queue,
-            &absent,
-            &mut progress,
-        )
-        .await?;
+        resolve_owed_ids(pool, provider, context, state, queue, absent, &mut progress).await?;
     }
     retry_quarantined_elsewhere(pool, provider, context, state, queue, &mut progress).await?;
     if state
@@ -625,6 +587,55 @@ async fn reconcile_gmail_snapshot(
         state.snapshot_resolutions.remove(context.folder_remote_id);
     }
     Ok(progress)
+}
+
+/// Index the presence listing once and walk the local folder once. Hold only
+/// unresolved IDs in memory, then page those in stable order without holding a
+/// database connection across provider lookups and writes.
+async fn gmail_snapshot_candidates(
+    pool: &SqlitePool,
+    account_id: &str,
+    folder_id: &str,
+    states: &[crate::providers::traits::RemoteMessageState],
+    resolved: Option<&HashSet<String>>,
+    owed: Option<&HashSet<String>>,
+) -> Result<Vec<String>, String> {
+    let present = states
+        .iter()
+        .map(|state| state.remote_id.as_str())
+        .collect::<HashSet<_>>();
+    let mut candidates: BTreeSet<String> = owed.into_iter().flatten().cloned().collect();
+    {
+        let mut local = sqlx::query_scalar::<_, String>(
+            "SELECT remote_id FROM messages
+             WHERE account_id = ? AND folder_id = ? AND NULLIF(remote_id, '') IS NOT NULL",
+        )
+        .bind(account_id)
+        .bind(folder_id)
+        .fetch(pool);
+        while let Some(id) = local.try_next().await.map_err(|error| error.to_string())? {
+            if !present.contains(id.as_str()) && !resolved.is_some_and(|ids| ids.contains(&id)) {
+                candidates.insert(id);
+            }
+        }
+    }
+    // Quarantine retries bypass presence/resolved filters. Exhausted work
+    // stays out until explicitly rearmed.
+    let retry: Vec<String> = sqlx::query_scalar(
+        "SELECT q.remote_id FROM sync_quarantine q
+         WHERE q.account_id = ? AND q.attempts < ? AND EXISTS (
+             SELECT 1 FROM messages m WHERE m.account_id = q.account_id
+             AND m.remote_id = q.remote_id AND m.folder_id = ?
+         )",
+    )
+    .bind(account_id)
+    .bind(satchel_core::db::sync_quarantine::MAX_INGEST_ATTEMPTS)
+    .bind(folder_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| error.to_string())?;
+    candidates.extend(retry);
+    Ok(candidates.into_iter().collect())
 }
 
 /// Retry work joins every Gmail snapshot, so a rearmed relabel heals within a
@@ -1430,6 +1441,7 @@ pub(crate) async fn sync_mailboxes(
             let mut snapshot_sync_complete = true;
             let mut externally_changed_threads = HashSet::new();
             let mut marker_changed_threads = HashSet::<String>::new();
+            let mut flag_changed_threads = HashSet::<String>::new();
             let mut folder_fetch_failures = Vec::<String>::new();
             let mut blocked_folders = Vec::<String>::new();
             let mut blocked_messages = 0usize;
@@ -1718,6 +1730,7 @@ pub(crate) async fn sync_mailboxes(
                         Ok(progress) => {
                             externally_changed_threads.extend(progress.changed);
                             marker_changed_threads.extend(progress.markers_applied);
+                            flag_changed_threads.extend(progress.flags_changed);
                         }
                         Err(err) => summary.failures.push(encoded_folder_sync_failure(
                             &account.email, &folder_name, err,
@@ -1759,12 +1772,10 @@ pub(crate) async fn sync_mailboxes(
                 repair_stale_done_threads_in_inbox(pool, &account.id).await?;
             }
             if let Some(events) = events {
-                let updated = externally_changed_threads
-                    .union(&marker_changed_threads)
-                    .cloned()
-                    .collect::<Vec<_>>();
-                if !updated.is_empty() {
-                    events.publish(AppEvent::ThreadsUpdated(updated));
+                externally_changed_threads.extend(marker_changed_threads);
+                externally_changed_threads.extend(flag_changed_threads);
+                if !externally_changed_threads.is_empty() {
+                    events.publish(AppEvent::ThreadsUpdated(externally_changed_threads.into_iter().collect()));
                 }
             }
 
@@ -2052,6 +2063,62 @@ mod tests {
             .expect("folder");
         }
         pool
+    }
+
+    #[tokio::test]
+    async fn gmail_snapshot_membership_scans_the_local_folder_once() {
+        use crate::providers::traits::RemoteMessageState;
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+
+        let pool = sync_pool().await;
+        sqlx::query(
+            "WITH RECURSIVE ids(n) AS (VALUES (1) UNION ALL SELECT n+1 FROM ids WHERE n < 20000)
+             INSERT INTO messages (id, account_id, folder_id, remote_id, from_address, to_addresses, date, created_at, updated_at)
+             SELECT printf('m%05d', n), 'account', 'inbox', printf('r%05d', n), 'a@a.test', '[]', '', '', '' FROM ids",
+        ).execute(&pool).await.unwrap();
+        let present: Vec<_> = (1..=10000)
+            .map(|n| RemoteMessageState {
+                remote_id: format!("r{n:05}"),
+                is_read: None,
+                is_starred: None,
+                workflow_marker: None,
+            })
+            .collect();
+        let ops = Arc::new(AtomicUsize::new(0));
+        {
+            let mut connection = pool.acquire().await.unwrap();
+            let ops = ops.clone();
+            connection
+                .lock_handle()
+                .await
+                .unwrap()
+                .set_progress_handler(1000, move || {
+                    ops.fetch_add(1000, Ordering::Relaxed);
+                    true
+                });
+        }
+        let resolved = HashSet::from(["r10001".into(), "r10002".into()]);
+        let owed = HashSet::from(["r10002".into(), "vanished-copy".into()]);
+        let candidates = super::gmail_snapshot_candidates(
+            &pool,
+            "account",
+            "inbox",
+            &present,
+            Some(&resolved),
+            Some(&owed),
+        )
+        .await
+        .unwrap();
+        assert_eq!(candidates.len(), 10000);
+        assert_eq!(candidates[0], "r10002");
+        assert_eq!(candidates.last().unwrap(), "vanished-copy");
+        assert!(
+            ops.load(Ordering::Relaxed) < 400_000,
+            "local folder scan grew beyond one pass"
+        );
     }
 
     fn account_row() -> MailAccountRow {

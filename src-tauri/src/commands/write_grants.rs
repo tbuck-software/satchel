@@ -17,6 +17,8 @@ use crate::commands::error::{CommandError, CommandResult};
 #[derive(Default)]
 pub struct WriteGrants {
     granted: Mutex<HashSet<PathBuf>>,
+    #[cfg(mobile)]
+    documents: Mutex<std::collections::HashMap<String, tauri_plugin_dialog::FilePath>>,
 }
 
 /// The path with symlinks resolved; a file that does not exist yet is resolved
@@ -40,6 +42,33 @@ impl WriteGrants {
         if let (Ok(canonical), Ok(mut granted)) = (canonical_target(path), self.granted.lock()) {
             granted.insert(canonical);
         }
+    }
+
+    #[cfg(mobile)]
+    fn grant_document(&self, file: tauri_plugin_dialog::FilePath) -> Option<String> {
+        let key = file.to_string();
+        self.documents.lock().ok()?.insert(key.clone(), file);
+        Some(key)
+    }
+
+    pub(super) fn take_export(
+        &self,
+        app: &tauri::AppHandle,
+        target: &str,
+    ) -> CommandResult<super::document_io::ExportDestination> {
+        #[cfg(desktop)]
+        let _ = app;
+        #[cfg(mobile)]
+        if let Some(document) = self
+            .documents
+            .lock()
+            .ok()
+            .and_then(|mut urls| urls.remove(target))
+        {
+            return super::document_io::ExportDestination::document(app, document);
+        }
+        self.take(Path::new(target))
+            .map(super::document_io::ExportDestination::local)
     }
 
     /// Consumes the grant for `path`, or refuses the write.
@@ -67,6 +96,7 @@ pub async fn choose_save_path(
     extensions: Vec<String>,
 ) -> CommandResult<Option<String>> {
     let extensions: Vec<&str> = extensions.iter().map(String::as_str).collect();
+    let suggested_name = satchel_core::utils::filename::safe_attachment_name(&suggested_name);
     let chosen = app
         .dialog()
         .file()
@@ -108,7 +138,12 @@ fn granted_path(
     state: &crate::AppState,
     chosen: Option<tauri_plugin_dialog::FilePath>,
 ) -> Option<String> {
-    let path = chosen?.into_path().ok()?;
+    let chosen = chosen?;
+    #[cfg(mobile)]
+    if matches!(chosen, tauri_plugin_dialog::FilePath::Url(_)) {
+        return state.write_grants.grant_document(chosen);
+    }
+    let path = chosen.into_path().ok()?;
     state.write_grants.grant(&path);
     Some(path.to_string_lossy().into_owned())
 }

@@ -125,13 +125,13 @@ const rangeLabel = computed(() => {
 
     <footer v-if="canRespond" class="event-card__actions">
       <AppButton variant="primary" size="sm" @click="emit('respond', item, 'accepted')">
-        {{ $t('calendar.rsvp.accept') }}
+        {{ $t(item.wholeSeries ? 'mail.invite.acceptSeries' : 'calendar.rsvp.accept') }}
       </AppButton>
       <AppButton variant="soft" size="sm" @click="emit('respond', item, 'tentative')">
-        {{ $t('calendar.rsvp.maybe') }}
+        {{ $t(item.wholeSeries ? 'mail.invite.maybeSeries' : 'calendar.rsvp.maybe') }}
       </AppButton>
       <AppButton variant="danger" size="sm" @click="emit('respond', item, 'declined')">
-        {{ $t('calendar.rsvp.decline') }}
+        {{ $t(item.wholeSeries ? 'mail.invite.declineSeries' : 'calendar.rsvp.decline') }}
       </AppButton>
     </footer>
   </div>

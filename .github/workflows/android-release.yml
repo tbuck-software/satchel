@@ -72,6 +72,11 @@ jobs:
 
       - name: Build signed Android App Bundle
         env:
+          SATCHEL_GMAIL_CLIENT_ID: ${{ vars.SATCHEL_ANDROID_GMAIL_CLIENT_ID || vars.SATCHEL_GMAIL_CLIENT_ID }}
+          SATCHEL_GMAIL_REDIRECT_URI: ${{ vars.SATCHEL_ANDROID_GMAIL_REDIRECT_URI }}
+          SATCHEL_GMAIL_DESKTOP_CLIENT_SECRET: ${{ vars.SATCHEL_ANDROID_GMAIL_DESKTOP_CLIENT_SECRET }}
+          SATCHEL_OUTLOOK_CLIENT_ID: ${{ vars.SATCHEL_ANDROID_OUTLOOK_CLIENT_ID || vars.SATCHEL_OUTLOOK_CLIENT_ID }}
+          SATCHEL_OUTLOOK_REDIRECT_URI: ${{ vars.SATCHEL_ANDROID_OUTLOOK_REDIRECT_URI }}
           NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
           ANDROID_NDK_ROOT: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
@@ -81,7 +86,13 @@ jobs:
             -Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m
             -Dkotlin.daemon.jvm.options=-Xmx384m
             -Dorg.gradle.workers.max=2 -Dorg.gradle.daemon=false
-        run: pnpm tauri android build --aab --target aarch64 --ci
+        run: |
+          if [[ ! "$SATCHEL_GMAIL_CLIENT_ID" =~ ^[^[:space:]]+$ ]] ||
+             [[ ! "$SATCHEL_OUTLOOK_CLIENT_ID" =~ ^[^[:space:]]+$ ]]; then
+            echo "::error::Set SATCHEL_ANDROID_GMAIL_CLIENT_ID and SATCHEL_ANDROID_OUTLOOK_CLIENT_ID in the repository variables before building a signed release."
+            exit 1
+          fi
+          pnpm tauri android build --aab --target aarch64 --ci
 
       - name: Upload signed AAB
         uses: actions/upload-artifact@v7

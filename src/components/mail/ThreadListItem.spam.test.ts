@@ -17,6 +17,7 @@ vi.mock('@/services/backend', async (importOriginal) => ({
 
 vi.mock('@/composables/useThreadActions', () => ({
   useThreadActions: () => ({
+    canTrash: () => true,
     toggleDone: vi.fn(),
     allDone: () => false,
     setAside: vi.fn(),

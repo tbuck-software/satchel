@@ -168,6 +168,7 @@ describe('useSearch', () => {
       warnings: [
         { operator: 'in', value: 'xyz' },
         { operator: 'after', value: 'gestern' },
+        { operator: 'candidate_limit', value: '2025-10-01T12:30:00Z' },
       ],
     });
     const { query, warnings } = useSearch();
@@ -177,6 +178,7 @@ describe('useSearch', () => {
     expect(warnings.value).toEqual([
       '“in:xyz” is ignored – unknown value.',
       '“after:gestern” is ignored – give the date as YYYY-MM-DD or relative (7d, 2w, yesterday).',
+      'This broad search ranks matches dated 2025-10-01 or later. Add before:2025-10-01T12:30:00Z to search older mail.',
     ]);
 
     query.value = '';

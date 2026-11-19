@@ -3,10 +3,12 @@ import {
   copyFileSync,
   cpSync,
   existsSync,
+  fstatSync,
   mkdirSync,
   readdirSync,
   renameSync,
   rmSync,
+  statSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -22,6 +24,9 @@ const stableRoot = join(home, 'Library', 'Application Support', 'de.tbuck.satche
 const dailyRoot = join(home, 'Library', 'Application Support', 'de.tbuck.satchel.daily', 'satchel');
 const stableDb = join(stableRoot, 'satchel.db');
 const dailyDb = join(dailyRoot, 'satchel.db');
+const profileLockName = 'satchel.db.lock';
+const profileLock = join(dailyRoot, profileLockName);
+const underProfileLock = '--under-profile-lock';
 
 function timestamp() {
   return new Date().toISOString().replace(/[:.]/g, '-');
@@ -54,7 +59,7 @@ function backupDailyData() {
     return;
   }
 
-  const entries = readdirSync(dailyRoot).filter((entry) => entry !== 'backups');
+  const entries = readdirSync(dailyRoot).filter((entry) => !['backups', profileLockName].includes(entry));
   if (entries.length === 0) {
     return;
   }
@@ -102,13 +107,50 @@ if (!existsSync(stableDb)) {
   process.exit(1);
 }
 
-// Make sure the target app is not holding an open SQLite connection while the
-// database is replaced. The command is harmless if the app is not running.
-spawnSync('osascript', ['-e', 'tell application "Satchel Daily" to quit'], {
-  stdio: 'ignore',
-});
+if (process.argv[2] !== underProfileLock) {
+  spawnSync('osascript', ['-e', 'tell application "Satchel Daily" to quit'], { stdio: 'ignore' });
+  mkdirSync(dailyRoot, { recursive: true });
 
-mkdirSync(dailyRoot, { recursive: true });
+  // Rust uses BSD flock on this file on macOS. Keep its descriptor open
+  // across exec so the import itself owns the lock through key and file swaps.
+  run('/usr/bin/perl', ['-MFcntl=:DEFAULT,:flock', '-e', `
+    $^F = 1024;
+    my ($lock_path, @command) = @ARGV;
+    sysopen(my $lock, $lock_path, O_RDWR | O_CREAT, 0600) or die "Open Daily profile lock: $!\n";
+    my $locked = 0;
+    for (1..20) {
+      if (flock($lock, LOCK_EX | LOCK_NB)) { $locked = 1; last; }
+      select(undef, undef, undef, 0.25);
+    }
+    die "The Daily profile is still in use. Quit Satchel Daily and retry.\n" unless $locked;
+    exec(@command, fileno($lock)) or die "Start Daily import: $!\n";
+  `, '--', profileLock, process.execPath, process.argv[1], underProfileLock]);
+  process.exit(0);
+}
+
+// Check the inherited descriptor and reassert the same lock on it. flock
+// belongs to the open file description shared by this process and the helper.
+try {
+  const fd = Number(process.argv[3]);
+  if (!Number.isInteger(fd) || fd < 3) throw new Error('Missing Daily profile lock descriptor.');
+  const openLock = fstatSync(fd, { bigint: true });
+  const expected = statSync(profileLock, { bigint: true });
+  if (openLock.dev !== expected.dev || openLock.ino !== expected.ino) {
+    throw new Error('Invalid Daily profile lock descriptor.');
+  }
+  run('/usr/bin/perl', ['-MFcntl=:flock', '-e', `
+    open(my $lock, '+<&=', 3) or die "Open inherited Daily profile lock: $!\n";
+    flock($lock, LOCK_EX | LOCK_NB) or die "Acquire Daily profile lock: $!\n";
+  `], { stdio: ['inherit', 'inherit', 'inherit', fd] });
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
+if (['satchel.restore-ready.json', 'satchel.restore-applying.json'].some((name) => existsSync(join(dailyRoot, name)))) {
+  console.error('Daily has a pending restore. Apply or cancel it before importing Stable data.');
+  process.exit(1);
+}
+
 const previousDailyBackup = backupDailyData();
 
 const tempDb = join(dailyRoot, `satchel.import-${timestamp()}.db`);

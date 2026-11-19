@@ -187,7 +187,7 @@
           "bodyContains": "Body contains"
         },
         "actions": {
-          "setState": "Set status",
+          "setState": "Set status on this device",
           "setPriority": "Set priority",
           "setCategory": "Set category",
           "addTag": "Add tag",
@@ -565,7 +565,7 @@
           "bodyContains": "Inhalt enthält"
         },
         "actions": {
-          "setState": "Status setzen",
+          "setState": "Status auf diesem Gerät setzen",
           "setPriority": "Priorität setzen",
           "setCategory": "Kategorie setzen",
           "addTag": "Tag hinzufügen",

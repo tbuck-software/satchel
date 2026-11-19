@@ -104,6 +104,7 @@ const snoozePickerOpen = ref(false);
 const printActive = ref(false);
 const printSubject = ref('');
 const printMessages = ref<Message[]>([]);
+let printRequest: symbol | null = null;
 const PRINT_CLEANUP_FALLBACK_MS = 60_000;
 let printCleanupTimer: number | null = null;
 let printPreviousTitle: string | null = null;
@@ -607,6 +608,7 @@ async function reloadMessages() {
 }
 
 const actionIds = computed(() => threadActionTargets(threadsStore.selectedThreadIds, props.threadId));
+const canDelete = computed(() => threadActions.canTrash(actionIds.value));
 const selectionCount = computed(() => threadsStore.selectedThreadIds?.length ?? 0);
 const showSelectionSummary = computed(() => selectionCount.value > 1 && !ui.isMobile);
 const actionUnread = computed(() => actionIds.value.some(id => (threadsStore.find(id)?.unreadCount ?? 0) > 0));
@@ -871,6 +873,7 @@ function selectedMessages(scope: 'latest' | 'conversation'): readonly Message[] 
 }
 
 function cleanupPrintView() {
+  printRequest = null;
   if (typeof window !== 'undefined') {
     window.removeEventListener('afterprint', cleanupPrintView);
     if (printCleanupTimer !== null) {
@@ -907,21 +910,29 @@ async function printThread(scope: 'latest' | 'conversation') {
   const currentThread = thread.value;
   if (!currentThread) return;
   cleanupPrintView();
-  printSubject.value = currentThread.subject;
-  printMessages.value = [...selectedMessages(scope)];
-  printActive.value = true;
-  printPreviousTitle = document.title;
-  document.title = currentThread.subject;
-  document.body.classList.add('satchel-thread-printing');
+  const request = Symbol();
+  printRequest = request;
 
   try {
+    const ids = selectedMessages(scope).map(message => message.id);
+    const complete = await messagesStore.messagesForExport(currentThread.id, ids);
+    if (printRequest !== request || thread.value?.id !== currentThread.id) return;
+    printSubject.value = currentThread.subject;
+    printMessages.value = complete;
+    printActive.value = true;
+    printPreviousTitle = document.title;
+    document.title = currentThread.subject;
+    document.body.classList.add('satchel-thread-printing');
+
     await nextTick();
+    if (printRequest !== request) return;
     window.addEventListener('afterprint', cleanupPrintView, { once: true });
     printCleanupTimer = window.setTimeout(cleanupPrintView, PRINT_CLEANUP_FALLBACK_MS);
     // Tauri swaps `window.print` for an IPC call on macOS/iOS that returns a
     // promise; await it so a rejected print reaches the toast below.
     await (window.print() as unknown);
   } catch {
+    if (printRequest !== request) return;
     cleanupPrintView();
     toast.error(t('thread.print.failed'));
   }
@@ -1041,6 +1052,7 @@ function showEntireThread() {
         :is-done="actionDone"
         :is-muted="actionIds.every(id => threadsStore.find(id)?.isMuted)"
         :can-mark-not-spam="canMarkNotSpam"
+        :can-delete="canDelete"
         :show-back="showBack"
         :position="props.position ?? 0"
         :total="props.total ?? 0"
@@ -1257,6 +1269,7 @@ function showEntireThread() {
       :is-starred="selectionCount ? actionPinned : Boolean(thread.isStarred)"
       :is-aside="!selectionCount && thread.workflowState === 'aside'"
       :message="threadMenuMessage"
+      :can-delete="canDelete"
       @dismiss="threadMenuOpen = false"
       @toggle-pin="void togglePin()"
       @set-aside="void toggleAside()"

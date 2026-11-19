@@ -117,7 +117,7 @@ it('marks each active rule as running on the server or staying local, with the r
   expect(badges.map((badge) => badge.text())).toEqual(['Also runs on server', 'Local only']);
   expect(badges[0]!.attributes('title')).toContain('Also runs on the server for Work');
   expect(badges[0]!.attributes('title')).toContain('whole conversation');
-  expect(badges[1]!.attributes('title')).toBe('“Set status” exists only in Satchel.');
+  expect(badges[1]!.attributes('title')).toBe('“Set status on this device” exists only in Satchel.');
 });
 
 it('shows no placement badges while no account has server rules on', async () => {

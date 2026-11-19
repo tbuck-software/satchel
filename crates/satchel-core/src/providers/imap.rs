@@ -1,4 +1,11 @@
 pub use super::smtp::{send_via_smtp, send_via_smtp_returning_wire_copy, SmtpRuntimeConfig};
+use async_imap::imap_proto::{
+    types::{
+        AttributeValue, MailboxDatum, MessageSection, NameAttribute, ResponseCode, SectionPath,
+    },
+    Response, Status,
+};
+use async_imap::types::Flag;
 use base64::Engine;
 use futures::TryStreamExt;
 use postroom::SourceId;
@@ -21,7 +28,7 @@ use crate::providers::{
         SyncCheckpoint,
     },
 };
-use crate::sync::errors::{SyncError, SyncResult};
+use crate::sync::errors::{SyncError, SyncResult, IMAP_MOVE_COPY_NEEDS_REVIEW};
 use crate::utils::mime::{
     clean_mailbox_display_name, decode_bytes_with_charset, decode_mime_encoded_words,
     decode_quoted_printable_bytes, decode_rfc2231_segments, decode_rfc2231_value,
@@ -41,6 +48,346 @@ where
         .await
         .map_err(|_| format!("imap {operation} timed out"))?
         .map_err(|error| format!("imap {operation} failed: {error}"))
+}
+
+/// Read a complete command response. async-imap's FETCH and SEARCH helpers
+/// discard the tagged completion status, which cannot authorize reconciliation.
+async fn read_checked_command<T>(
+    session: &mut async_imap::Session<T>,
+    command: &str,
+    mut on_response: impl FnMut(&Response<'_>),
+) -> async_imap::error::Result<()>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+{
+    use async_imap::error::{Error, ParseError, ValidateError};
+
+    if let Some(character) = command.chars().find(|c| matches!(c, '\r' | '\n')) {
+        return Err(ValidateError(character).into());
+    }
+    let expected = session.run_command(command).await?;
+    while let Some(response) = session.read_response().await? {
+        match response.parsed() {
+            Response::Done {
+                tag,
+                status,
+                code,
+                information,
+            } if tag == &expected => {
+                return match status {
+                    Status::Ok => {
+                        on_response(response.parsed());
+                        Ok(())
+                    }
+                    Status::No => Err(Error::No(format!("code: {code:?}, info: {information:?}"))),
+                    Status::Bad => {
+                        Err(Error::Bad(format!("code: {code:?}, info: {information:?}")))
+                    }
+                    other => Err(ParseError::Unexpected(format!("{other:?}")).into()),
+                };
+            }
+            Response::Data {
+                status: Status::Bye,
+                ..
+            } => return Err(Error::ConnectionLost),
+            parsed => on_response(parsed),
+        }
+    }
+    Err(Error::ConnectionLost)
+}
+
+#[derive(Debug, Default)]
+struct SyncFetch {
+    message: u32,
+    uid: Option<u32>,
+    size: Option<u32>,
+    raw_flags: Option<Vec<String>>,
+    header: Option<Vec<u8>>,
+    text: Option<Vec<u8>>,
+    internal_date: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl SyncFetch {
+    fn from_response(response: &Response<'_>) -> Option<Self> {
+        let Response::Fetch(message, attributes) = response else {
+            return None;
+        };
+        let mut fetch = Self {
+            message: *message,
+            ..Self::default()
+        };
+        for value in attributes {
+            match value {
+                AttributeValue::Uid(value) => fetch.uid = Some(*value),
+                AttributeValue::Rfc822Size(value) => fetch.size = Some(*value),
+                AttributeValue::Flags(flags) => {
+                    fetch.raw_flags = Some(flags.iter().map(ToString::to_string).collect());
+                }
+                AttributeValue::BodySection {
+                    section: Some(SectionPath::Full(MessageSection::Header)),
+                    data: Some(bytes),
+                    ..
+                }
+                | AttributeValue::Rfc822Header(Some(bytes)) => fetch.header = Some(bytes.to_vec()),
+                AttributeValue::BodySection {
+                    section: Some(SectionPath::Full(MessageSection::Text)),
+                    data: Some(bytes),
+                    ..
+                }
+                | AttributeValue::Rfc822Text(Some(bytes)) => fetch.text = Some(bytes.to_vec()),
+                AttributeValue::InternalDate(date) => {
+                    fetch.internal_date =
+                        chrono::DateTime::parse_from_str(date, "%d-%b-%Y %H:%M:%S %z")
+                            .ok()
+                            .map(|date| date.to_utc());
+                }
+                _ => {}
+            }
+        }
+        Some(fetch)
+    }
+
+    fn flags(&self) -> impl Iterator<Item = Flag<'_>> {
+        self.raw_flags
+            .iter()
+            .flatten()
+            .map(|flag| Flag::from(flag.as_str()))
+    }
+
+    fn header(&self) -> Option<&[u8]> {
+        self.header.as_deref()
+    }
+
+    fn text(&self) -> Option<&[u8]> {
+        self.text.as_deref()
+    }
+}
+
+async fn checked_fetch<T>(
+    session: &mut async_imap::Session<T>,
+    command: &str,
+) -> async_imap::error::Result<Vec<SyncFetch>>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+{
+    let mut entries = Vec::new();
+    read_checked_command(session, command, |response| {
+        entries.extend(SyncFetch::from_response(response));
+    })
+    .await?;
+    Ok(entries)
+}
+
+async fn checked_uid_search<T>(
+    session: &mut async_imap::Session<T>,
+    query: &str,
+    duration: Duration,
+    operation: &str,
+) -> Result<std::collections::HashSet<u32>, String>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+{
+    let mut ids = None;
+    timeout(
+        duration,
+        read_checked_command(session, &format!("UID SEARCH {query}"), |response| {
+            if let Response::MailboxData(MailboxDatum::Search(found)) = response {
+                ids.get_or_insert_with(std::collections::HashSet::new)
+                    .extend(found);
+            }
+        }),
+    )
+    .await
+    .map_err(|_| format!("imap {operation} timed out"))?
+    .map_err(|error| format!("imap {operation} failed: {error}"))?;
+    ids.ok_or_else(|| format!("imap {operation} returned no SEARCH data"))
+}
+
+async fn checked_list<T>(
+    session: &mut async_imap::Session<T>,
+    command: &str,
+    duration: Duration,
+) -> Result<Vec<(RemoteFolder, Option<String>)>, String>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+{
+    let mut folders = Vec::new();
+    timeout(
+        duration,
+        read_checked_command(session, command, |response| {
+            if let Response::MailboxData(MailboxDatum::List {
+                name_attributes,
+                delimiter,
+                name,
+            }) = response
+            {
+                let kind = name_attributes
+                    .iter()
+                    .find_map(|attribute| match attribute {
+                        NameAttribute::Archive => Some("archive"),
+                        NameAttribute::Drafts => Some("drafts"),
+                        NameAttribute::Junk => Some("spam"),
+                        NameAttribute::Sent => Some("sent"),
+                        NameAttribute::Trash => Some("trash"),
+                        _ => None,
+                    });
+                folders.push((
+                    RemoteFolder {
+                        id: name.to_string(),
+                        name: name.to_string(),
+                        kind: kind.map(str::to_string),
+                    },
+                    delimiter.as_ref().map(ToString::to_string),
+                ));
+            }
+        }),
+    )
+    .await
+    .map_err(|_| "imap LIST timed out".to_string())?
+    .map_err(|error| format!("imap LIST failed: {error}"))?;
+    Ok(folders)
+}
+
+async fn collect_sync_fetch<T>(
+    session: &mut async_imap::Session<T>,
+    duration: Duration,
+    command: &str,
+    operation: &str,
+) -> Result<Vec<SyncFetch>, String>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+{
+    timeout(duration, checked_fetch(session, command))
+        .await
+        .map_err(|_| format!("imap {operation} timed out"))?
+        .map_err(|error| format!("imap {operation} failed: {error}"))
+}
+
+const SNAPSHOT_FLAG_BATCH: usize = 500;
+
+fn state_from_flags(uid: u32, entry: Option<&SyncFetch>) -> RemoteMessageState {
+    RemoteMessageState {
+        remote_id: uid.to_string(),
+        is_read: entry.map(|entry| entry.flags().any(|flag| matches!(flag, Flag::Seen))),
+        is_starred: entry.map(|entry| entry.flags().any(|flag| matches!(flag, Flag::Flagged))),
+        workflow_marker: entry.map(|entry| workflow_marker_from_flags(entry.flags())),
+    }
+}
+
+async fn read_state_snapshot<T>(
+    session: &mut async_imap::Session<T>,
+    duration: Duration,
+    mailbox_size: u32,
+) -> Result<Option<Vec<RemoteMessageState>>, String>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+{
+    // SEARCH confirms presence once. Subsequent FETCH commands use UIDs so
+    // sequence-number shifts between requests cannot make mail disappear.
+    // Give the legacy SEARCH line the same per-byte allowance as a body chunk.
+    let search_duration = duration
+        + Duration::from_secs((u64::from(mailbox_size) * 11).div_ceil(MIN_FETCH_THROUGHPUT));
+    let ids = match checked_uid_search(session, "ALL", search_duration, "UID SEARCH ALL").await {
+        Ok(ids) => ids,
+        // The pinned parser cannot decode ESEARCH from pure IMAP4rev2.
+        // Its decoder keeps the unparsed response, so the fallback reconnects.
+        Err(error)
+            if error.ends_with("returned no SEARCH data")
+                || error.to_ascii_uppercase().contains("\"* ESEARCH") =>
+        {
+            return Ok(None)
+        }
+        Err(error) => return Err(error),
+    };
+    let mut uids = ids.into_iter().collect::<Vec<_>>();
+    uids.sort_unstable();
+    let mut states = Vec::with_capacity(uids.len());
+    for batch in uids.chunks(SNAPSHOT_FLAG_BATCH) {
+        let uid_set = ImapProvider::uid_set(batch);
+        let flags: std::collections::HashMap<_, _> = collect_sync_fetch(
+            session,
+            duration,
+            &format!("UID FETCH {uid_set} (UID FLAGS)"),
+            "UID FETCH state snapshot",
+        )
+        .await?
+        .into_iter()
+        .filter_map(|entry| Some((entry.uid?, entry)))
+        .filter(|(_, entry)| entry.raw_flags.is_some())
+        .collect();
+        for uid in batch {
+            states.push(state_from_flags(*uid, flags.get(uid)));
+        }
+    }
+    Ok(Some(states))
+}
+
+/// A sequence-number fallback for servers whose SEARCH reply cannot be read.
+/// Abort the entire snapshot if the server reports an expunge or a new
+/// generation, or if a batch is missing any of its ordered UIDs.
+async fn read_sequence_state_snapshot<T>(
+    session: &mut async_imap::Session<T>,
+    duration: Duration,
+    mailbox_size: u32,
+    uidvalidity: u32,
+) -> Result<Vec<RemoteMessageState>, String>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+{
+    let mut states = Vec::new();
+    let mut last_uid = 0;
+    for first in (1..=mailbox_size.max(1)).step_by(SNAPSHOT_FLAG_BATCH) {
+        let last = mailbox_size.min(first.saturating_add(SNAPSHOT_FLAG_BATCH as u32 - 1));
+        let command = if mailbox_size == 0 {
+            "UID FETCH 1:* (UID FLAGS)".to_string()
+        } else {
+            format!("FETCH {first}:{last} (UID FLAGS)")
+        };
+        let mut entries = std::collections::BTreeMap::new();
+        let mut changed = false;
+        timeout(
+            duration,
+            read_checked_command(session, &command, |response| match response {
+                Response::Expunge(_) | Response::Vanished { .. } => changed = true,
+                Response::Data {
+                    code: Some(ResponseCode::UidValidity(found)),
+                    ..
+                }
+                | Response::Done {
+                    code: Some(ResponseCode::UidValidity(found)),
+                    ..
+                } => {
+                    changed |= *found != uidvalidity;
+                }
+                Response::MailboxData(MailboxDatum::Exists(found)) => {
+                    changed |= *found < mailbox_size
+                }
+                Response::Fetch(_, _) if mailbox_size == 0 => changed = true,
+                Response::Fetch(sequence, _) if (first..=last).contains(sequence) => {
+                    if let Some(entry) = SyncFetch::from_response(response)
+                        .filter(|entry| entry.uid.is_some() && entry.raw_flags.is_some())
+                    {
+                        entries.insert(*sequence, entry);
+                    }
+                }
+                _ => {}
+            }),
+        )
+        .await
+        .map_err(|_| "imap FETCH state snapshot timed out".to_string())?
+        .map_err(|error| format!("imap FETCH state snapshot failed: {error}"))?;
+        if changed || entries.len() != (last.saturating_sub(first - 1)) as usize {
+            return Err("imap mailbox changed during its state snapshot".into());
+        }
+        for entry in entries.values() {
+            let Some(uid) = entry.uid.filter(|uid| *uid > last_uid) else {
+                return Err("imap state snapshot is missing ordered UIDs".into());
+            };
+            states.push(state_from_flags(uid, Some(entry)));
+            last_uid = uid;
+        }
+    }
+    Ok(states)
 }
 
 type ImapSession = async_imap::Session<TlsStream<TcpStream>>;
@@ -482,22 +829,12 @@ impl ImapProvider {
     async fn inbox_namespace(
         session: &mut async_imap::Session<TlsStream<TcpStream>>,
     ) -> Option<(String, Option<String>)> {
-        let names = collect_imap_response(
-            Self::op_timeout(),
-            session.list(None, Some("INBOX")),
-            "LIST INBOX",
-        )
-        .await
-        .ok()?;
-        names
+        checked_list(session, r#"LIST "" "INBOX""#, Self::op_timeout())
+            .await
+            .ok()?
             .into_iter()
-            .find(|name| name.name().eq_ignore_ascii_case("INBOX"))
-            .map(|name| {
-                (
-                    name.name().to_string(),
-                    name.delimiter().map(str::to_string),
-                )
-            })
+            .find(|(folder, _)| folder.name.eq_ignore_ascii_case("INBOX"))
+            .map(|(folder, delimiter)| (folder.name, delimiter))
     }
 
     async fn select_draft_folder(
@@ -539,7 +876,7 @@ impl ImapProvider {
     /// something we cannot get back cheaply.
     async fn fetch_recent_backfill_bodies<T>(
         session: &mut async_imap::Session<T>,
-        batch: &[async_imap::types::Fetch],
+        batch: &[SyncFetch],
         cutoff: chrono::DateTime<chrono::Utc>,
     ) -> Result<std::collections::HashMap<u32, Vec<u8>>, String>
     where
@@ -555,7 +892,7 @@ impl ImapProvider {
                     .unwrap_or_default();
                 let inside = chrono::DateTime::parse_from_rfc3339(&parse_message_date(
                     &header,
-                    entry_internal_date(entry),
+                    entry.internal_date,
                     chrono::Utc::now(),
                 ))
                 .map(|date| date.with_timezone(&chrono::Utc) >= cutoff)
@@ -569,9 +906,10 @@ impl ImapProvider {
             return Ok(bodies);
         }
 
-        let entries = collect_imap_response(
+        let entries = collect_sync_fetch(
+            session,
             Self::op_timeout(),
-            session.uid_fetch(wanted.join(","), "(UID BODY.PEEK[TEXT])"),
+            &format!("UID FETCH {} (UID BODY.PEEK[TEXT])", wanted.join(",")),
             "BACKFILL body",
         )
         .await?;
@@ -1043,18 +1381,21 @@ impl ImapProvider {
             .join(",")
     }
 
-    async fn apply_uid_store(
-        session: &mut async_imap::Session<TlsStream<TcpStream>>,
+    async fn apply_uid_store<T>(
+        session: &mut async_imap::Session<T>,
         uid_set: &str,
         query: &str,
-    ) -> Result<(), String> {
-        collect_imap_response(
+    ) -> Result<(), String>
+    where
+        T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+    {
+        timeout(
             Self::op_timeout(),
-            session.uid_store(uid_set, query),
-            "UID STORE",
+            session.run_command_and_check_ok(format!("UID STORE {uid_set} {query}")),
         )
-        .await?;
-        Ok(())
+        .await
+        .map_err(|_| "imap UID STORE timed out".to_string())?
+        .map_err(|error| format!("imap UID STORE failed: {error}"))
     }
 
     /// Remove exactly these UIDs from the selected mailbox.
@@ -1064,21 +1405,21 @@ impl ImapProvider {
     /// and mutt mark mail that way and never expunge it. The fallback therefore
     /// runs only once `UID SEARCH DELETED` has shown that nothing but our own
     /// UIDs would go.
-    async fn expunge_uids(
-        session: &mut async_imap::Session<TlsStream<TcpStream>>,
+    async fn expunge_uids<T>(
+        session: &mut async_imap::Session<T>,
         uids: &[u32],
-    ) -> Result<(), String> {
+    ) -> Result<(), String>
+    where
+        T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+    {
         if uids.is_empty() {
             return Ok(());
         }
 
-        match timeout(Self::op_timeout(), async {
-            session
-                .uid_expunge(Self::uid_set(uids))
-                .await?
-                .try_collect::<Vec<_>>()
-                .await
-        })
+        match timeout(
+            Self::op_timeout(),
+            session.run_command_and_check_ok(format!("UID EXPUNGE {}", Self::uid_set(uids))),
+        )
         .await
         {
             Ok(Ok(_)) => return Ok(()),
@@ -1090,22 +1431,28 @@ impl ImapProvider {
         }
 
         Self::ensure_plain_expunge_is_safe(session, uids).await?;
-        collect_imap_response(Self::op_timeout(), session.expunge(), "EXPUNGE").await?;
-
-        Ok(())
+        timeout(
+            Self::op_timeout(),
+            session.run_command_and_check_ok("EXPUNGE"),
+        )
+        .await
+        .map_err(|_| "imap EXPUNGE timed out".to_string())?
+        .map_err(|error| format!("imap EXPUNGE failed: {error}"))
     }
 
     /// Refuse a plain `EXPUNGE` while the mailbox holds a `\Deleted` message
     /// that is not ours. The flag we set stays, and the queued retry tries
     /// again once the other client has cleaned up.
-    async fn ensure_plain_expunge_is_safe(
-        session: &mut async_imap::Session<TlsStream<TcpStream>>,
+    async fn ensure_plain_expunge_is_safe<T>(
+        session: &mut async_imap::Session<T>,
         uids: &[u32],
-    ) -> Result<(), String> {
-        let deleted = timeout(Self::op_timeout(), session.uid_search("DELETED"))
-            .await
-            .map_err(|_| "imap UID SEARCH DELETED timed out".to_string())?
-            .map_err(|err| format!("imap UID SEARCH DELETED failed: {err}"))?;
+    ) -> Result<(), String>
+    where
+        T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+    {
+        let deleted =
+            checked_uid_search(session, "DELETED", Self::op_timeout(), "UID SEARCH DELETED")
+                .await?;
         if plain_expunge_is_safe(&deleted, uids) {
             return Ok(());
         }
@@ -1130,6 +1477,41 @@ impl ImapProvider {
             return Ok(());
         }
         Self::ensure_plain_expunge_is_safe(session, uids).await
+    }
+
+    /// Once COPY might have happened, replaying the entire operation would
+    /// copy the same source UID again. Leave both folders for the user to
+    /// inspect if the verdict or source cleanup is unknown.
+    async fn copy_and_remove_source<T>(
+        session: &mut async_imap::Session<T>,
+        uids: &[u32],
+        target: &str,
+    ) -> SyncResult<()>
+    where
+        T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+    {
+        let needs_review = |error: String| {
+            tracing::warn!(%error, "IMAP COPY move stopped after possible destination copy");
+            SyncError::Permanent(IMAP_MOVE_COPY_NEEDS_REVIEW.into())
+        };
+        let uid_set = Self::uid_set(uids);
+        match timeout(Self::op_timeout(), session.uid_copy(&uid_set, target)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error))
+                if is_server_rejection(&error)
+                    || matches!(error, async_imap::error::Error::Validate(_)) =>
+            {
+                return Err(format!("imap UID COPY failed: {error}").into());
+            }
+            Ok(Err(error)) => return Err(needs_review(format!("imap UID COPY failed: {error}"))),
+            Err(_) => return Err(needs_review("imap UID COPY timed out".into())),
+        }
+        Self::apply_uid_store(session, &uid_set, "+FLAGS.SILENT (\\Deleted)")
+            .await
+            .map_err(needs_review)?;
+        Self::expunge_uids(session, uids)
+            .await
+            .map_err(needs_review)
     }
 }
 
@@ -1317,7 +1699,7 @@ fn advance_after_chunks(
 /// What the chunked fetch brought back.
 #[derive(Debug, Default)]
 struct ChunkedFetch {
-    entries: Vec<async_imap::types::Fetch>,
+    entries: Vec<SyncFetch>,
     /// Chunks that arrived in full, counted from the first.
     completed: usize,
     /// Why the run stopped early. The session is then in an unknown state.
@@ -1347,9 +1729,10 @@ where
             .map(|message| message.uid.to_string())
             .collect::<Vec<_>>()
             .join(",");
-        match collect_imap_response(
+        match collect_sync_fetch(
+            session,
             chunk_timeout(base_timeout, chunk),
-            session.uid_fetch(uid_set, MESSAGE_FETCH_ITEMS),
+            &format!("UID FETCH {uid_set} {MESSAGE_FETCH_ITEMS}"),
             "UID FETCH",
         )
         .await
@@ -1392,7 +1775,7 @@ struct EnvelopeContext {
 /// own `BODY[TEXT]` when the bodies came from a separate fetch. Returns the
 /// envelopes and the number of entries discarded for lacking a UID.
 async fn envelopes_off_runtime(
-    entries: Vec<async_imap::types::Fetch>,
+    entries: Vec<SyncFetch>,
     bodies: Option<std::collections::HashMap<u32, Vec<u8>>>,
     context: EnvelopeContext,
 ) -> Result<(Vec<MessageEnvelope>, usize), String> {
@@ -1431,30 +1814,10 @@ impl ImapProvider {
         read_quota: bool,
     ) -> SyncResult<(Vec<RemoteFolder>, super::quota::QuotaProbe)> {
         let mut session = self.login_session().await?;
-        let names =
-            collect_imap_response(Self::op_timeout(), session.list(None, Some("*")), "LIST")
-                .await?;
-
-        let mut folders = names
+        let mut folders = checked_list(&mut session, r#"LIST "" "*""#, Self::op_timeout())
+            .await?
             .into_iter()
-            .map(|name| {
-                let kind = name
-                    .attributes()
-                    .iter()
-                    .find_map(|attribute| match attribute {
-                        async_imap::types::NameAttribute::Archive => Some("archive"),
-                        async_imap::types::NameAttribute::Drafts => Some("drafts"),
-                        async_imap::types::NameAttribute::Junk => Some("spam"),
-                        async_imap::types::NameAttribute::Sent => Some("sent"),
-                        async_imap::types::NameAttribute::Trash => Some("trash"),
-                        _ => None,
-                    });
-                RemoteFolder {
-                    id: name.name().to_string(),
-                    name: name.name().to_string(),
-                    kind: kind.map(str::to_string),
-                }
-            })
+            .map(|(folder, _)| folder)
             .collect::<Vec<_>>();
 
         if folders.is_empty() {
@@ -1623,9 +1986,10 @@ impl MailProvider for ImapProvider {
         let use_uid_fetch = has_cursor && since_uid > 0;
         let listing = if use_uid_fetch {
             let uid_set = format!("{}:*", since_uid.saturating_add(1));
-            collect_imap_response(
+            collect_sync_fetch(
+                &mut session,
                 Self::op_timeout(),
-                session.uid_fetch(uid_set, MESSAGE_LISTING_ITEMS),
+                &format!("UID FETCH {uid_set} {MESSAGE_LISTING_ITEMS}"),
                 "UID FETCH",
             )
             .await?
@@ -1640,9 +2004,10 @@ impl MailProvider for ImapProvider {
             } else {
                 format!("{tail_start}:*")
             };
-            collect_imap_response(
+            collect_sync_fetch(
+                &mut session,
                 Self::op_timeout(),
-                session.fetch(seq_set, MESSAGE_LISTING_ITEMS),
+                &format!("FETCH {seq_set} {MESSAGE_LISTING_ITEMS}"),
                 "FETCH",
             )
             .await?
@@ -1719,9 +2084,10 @@ impl MailProvider for ImapProvider {
                 } else {
                     "(UID FLAGS INTERNALDATE BODY.PEEK[HEADER] BODY.PEEK[TEXT])"
                 };
-                let mut older = collect_imap_response(
+                let mut older = collect_sync_fetch(
+                    &mut session,
                     Self::op_timeout(),
-                    session.fetch(backfill_set, backfill_items),
+                    &format!("FETCH {backfill_set} {backfill_items}"),
                     "BACKFILL",
                 )
                 .await?;
@@ -1825,9 +2191,10 @@ impl MailProvider for ImapProvider {
                 .map(u32::to_string)
                 .collect::<Vec<_>>()
                 .join(",");
-            let fetched = collect_imap_response(
+            let fetched = collect_sync_fetch(
+                &mut session,
                 Self::op_timeout(),
-                session.uid_fetch(uid_set, MESSAGE_FETCH_ITEMS),
+                &format!("UID FETCH {uid_set} {MESSAGE_FETCH_ITEMS}"),
                 "UID FETCH",
             )
             .await?
@@ -1870,7 +2237,7 @@ impl MailProvider for ImapProvider {
             .as_ref()
             .is_some_and(|config| is_gmail_imap_host(&config.host));
         let mut session = self.login_session().await?;
-        let mailbox = timeout(Self::op_timeout(), session.select(folder))
+        let mut mailbox = timeout(Self::op_timeout(), session.select(folder))
             .await
             .map_err(|_| format!("imap SELECT {folder} timed out"))?
             .map_err(|err| format!("imap SELECT {folder} failed: {err}"))?;
@@ -1885,42 +2252,31 @@ impl MailProvider for ImapProvider {
                 format!("imap protocol violation: SELECT {folder} reported no UIDVALIDITY")
             })?;
 
-        if mailbox.exists == 0 {
-            let _ = timeout(Self::op_timeout(), session.logout()).await;
-            return Ok(Some(crate::providers::traits::RemoteMessageStateSnapshot {
-                states: Vec::new(),
-                remote_uidvalidity: Some(remote_uidvalidity),
-                custom_keywords: Some(keyword_support(gmail_free, &mailbox.permanent_flags)),
-            }));
-        }
-
-        let fetched = collect_imap_response(
-            Self::op_timeout(),
-            session.uid_fetch("1:*", "(UID FLAGS)"),
-            "UID FETCH state snapshot",
-        )
-        .await?;
-
-        let states = fetched
-            .into_iter()
-            .filter_map(|entry| {
-                let uid = entry.uid?;
-                Some(RemoteMessageState {
-                    remote_id: uid.to_string(),
-                    is_read: Some(
-                        entry
-                            .flags()
-                            .any(|flag| matches!(flag, async_imap::types::Flag::Seen)),
-                    ),
-                    is_starred: Some(
-                        entry
-                            .flags()
-                            .any(|flag| matches!(flag, async_imap::types::Flag::Flagged)),
-                    ),
-                    workflow_marker: Some(workflow_marker_from_flags(entry.flags())),
-                })
-            })
-            .collect();
+        let states = match read_state_snapshot(&mut session, Self::op_timeout(), mailbox.exists)
+            .await?
+        {
+            Some(states) => states,
+            None => {
+                drop(session);
+                session = self.login_session().await?;
+                mailbox = timeout(Self::op_timeout(), session.select(folder))
+                    .await
+                    .map_err(|_| format!("imap SELECT {folder} timed out"))?
+                    .map_err(|error| format!("imap SELECT {folder} failed: {error}"))?;
+                if mailbox.uid_validity != Some(remote_uidvalidity) {
+                    return Err(
+                        format!("imap UIDVALIDITY changed during the {folder} snapshot").into(),
+                    );
+                }
+                read_sequence_state_snapshot(
+                    &mut session,
+                    Self::op_timeout(),
+                    mailbox.exists,
+                    remote_uidvalidity,
+                )
+                .await?
+            }
+        };
 
         let _ = timeout(Self::op_timeout(), session.logout()).await;
         Ok(Some(crate::providers::traits::RemoteMessageStateSnapshot {
@@ -2168,12 +2524,7 @@ impl MailProvider for ImapProvider {
                     return Err(format!("imap UID MOVE failed: {error}").into());
                 }
                 Self::ensure_expunge_is_possible(&mut session, &group.uids).await?;
-                timeout(Self::op_timeout(), session.uid_copy(&uid_set, target))
-                    .await
-                    .map_err(|_| "imap UID COPY timed out".to_string())?
-                    .map_err(|err| format!("imap UID COPY failed: {err}"))?;
-                Self::apply_uid_store(&mut session, &uid_set, "+FLAGS.SILENT (\\Deleted)").await?;
-                Self::expunge_uids(&mut session, &group.uids).await?;
+                Self::copy_and_remove_source(&mut session, &group.uids, target).await?;
             }
         }
 
@@ -2303,13 +2654,13 @@ impl MailProvider for ImapProvider {
             if !is_numeric_imap_uid(identifier) {
                 let escaped = identifier.replace('\\', "\\\\").replace('"', "\\\"");
                 old_uids.extend(
-                    timeout(
+                    checked_uid_search(
+                        &mut session,
+                        &format!(r#"HEADER Message-ID "{escaped}""#),
                         Self::op_timeout(),
-                        session.uid_search(format!("HEADER Message-ID \"{escaped}\"")),
+                        "draft search",
                     )
-                    .await
-                    .map_err(|_| "imap draft search timed out".to_string())?
-                    .map_err(|err| format!("imap draft search failed: {err}"))?,
+                    .await?,
                 );
             }
         }
@@ -2324,13 +2675,13 @@ impl MailProvider for ImapProvider {
         let _ = timeout(Self::op_timeout(), session.noop()).await;
 
         let escaped = message_id.replace('\\', "\\\\").replace('"', "\\\"");
-        let current_uids = timeout(
+        let current_uids = checked_uid_search(
+            &mut session,
+            &format!(r#"HEADER Message-ID "{escaped}""#),
             Self::op_timeout(),
-            session.uid_search(format!("HEADER Message-ID \"{escaped}\"")),
+            "replacement draft search",
         )
-        .await
-        .map_err(|_| "imap replacement draft search timed out".to_string())?
-        .map_err(|err| format!("imap replacement draft search failed: {err}"))?;
+        .await?;
         let newest_uid = current_uids.iter().max().copied();
         old_uids.extend(current_uids);
         if let Some(newest_uid) = newest_uid {
@@ -2370,13 +2721,13 @@ impl MailProvider for ImapProvider {
         let mut session = self.login_session().await?;
         let _folder = Self::select_draft_folder(&mut session, folder).await?;
         let escaped = identifier.replace('\\', "\\\\").replace('"', "\\\"");
-        let uids = timeout(
+        let uids = checked_uid_search(
+            &mut session,
+            &format!(r#"HEADER Message-ID "{escaped}""#),
             Self::op_timeout(),
-            session.uid_search(format!("HEADER Message-ID \"{escaped}\"")),
+            "draft delete search",
         )
-        .await
-        .map_err(|_| "imap draft delete search timed out".to_string())?
-        .map_err(|err| format!("imap draft delete search failed: {err}"))?
+        .await?
         .into_iter()
         .collect::<Vec<_>>();
         if !uids.is_empty() {
@@ -4935,26 +5286,6 @@ where
 }
 
 /// A fetch for a marker write: `Ok(None)` when the server refused it.
-async fn marker_command<F, S, T>(
-    op_timeout: Duration,
-    command: F,
-    operation: &str,
-) -> Result<Option<Vec<T>>, String>
-where
-    F: std::future::Future<Output = Result<S, async_imap::error::Error>>,
-    S: futures::TryStream<Ok = T, Error = async_imap::error::Error>,
-{
-    match timeout(op_timeout, async { command.await?.try_collect().await }).await {
-        Err(_) => Err(format!("imap {operation} timed out")),
-        Ok(Ok(items)) => Ok(Some(items)),
-        Ok(Err(async_imap::error::Error::No(reason) | async_imap::error::Error::Bad(reason))) => {
-            tracing::info!(operation, %reason, "server refused a workflow keyword write");
-            Ok(None)
-        }
-        Ok(Err(error)) => Err(format!("imap {operation} failed: {error}")),
-    }
-}
-
 /// Write a workflow marker onto one mailbox's copies: drop the Satchel
 /// keywords the marker does not keep, then add its own. Other keywords stay.
 /// The vocabulary is fixed, so this needs no FETCH, except for a
@@ -4997,14 +5328,16 @@ where
         .map(|copy| copy.uid)
         .collect::<Vec<_>>();
     if !guarded.is_empty() {
-        let Some(current) = marker_command(
-            op_timeout,
-            session.uid_fetch(ImapProvider::uid_set(&guarded), "(UID FLAGS)"),
-            "UID FETCH workflow keywords",
-        )
-        .await?
-        else {
-            return Ok(MarkerFolderOutcome::Unavailable);
+        let command = format!("UID FETCH {} (UID FLAGS)", ImapProvider::uid_set(&guarded));
+        let current = match timeout(op_timeout, checked_fetch(session, &command)).await {
+            Ok(Ok(entries)) => entries,
+            Ok(Err(error)) if is_server_rejection(&error) => {
+                return Ok(MarkerFolderOutcome::Unavailable);
+            }
+            Ok(Err(error)) => {
+                return Err(format!("imap UID FETCH workflow keywords failed: {error}"))
+            }
+            Err(_) => return Err("imap UID FETCH workflow keywords timed out".into()),
         };
         let markers = current
             .iter()
@@ -5083,7 +5416,7 @@ pub(crate) fn allows_custom_keywords(permanent_flags: &[async_imap::types::Flag<
 /// entry as an envelope. `body` is the entry's `BODY[TEXT]` or, for a backfill
 /// that fetched bodies separately, what that fetch returned.
 fn envelope_from_fetch(
-    entry: &async_imap::types::Fetch,
+    entry: &SyncFetch,
     body: Option<&[u8]>,
     uid: u32,
     context: &EnvelopeContext,
@@ -5135,7 +5468,7 @@ fn envelope_from_fetch(
     let references = parse_header_value(&header, "References")
         .map(|raw| split_references(&raw))
         .unwrap_or_default();
-    let date_rfc3339 = parse_message_date(&header, entry_internal_date(entry), ingested_at);
+    let date_rfc3339 = parse_message_date(&header, entry.internal_date, ingested_at);
     let is_read = entry
         .flags()
         .any(|flag| matches!(flag, async_imap::types::Flag::Seen));
@@ -5175,7 +5508,7 @@ fn envelope_from_fetch(
         bcc_addresses,
         reply_to,
         remote_draft_id,
-        received_at_rfc3339: entry_internal_date(entry).map(|date| date.to_rfc3339()),
+        received_at_rfc3339: entry.internal_date.map(|date| date.to_rfc3339()),
         date_rfc3339,
         body_text: parsed_body.text,
         body_html: parsed_body.html,
@@ -5202,13 +5535,6 @@ fn envelope_from_fetch(
         autocrypt_eligible: crate::chat::autocrypt_eligible_block(&header),
         attachments,
     }
-}
-
-/// The server's own receive time for a fetched message, if it reported one.
-fn entry_internal_date(entry: &async_imap::types::Fetch) -> Option<chrono::DateTime<chrono::Utc>> {
-    entry
-        .internal_date()
-        .map(|value| value.with_timezone(&chrono::Utc))
 }
 
 fn strip_parenthesized_comments(input: &str) -> String {
@@ -7028,6 +7354,257 @@ Content-Type: text/html\r\n\r\n\
         let mut client = async_imap::Client::new(socket);
         client.read_response().await.unwrap();
         client.login("user", "password").await.unwrap()
+    }
+
+    async fn scripted_mailbox(
+        script: Vec<(String, String, &'static str)>,
+    ) -> (
+        async_imap::Session<tokio::net::TcpStream>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let (reader, mut writer) = socket.into_split();
+            let mut lines = tokio::io::BufReader::new(reader).lines();
+            writer.write_all(b"* OK test mailbox\r\n").await.unwrap();
+            let login = lines.next_line().await.unwrap().unwrap();
+            let (tag, login) = login.split_once(' ').unwrap();
+            assert!(login.starts_with("LOGIN "));
+            writer
+                .write_all(format!("{tag} OK login\r\n").as_bytes())
+                .await
+                .unwrap();
+            for (expected, data, verdict) in script {
+                let actual = lines.next_line().await.unwrap().unwrap();
+                let (tag, command) = actual.split_once(' ').unwrap();
+                assert_eq!(command, expected);
+                if verdict.is_empty() {
+                    return;
+                }
+                writer
+                    .write_all(format!("{data}{tag} {verdict}\r\n").as_bytes())
+                    .await
+                    .unwrap();
+            }
+            assert!(lines.next_line().await.unwrap().is_none());
+        });
+        (chunk_session(address).await, server)
+    }
+
+    #[tokio::test]
+    async fn rejected_state_snapshot_discards_partial_fetch_and_listing_replies() {
+        let (mut session, server) = scripted_mailbox(vec![
+            (
+                "UID SEARCH ALL".into(),
+                "* SEARCH 1 2\r\n".into(),
+                "OK searched",
+            ),
+            (
+                "UID FETCH 1,2 (UID FLAGS)".into(),
+                "* 1 FETCH (UID 1 FLAGS (\\Seen))\r\n".into(),
+                "NO incomplete",
+            ),
+            (
+                r#"LIST "" "*""#.into(),
+                "* LIST () \"/\" INBOX\r\n".into(),
+                "BAD incomplete",
+            ),
+        ])
+        .await;
+        let error = super::read_state_snapshot(&mut session, Duration::from_secs(2), 2)
+            .await
+            .unwrap_err();
+        assert!(error.contains("no response"));
+        let error = super::checked_list(&mut session, r#"LIST "" "*""#, Duration::from_secs(2))
+            .await
+            .unwrap_err();
+        assert!(error.contains("bad response"));
+        drop(session);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn imap_state_snapshot_reads_flags_in_bounded_commands() {
+        let ids = (1..=super::SNAPSHOT_FLAG_BATCH as u32 + 1).collect::<Vec<_>>();
+        let search_ids = ids.iter().map(u32::to_string).collect::<Vec<_>>().join(" ");
+        let mut script = vec![(
+            "UID SEARCH ALL".into(),
+            format!("* SEARCH {search_ids}\r\n"),
+            "OK searched",
+        )];
+        for batch in ids.chunks(super::SNAPSHOT_FLAG_BATCH) {
+            let id = batch[0];
+            script.push((
+                format!(
+                    "UID FETCH {} (UID FLAGS)",
+                    super::ImapProvider::uid_set(batch)
+                ),
+                format!("* {id} FETCH (UID {id} FLAGS (\\Seen))\r\n"),
+                "OK fetched",
+            ));
+        }
+        let (mut session, server) = scripted_mailbox(script).await;
+        let states =
+            super::read_state_snapshot(&mut session, Duration::from_secs(2), ids.len() as u32)
+                .await
+                .unwrap();
+        let states = states.expect("SEARCH snapshot");
+        assert_eq!(states.len(), ids.len());
+        assert_eq!(states[0].is_read, Some(true));
+        assert_eq!(states[1].is_read, None);
+        assert_eq!(states.last().unwrap().is_read, Some(true));
+        drop(session);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn esearch_falls_back_to_a_complete_ordered_sequence_snapshot() {
+        let (mut session, server) = scripted_mailbox(vec![(
+            "UID SEARCH ALL".into(),
+            "* ESEARCH UID ALL 11,15\r\n".into(),
+            "OK searched",
+        )])
+        .await;
+        assert!(
+            super::read_state_snapshot(&mut session, Duration::from_secs(2), 2)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        drop(session);
+        server.await.unwrap();
+
+        let reply = "* 1 FETCH (UID 11 FLAGS (\\Seen))\r\n* 2 FETCH (UID 15 FLAGS ())\r\n";
+        let (mut session, server) = scripted_mailbox(vec![
+            ("FETCH 1:2 (UID FLAGS)".into(), reply.into(), "OK fetched"),
+            (
+                "FETCH 1:2 (UID FLAGS)".into(),
+                format!("* 1 EXPUNGE\r\n{reply}"),
+                "OK fetched",
+            ),
+            (
+                "FETCH 1:2 (UID FLAGS)".into(),
+                reply.into(),
+                "OK [UIDVALIDITY 8] changed",
+            ),
+        ])
+        .await;
+        let timeout = Duration::from_secs(2);
+        let states = super::read_sequence_state_snapshot(&mut session, timeout, 2, 7)
+            .await
+            .unwrap();
+        assert_eq!(
+            states
+                .iter()
+                .map(|state| state.remote_id.as_str())
+                .collect::<Vec<_>>(),
+            ["11", "15"]
+        );
+        assert_eq!(states[0].is_read, Some(true));
+        for _ in 0..2 {
+            assert!(
+                super::read_sequence_state_snapshot(&mut session, timeout, 2, 7)
+                    .await
+                    .unwrap_err()
+                    .contains("mailbox changed")
+            );
+        }
+        drop(session);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn copy_move_with_possible_destination_copies_requires_manual_review() {
+        let (mut session, server) = scripted_mailbox(vec![
+            ("UID COPY 7 \"Target\"".into(), String::new(), "OK copied"),
+            (
+                "UID STORE 7 +FLAGS.SILENT (\\Deleted)".into(),
+                String::new(),
+                "NO source not writable",
+            ),
+            ("UID COPY 7 \"Target\"".into(), String::new(), ""),
+        ])
+        .await;
+        for _ in 0..2 {
+            let error = super::ImapProvider::copy_and_remove_source(&mut session, &[7], "Target")
+                .await
+                .unwrap_err();
+            assert!(error.is_permanent());
+            assert_eq!(error.encoded(), super::IMAP_MOVE_COPY_NEEDS_REVIEW);
+        }
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_imap_rejected_chunk_cannot_advance_the_incremental_cursor() {
+        let (mut session, server) = scripted_mailbox(vec![(
+            format!("UID FETCH 1,2,3 {}", super::MESSAGE_FETCH_ITEMS),
+            "* 1 FETCH (UID 1)\r\n".into(),
+            "NO incomplete",
+        )])
+        .await;
+        let messages = (1..=3).map(|uid| listed(uid, 10)).collect::<Vec<_>>();
+        let plan = super::plan_incremental_fetch(&messages, TEST_LIMITS);
+        let error = super::fetch_planned_chunks(&mut session, &plan, Duration::from_secs(2))
+            .await
+            .unwrap_err();
+        assert!(error.contains("no response"));
+        drop(session);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn imap_writes_require_ack_and_plain_expunge_requires_confirmed_search() {
+        let (mut session, server) = scripted_mailbox(vec![
+            (
+                "UID STORE 7 +FLAGS.SILENT (\\Seen)".into(),
+                String::new(),
+                "NO read only",
+            ),
+            ("UID EXPUNGE 7".into(), String::new(), "BAD no UIDPLUS"),
+            (
+                "UID SEARCH DELETED".into(),
+                "* SEARCH 7\r\n".into(),
+                "NO incomplete",
+            ),
+            ("UID EXPUNGE 7".into(), String::new(), "BAD no UIDPLUS"),
+            (
+                "UID SEARCH DELETED".into(),
+                "* SEARCH 7 8\r\n".into(),
+                "OK searched",
+            ),
+            ("UID EXPUNGE 7".into(), String::new(), "BAD no UIDPLUS"),
+            (
+                "UID SEARCH DELETED".into(),
+                "* SEARCH 7\r\n".into(),
+                "OK searched",
+            ),
+            ("EXPUNGE".into(), "* 1 EXPUNGE\r\n".into(), "OK expunged"),
+        ])
+        .await;
+        assert!(
+            super::ImapProvider::apply_uid_store(&mut session, "7", "+FLAGS.SILENT (\\Seen)")
+                .await
+                .unwrap_err()
+                .contains("no response")
+        );
+        assert!(super::ImapProvider::expunge_uids(&mut session, &[7])
+            .await
+            .unwrap_err()
+            .contains("no response"));
+        assert!(super::ImapProvider::expunge_uids(&mut session, &[7])
+            .await
+            .unwrap_err()
+            .contains("foreign"));
+        super::ImapProvider::expunge_uids(&mut session, &[7])
+            .await
+            .unwrap();
+        drop(session);
+        server.await.unwrap();
     }
 
     /// A chunk that breaks off keeps the chunks before it: the next run starts

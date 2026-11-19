@@ -60,6 +60,28 @@ async fn assert_untouched(pool: &SqlitePool, thread: &str) {
     assert_eq!(moved, 0, "{thread} kept its messages where they were");
 }
 
+async fn put_thread_in_trash(
+    pool: &SqlitePool,
+    account: &str,
+    remote: &str,
+    uidvalidity: Option<u32>,
+    thread: &str,
+) {
+    let folder = format!("{account}-trash");
+    sqlx::query(
+        "INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, uidvalidity, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'trash', ?, ?, '2026-01-01', '2026-01-01')",
+    )
+    .bind(&folder).bind(account).bind(remote).bind(remote).bind(remote).bind(uidvalidity.map(i64::from))
+    .execute(pool).await.unwrap();
+    sqlx::query("UPDATE messages SET folder_id = ? WHERE thread_id = ?")
+        .bind(folder)
+        .bind(thread)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
 fn ids(range: std::ops::Range<usize>) -> Vec<String> {
     range.map(|n| format!("t{n:05}")).collect()
 }
@@ -176,17 +198,7 @@ async fn a_trash_a_later_batch_stops_keeps_an_undo_for_exactly_what_moved() {
 async fn a_stopped_trash_that_only_deleted_permanently_leaves_no_empty_receipt() {
     let pool = pool().await;
     let threads = seed(&pool, 2).await;
-    sqlx::query(
-        "INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, uidvalidity, created_at, updated_at)
-         VALUES ('imap-a-trash', 'imap-a', 'Trash', 'Trash', 'trash', 'Trash', 12, '2026-01-01', '2026-01-01')",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
-    sqlx::query("UPDATE messages SET folder_id = 'imap-a-trash' WHERE thread_id = 't00000'")
-        .execute(&pool)
-        .await
-        .unwrap();
+    put_thread_in_trash(&pool, "imap-a", "Trash", Some(12), "t00000").await;
     fail_writes_of(&pool, "t00001").await;
     let queue = SyncQueue::new();
     mail_actions::set_move_batch_threads_for_tests(Some(1));
@@ -234,21 +246,11 @@ async fn a_first_batch_failure_changes_nothing() {
 #[tokio::test]
 async fn a_failed_batch_reports_none_of_its_permanent_deletes() {
     let pool = pool().await;
-    let threads = seed(&pool, 4).await;
-    sqlx::query(
-        "INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at)
-         VALUES ('gmail-trash', 'gmail', 'TRASH', 'TRASH', 'trash', 'TRASH', '2026-01-01', '2026-01-01')",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
-    // Batches of two: t0+t1 commit; t2 (Gmail, all in Trash) is deleted for
-    // good, then t3's writes fail and take t2's deletion back with them.
-    sqlx::query("UPDATE messages SET folder_id = 'gmail-trash' WHERE thread_id = 't00002'")
-        .execute(&pool)
-        .await
-        .unwrap();
-    fail_writes_of(&pool, "t00003").await;
+    let threads = seed(&pool, 6).await;
+    // The first four moves commit. In the final batch, the second thread's
+    // failed writes roll back the first thread's permanent IMAP deletion.
+    put_thread_in_trash(&pool, "imap-a", "Trash", Some(12), "t00004").await;
+    fail_writes_of(&pool, "t00005").await;
     let queue = SyncQueue::new();
     mail_actions::set_move_batch_threads_for_tests(Some(2));
     let receipt = mail_actions::trash_threads(&pool, &queue, &threads)
@@ -261,13 +263,13 @@ async fn a_failed_batch_reports_none_of_its_permanent_deletes() {
         "{:?}",
         receipt.permanently_deleted
     );
-    assert_eq!(receipt.undo_thread_ids, ids(0..2));
-    assert_eq!(receipt.stopped_early.expect("stopped").remaining, ids(2..4));
-    let kept: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM messages WHERE thread_id = 't00002'")
+    assert_eq!(receipt.undo_thread_ids, ids(0..4));
+    assert_eq!(receipt.stopped_early.expect("stopped").remaining, ids(4..6));
+    let kept: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM messages WHERE thread_id = 't00004'")
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(kept, 3, "t2 kept its messages");
+    assert_eq!(kept, 3, "the IMAP thread kept its messages");
     let deletes: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM sync_queue WHERE json_extract(payload, '$.kind') = 'delete'",
     )
@@ -275,4 +277,37 @@ async fn a_failed_batch_reports_none_of_its_permanent_deletes() {
     .await
     .unwrap();
     assert_eq!(deletes, 0);
+}
+
+#[tokio::test]
+async fn a_permanent_gmail_delete_refuses_the_whole_mixed_selection() {
+    let pool = pool().await;
+    let threads = seed(&pool, 4).await;
+    put_thread_in_trash(&pool, "gmail", "TRASH", None, "t00002").await;
+    let queue = SyncQueue::new();
+    mail_actions::set_move_batch_threads_for_tests(Some(1));
+    let result = mail_actions::trash_threads(&pool, &queue, &threads).await;
+    mail_actions::set_move_batch_threads_for_tests(None);
+
+    assert_eq!(
+        result.unwrap_err(),
+        "backend.errors.gmailPermanentDeleteUnavailable"
+    );
+    for thread in &threads {
+        assert_untouched(&pool, thread).await;
+    }
+    let kept: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM messages WHERE thread_id = 't00002' AND folder_id = 'gmail-trash'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(kept, 3);
+    for table in ["sync_queue", "mail_action_receipts"] {
+        let rows: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(rows, 0, "{table}");
+    }
 }
