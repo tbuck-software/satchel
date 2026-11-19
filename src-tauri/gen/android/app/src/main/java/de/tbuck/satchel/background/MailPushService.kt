@@ -4,6 +4,10 @@ import android.app.Application
 import android.content.Context
 import android.os.Build
 import android.util.Base64
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.workDataOf
 import androidx.work.Configuration
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
@@ -92,6 +96,13 @@ class MailPushService : FirebaseMessagingService() {
       val device = message.data.getValue("device")
       val prefs = PushStore.prefs(this)
       if (!prefs.contains("received.$device")) prefs.edit().putBoolean("received.$device", true).apply()
+      message.data["verify"]?.takeIf { it.matches(Regex("[A-Za-z0-9_-]{43}")) }?.let {
+        val peer = prefs.getString("device.$device", null)?.let(::JSONObject)
+        if (peer?.optBoolean("pending") == true && prefs.edit().putString("challenge.$device", it).commit()) {
+          val work = OneTimeWorkRequestBuilder<RelayReceipt>().setInputData(workDataOf("device" to device)).build()
+          WorkManager.getInstance(this).enqueueUniqueWork("satchel-receipt-$device", ExistingWorkPolicy.KEEP, work)
+        }
+      }
       val signalId = message.messageId ?: "$device-${message.data.getValue("time")}"
       BackgroundMailSyncWorkScheduler.wake(this, signalId)
     }

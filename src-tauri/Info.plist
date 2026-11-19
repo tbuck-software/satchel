@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Satchel macht diesen Mac beim Koppeln für dein Handy im lokalen Netzwerk sichtbar.</string>
+  <key>NSBonjourServices</key>
+  <array><string>_satchel-pair._tcp</string></array>
   <key>NSContactsUsageDescription</key>
   <string>Satchel nutzt deine Kontakte, um Profilbilder bekannter Absender anzuzeigen.</string>
   <key>LSFileQuarantineEnabled</key>

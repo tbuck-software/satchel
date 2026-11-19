@@ -36,6 +36,19 @@ class BootRescheduleReceiver : BroadcastReceiver() {
 class BackgroundSyncPlugin(private val activity: Activity) : Plugin(activity) {
   private val pairing by lazy { PushPairing(activity.applicationContext) }
 
+  private val relay by lazy { RelayPairing(activity.applicationContext) }
+  private val relayWorker = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+  @Command
+  fun relayPush(invoke: Invoke) {
+    relayWorker.execute {
+      runCatching {
+        val args = invoke.getArgs()
+        relay.apply(args.getString("action"), args.optString("id"), args.getString("origin"))
+      }.onSuccess { invoke.resolve(it) }.onFailure { invoke.reject("relay_push") }
+    }
+  }
+
   @Command
   fun pushDevices(invoke: Invoke) {
     activity.runOnUiThread {

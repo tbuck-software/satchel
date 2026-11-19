@@ -315,3 +315,10 @@ import type { PushDeviceAction } from './generated/app/commands/background_sync/
 export function backendPushDevices(action: PushDeviceAction, id?: string): Promise<PushDevices> {
   return invoke<PushDevices>('push_devices', { action, id: id ?? null });
 }
+
+import type { RelayStatus } from './generated/app/commands/relay_push/RelayStatus';
+import type { RelayAction } from './generated/app/commands/relay_push/RelayAction';
+
+export function backendRelayPush(action: RelayAction, id?: string): Promise<RelayStatus> {
+  return invoke<RelayStatus>('relay_push', { action, id: id ?? null });
+}

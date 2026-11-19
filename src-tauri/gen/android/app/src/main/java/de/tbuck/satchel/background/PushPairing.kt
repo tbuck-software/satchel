@@ -246,7 +246,7 @@ internal class PushPairing(private val context: Context) {
         val direct = directAddress?.let { " --discover $it" }.orEmpty()
         put("command", "curl -fsSL https://raw.githubusercontent.com/tbuck-software/satchel/main/tooling/push-device/install.sh | sh -s -- $key$option$direct")
       }
-      put("devices", JSONArray(PushStore.devices(context).map {
+      put("devices", JSONArray(PushStore.devices(context).filterNot { it.has("relay") }.map {
         JSONObject().put("id", it.getString("id")).put("name", it.getString("name"))
           .put("state", if (prefs.contains("received." + it.getString("id"))) "verified" else "paired")
       }))

@@ -1974,6 +1974,26 @@ export default {
                 }
             }
         },
+        "relay_push": {
+            "kind": "object",
+            "fields": {
+                "action": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "id": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
+        },
         "release_draft_editor": {
             "kind": "object",
             "fields": {

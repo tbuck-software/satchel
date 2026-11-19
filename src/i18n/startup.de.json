@@ -1089,6 +1089,10 @@
     "pushDevices": {
       "failed": "Verbindung fehlgeschlagen. Prüfe das Netzwerk und die Meldung auf dem Rechner und versuche es erneut."
     },
+    "relay": {
+      "failed": "Verbindung fehlgeschlagen. Prüfe deine Netzwerkverbindung und versuche es erneut.",
+      "unavailable": "Der gemeinsame Push-Dienst ist in dieser Version noch nicht verfügbar."
+    },
     "rules": {
       "empty": "Noch keine Regeln angelegt.",
       "title": "Automatische Regeln"

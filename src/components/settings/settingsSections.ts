@@ -185,5 +185,9 @@ export function useSettingsSections() {
   const trayAvailable = computed(() =>
     shellCapabilities.value !== null && supportsDesktopBackgroundControls(shellCapabilities.value));
 
-  return { groups, labels, mobileSyncPlatform, trayAvailable };
+  const relayPlatform = computed(() => {
+    const platform = shellCapabilities.value?.platform;
+    return platform && ['macos', 'windows', 'linux', 'android'].includes(platform) ? platform : null;
+  });
+  return { groups, labels, mobileSyncPlatform, relayPlatform, trayAvailable };
 }

@@ -306,6 +306,7 @@ const COMMANDS: &[&str] = &[
     "set_background_sync",
     "background_sync_status",
     "push_devices",
+    "relay_push",
     "open_background_sync_settings",
     "load_message_body",
     "take_pending_notification_thread",

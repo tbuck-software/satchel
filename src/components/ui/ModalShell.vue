@@ -33,12 +33,14 @@ withDefaults(
     label: string;
     /** Width of the dialog in the desktop case. The gutter is the frame's. */
     width?: string;
+    /** Short prompts can keep a bounded dialog on a phone. */
+    compact?: boolean;
     /** Height of the dialog in the desktop case. `auto` follows the content. */
     height?: string;
     /** Whether clicking the backdrop dismisses. Off for destructive flows. */
     dismissOnBackdrop?: boolean;
   }>(),
-  { width: '860px', height: '620px', dismissOnBackdrop: true },
+  { width: '860px', height: '620px', compact: false, dismissOnBackdrop: true },
 );
 
 const emit = defineEmits<{ dismiss: [] }>();
@@ -79,7 +81,7 @@ onBeforeUnmount(unlockScroll);
 <template>
   <div
     class="shell-backdrop"
-    :class="{ 'shell-backdrop--full': ui.isSinglePane }"
+    :class="{ 'shell-backdrop--full': ui.isSinglePane && !compact, 'shell-backdrop--compact': compact }"
     @click="dismissOnBackdrop ? onBackdropClick($event) : undefined"
     @keydown.tab="onTab"
   >
@@ -90,7 +92,7 @@ onBeforeUnmount(unlockScroll);
       aria-modal="true"
       tabindex="-1"
       :aria-label="label"
-      :style="ui.isSinglePane ? undefined : { '--shell-w': width, '--shell-h': height }"
+      :style="ui.isSinglePane && !compact ? undefined : { '--shell-w': width, '--shell-h': height }"
     >
       <slot />
     </div>
@@ -137,6 +139,11 @@ onBeforeUnmount(unlockScroll);
   background: var(--bg-surface);
   box-shadow: var(--shadow-lg), 0 0 0 1px var(--border-color-muted);
   overflow: hidden;
+}
+
+.shell-backdrop--compact .shell-panel {
+  max-width: calc(100% - 2 * var(--space-lg));
+  overflow-y: auto;
 }
 
 .shell-backdrop--full .shell-panel {

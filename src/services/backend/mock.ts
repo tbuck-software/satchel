@@ -1645,7 +1645,33 @@ function mergeJobById(id: unknown): MockMergeJob {
 
 const mockPushDevices: { id: string; name: string; state: string }[] = [];
 let pushScanStarted = 0;
+let relayPhase = 'idle';
+let relayChanged = 0;
+const relayPeers = new Map<string, string>();
 const handlers: Record<string, Handler> = {
+  background_sync_status: () => ({ enabled: true, running: true, batteryOptimizationExempt: true }),
+  open_background_sync_settings: () => undefined,
+  relay_push: ({ action, id }) => {
+    const phone = /Android/.test(navigator.userAgent);
+    const peer = phone ? 'Mac mini' : 'Pixel';
+    if (action === 'start') relayPhase = phone ? 'searching' : 'visible';
+    if (action === 'select') relayPhase = 'requested';
+    if (action === 'approve') relayPhase = 'verifying';
+    if (action === 'cancel') relayPhase = 'idle';
+    if (action === 'remove') relayPeers.delete(String(id));
+    if (action !== 'status') relayChanged = Date.now();
+    if (Date.now() - relayChanged > 3500 && action === 'status') {
+      if (relayPhase === 'visible') relayPhase = 'requested';
+      else if (relayPhase === 'verifying' || (phone && relayPhase === 'requested')) {
+        relayPeers.set('example', peer);
+        relayPhase = 'idle';
+      }
+    }
+    const device = { id: 'example', name: peer, state: 'visible' };
+    return { phase: relayPhase, devices: Array.from(relayPeers, ([id, name]) => ({ id, name, state: 'verified' })),
+      nearby: relayPhase === 'searching' ? [device] : [], code: relayPhase === 'requested' ? '325091' : null,
+      request: 'example', name: peer };
+  },
   push_devices: ({ action, id }) => {
     if (action === 'start') pushScanStarted = Date.now();
     if (action === 'cancel') pushScanStarted = 0;

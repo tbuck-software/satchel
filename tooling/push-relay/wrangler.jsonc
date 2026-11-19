@@ -1,0 +1,14 @@
+{
+  "name": "satchel-push",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-06-01",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": { "enabled": false },
+  "durable_objects": { "bindings": [{ "name": "LINKS", "class_name": "PushLink" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PushLink"] }],
+  "ratelimits": [
+    { "name": "ENROLL_LIMIT", "namespace_id": "1001", "simple": { "limit": 12, "period": 60 } },
+    { "name": "REQUEST_LIMIT", "namespace_id": "1002", "simple": { "limit": 240, "period": 60 } }
+  ]
+}

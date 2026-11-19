@@ -1,6 +1,6 @@
 # Satchel privacy and data handling
 
-Updated: 6 November 2026
+Updated: 19 November 2026
 
 Satchel is an open-source mail client maintained by tbuck-software. This notice
 describes the app distributed from [the Satchel repository](https://github.com/tbuck-software/satchel).
@@ -50,7 +50,14 @@ Pairing a push device on Android registers Satchel with Firebase Cloud Messaging
 Google receives the installation identifier, network metadata, delivery time and
 an authenticated wake signal. The phone fetches the messages from the mail
 provider. Each paired computer uses its own local Satchel profile or the IMAP
-accounts configured on that computer. Removing a device in Satchel revokes its
+accounts configured on that computer. When you choose the shared push service,
+Satchel advertises a temporary pairing ID on your local network for up to five
+minutes. The relay at Cloudflare stores the pairing ID, phone model, FCM delivery
+address, verification key, hashed device credentials and last delivery time.
+The relay receives connection metadata such as IP addresses. Wake requests
+contain no mailbox address, subject, sender, message body or mail login.
+Removing a shared pairing deletes its record at the relay once the request reaches it.
+Removing a device in Satchel revokes its
 wake signals. The computer owner can stop its watcher and remove its credentials.
 
 Translation is off until you add a DeepL API key and allow an account. When

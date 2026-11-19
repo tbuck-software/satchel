@@ -12,7 +12,17 @@ trap 'rm -f "$file"' EXIT
 curl --fail --silent --show-error --location --proto '=https' \
   https://raw.githubusercontent.com/tbuck-software/satchel/main/tooling/push-device/device.py -o "$file"
 mv "$file" "$root/device.py"
-if ( : </dev/tty ) 2>/dev/null; then
-  exec "$root/venv/bin/python" "$root/device.py" pair "$@" </dev/tty
+action=pair
+if [ "${1:-}" = visible ]; then
+  shift
+  action=visible
+  if [ -z "${SATCHEL_PUSH_RELAY_URL:-}" ]; then
+    SATCHEL_PUSH_RELAY_URL=$(curl --fail --silent --show-error --location --proto '=https' \
+      https://raw.githubusercontent.com/tbuck-software/satchel/main/tooling/push-relay/origin.txt)
+    export SATCHEL_PUSH_RELAY_URL
+  fi
 fi
-exec "$root/venv/bin/python" "$root/device.py" pair "$@" </dev/null
+if ( : </dev/tty ) 2>/dev/null; then
+  exec "$root/venv/bin/python" "$root/device.py" "$action" "$@" </dev/tty
+fi
+exec "$root/venv/bin/python" "$root/device.py" "$action" "$@" </dev/null

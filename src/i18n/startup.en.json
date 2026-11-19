@@ -1089,6 +1089,10 @@
     "pushDevices": {
       "failed": "Could not connect. Check the network and the message on the computer, then try again."
     },
+    "relay": {
+      "failed": "Could not connect. Check your network connection and try again.",
+      "unavailable": "The shared push service is unavailable in this build."
+    },
     "rules": {
       "empty": "No rules yet.",
       "title": "Automatic rules"

@@ -97,6 +97,8 @@ struct StoredMessage {
     /// First seen after the account's notification cutoff: new mail, not a
     /// first sync, a re-sync or a UIDVALIDITY reset replaying old mail.
     newly_seen: bool,
+    #[cfg(desktop)]
+    relay_pending: bool,
     message_is_draft: bool,
     message_is_sent: bool,
     attachment_ids: Vec<String>,
@@ -315,6 +317,8 @@ pub(crate) async fn upsert_provider_messages(
             }
         }
         tx.commit().await.map_err(|error| error.to_string())?;
+        #[cfg(desktop)]
+        wake_relay_after_commit(app, stored.iter().any(|(_, message)| message.relay_pending));
         replay_ingest_effects(pool, account_id).await?;
         for (message, stored) in stored {
             if let Err(error) = finish_provider_message(
@@ -471,6 +475,8 @@ pub(crate) async fn upsert_gmail_snapshot_message(
         .await
         .map_err(|error| error.to_string())?;
     tx.commit().await.map_err(|error| error.to_string())?;
+    #[cfg(desktop)]
+    wake_relay_after_commit(app, stored.iter().any(|message| message.relay_pending));
     replay_ingest_effects(pool, account_id).await?;
     for ((folder_id, label, folder_type), stored) in targets.iter().zip(stored) {
         if let Err(error) = finish_provider_message(
@@ -1257,11 +1263,32 @@ async fn persist_provider_message(
     if newly_seen && !message_is_draft && !sender_is_account {
         apply_autocrypt_header(tx, account_id, folder_type, message).await?;
     }
+    // Commit the wake with the mail. The counter lets a concurrent delivery acknowledge
+    // exactly the arrivals it covered, even if another one arrives during the HTTP call.
+    #[cfg(desktop)]
+    let relay_pending = if newly_seen
+        && !message_is_draft
+        && !message_is_sent
+        && (folder_type == "inbox"
+            || (provider_kind == "gmail"
+                && message.mailbox_ids.iter().any(|label| label == "INBOX")))
+    {
+        sqlx::query("UPDATE desktop_push_links SET pending=pending+1")
+            .execute(&mut **tx)
+            .await
+            .map_err(|error| error.to_string())?
+            .rows_affected()
+            > 0
+    } else {
+        false
+    };
     Ok(Some(StoredMessage {
         message_id,
         thread_id,
         was_pre_existing,
         newly_seen,
+        #[cfg(desktop)]
+        relay_pending,
         message_is_draft,
         message_is_sent,
         attachment_ids,
@@ -1337,6 +1364,17 @@ async fn apply_autocrypt_header(
     .map_err(|error| error.to_string())
 }
 
+#[cfg(desktop)]
+fn wake_relay_after_commit(app: Option<&AppHandle>, pending: bool) {
+    if pending {
+        if let Some(sender) =
+            app.and_then(|app| app.try_state::<crate::commands::relay_push::Desktop>())
+        {
+            sender.mail_arrived();
+        }
+    }
+}
+
 async fn finish_provider_message(
     app: Option<&AppHandle>,
     pool: &SqlitePool,
@@ -1360,6 +1398,7 @@ async fn finish_provider_message(
         message_is_sent,
         attachment_ids,
         workflow_marker_changed,
+        ..
     } = stored;
     // Provider downloads and event publishing follow the committed rows.
     if folder_type == "archive" || folder_type == "aside" || is_snooze_folder(folder_remote_id) {
@@ -2444,6 +2483,33 @@ mod tests {
         )
         .await
         .unwrap()
+    }
+
+    #[cfg(desktop)]
+    #[tokio::test]
+    async fn relay_queues_fresh_mail_once_for_each_paired_phone() {
+        let pool = ingest_pool().await;
+        sqlx::query("INSERT INTO desktop_push_links(id,name,credential,approved) VALUES('a','A','test',1),('b','B','test',1)")
+            .execute(&pool).await.unwrap();
+        sqlx::query("UPDATE accounts SET last_sync_at='2026-01-01T00:00:00Z'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let mut fresh = envelope("1");
+        fresh.date_rfc3339 = "2026-01-02T00:00:00Z".into();
+        let mut old = envelope("2");
+        old.date_rfc3339 = "2025-01-01T00:00:00Z".into();
+        let messages = [fresh.clone(), old, fresh];
+        assert!(ingest_many(&pool, &messages)
+            .await
+            .into_iter()
+            .all(|result| result.is_ok()));
+        let pending: Vec<i64> =
+            sqlx::query_scalar("SELECT pending FROM desktop_push_links ORDER BY id")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(pending, [1, 1]);
     }
 
     #[tokio::test]
