@@ -110,7 +110,13 @@ remaining warnings are:
 - `proc-macro-error`, `zbus_names`, `zvariant`, and `zvariant_derive` have
   maintenance advisories in the desktop dependency graph.
 - `glib` 0.18.5 has an unsoundness advisory in the Linux GTK stack used by
-  Tauri.
+  Tauri: RUSTSEC-2024-0429, Dependabot GHSA-wrw7-89jp-8q8g, fixed in 0.20.
+  `gtk` 0.18 (gtk3-rs, archived) requires `glib` ^0.18, and Tauri 2, wry,
+  tao and muda need that GTK 3 stack on Linux, so no compatible fix exists.
+  The unsound code is `VariantStrIter`, reached only through
+  `Variant::array_iter_str`; Satchel does not depend on `glib` directly, and
+  none of the crates between it and Tauri call that method. The Dependabot
+  alert is dismissed as tolerable risk; recheck when Tauri moves to GTK 4.
 - `tokio` has an I/O-safety unsoundness advisory for `AsyncFd` constructors,
   RUSTSEC-2026-0386, in both lockfiles, at 1.49.0 in the root and 1.53.2 in fuzz.
 
