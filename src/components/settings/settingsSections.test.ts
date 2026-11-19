@@ -26,6 +26,8 @@ const DESKTOP: BackendRuntimeCapabilities = {
   background_sync: false,
   contacts: true,
   file_associations: true,
+  directory_backup: true,
+  document_backup: true,
   deep_links: false,
   push: false,
 };
@@ -41,6 +43,7 @@ const PHONE: BackendRuntimeCapabilities = {
   native_crypto: false,
   background_sync: true,
   file_associations: false,
+  directory_backup: false,
   deep_links: true,
   push: true,
 };

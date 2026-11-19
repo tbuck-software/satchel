@@ -210,6 +210,48 @@ test('a draft sent or discarded elsewhere still lets the composer close', async 
   await expect(composer).toHaveCount(0);
 });
 
+test('sending a stale draft asks the editor to resolve the conflict', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('region', { name: 'Unsent drafts' })
+    .getByRole('button', { name: 'Continue editing', exact: true }).click();
+  const composer = page.getByRole('dialog', { name: 'Compose email' });
+  const send = composer.getByRole('button', { name: 'Send', exact: true });
+  await expect(send).toBeEnabled({ timeout: 20_000 });
+  await page.evaluate(async (mockModule) => {
+    const backend = await import(mockModule) as { sendCommand: (command: string, payload: { id: string }) => Promise<unknown> };
+    await backend.sendCommand('delete_draft', { id: 'dr-offer' });
+  }, '/src/services/backend/mock.ts');
+  await send.click();
+
+  await expect(composer.getByRole('alert')).toContainText('Draft not saved');
+  await expect(composer.getByRole('button', { name: 'Save as new draft' })).toBeVisible();
+  await expect(send).toBeDisabled();
+});
+
+test('closing immediately after clearing a saved draft keeps it empty', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'New message', exact: true }).click();
+  const composer = page.getByRole('dialog', { name: 'Compose email' });
+  const subject = composer.getByRole('textbox', { name: 'Subject', exact: true });
+  const close = composer.getByRole('button', { name: 'Close composer' });
+  const reopen = page.locator('.toast__action').filter({ hasText: 'Continue editing' }).last();
+  const listDrafts = () => page.evaluate(async (mockModule) => {
+    const backend = await import(mockModule) as { sendCommand: (command: string) => Promise<Array<{ id: string; subject: string }>> };
+    return backend.sendCommand('list_drafts');
+  }, '/src/services/backend/mock.ts');
+  await subject.fill('Subject-only draft');
+  await close.click();
+  await reopen.click();
+  await expect(subject).toHaveValue('Subject-only draft');
+  const draft = (await listDrafts()).find(entry => entry.subject === 'Subject-only draft');
+  expect(draft).toBeDefined();
+
+  await subject.fill('');
+  await close.click();
+  await expect(composer).toHaveCount(0);
+  await expect.poll(async () => (await listDrafts()).find(entry => entry.id === draft?.id)?.subject).toBe('');
+});
+
 test('phone ComposeFab opens a full-screen composer and returns to the mailbox', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/?mockSignatures=1');

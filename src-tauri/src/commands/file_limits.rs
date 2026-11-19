@@ -8,6 +8,8 @@
 
 use std::path::Path;
 
+use tokio::io::AsyncReadExt;
+
 /// Ceiling for a file a command reads in one piece.
 ///
 /// Shared with the `.eml` viewer, which had the only such check in the tree.
@@ -24,13 +26,30 @@ pub async fn guard_import_size(path: &Path) -> Result<(), String> {
     let Ok(meta) = tokio::fs::metadata(path).await else {
         return Ok(());
     };
-    if meta.len() <= MAX_IMPORT_BYTES {
+    check_import_size(meta.len())
+}
+
+/// Enforce the same limit for document providers that do not report a length.
+pub(super) async fn read_bounded(
+    file: impl tokio::io::AsyncRead + Unpin,
+) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+    file.take(MAX_IMPORT_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .await
+        .map_err(|error| error.to_string())?;
+    check_import_size(bytes.len() as u64)?;
+    Ok(bytes)
+}
+
+fn check_import_size(bytes: u64) -> Result<(), String> {
+    if bytes <= MAX_IMPORT_BYTES {
         return Ok(());
     }
     Err(serde_json::json!({
         "key": FILE_TOO_LARGE,
         "params": {
-            "megabytes": meta.len() / (1024 * 1024),
+            "megabytes": bytes / (1024 * 1024),
             "limit": MAX_IMPORT_BYTES / (1024 * 1024),
         },
     })

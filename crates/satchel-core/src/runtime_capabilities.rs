@@ -29,6 +29,8 @@ pub struct RuntimeCapabilities {
     pub background_sync: bool,
     pub contacts: bool,
     pub file_associations: bool,
+    pub directory_backup: bool,
+    pub document_backup: bool,
     pub deep_links: bool,
     pub push: bool,
 }
@@ -46,6 +48,8 @@ pub fn capabilities_for(platform: PlatformKind) -> RuntimeCapabilities {
         background_sync: true,
         contacts: matches!(platform, PlatformKind::Macos),
         file_associations: desktop,
+        directory_backup: desktop,
+        document_backup: true,
         deep_links: true,
         push: mobile,
     }
@@ -95,6 +99,8 @@ mod tests {
             assert!(capabilities.single_instance);
             assert!(capabilities.file_associations);
             assert!(capabilities.native_crypto);
+            assert!(capabilities.directory_backup);
+            assert!(capabilities.document_backup);
         }
     }
 
@@ -107,6 +113,8 @@ mod tests {
             assert!(!capabilities.single_instance);
             assert!(!capabilities.file_associations);
             assert!(capabilities.native_crypto);
+            assert!(!capabilities.directory_backup);
+            assert!(capabilities.document_backup);
         }
     }
 

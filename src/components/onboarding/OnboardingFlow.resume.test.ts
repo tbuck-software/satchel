@@ -117,6 +117,29 @@ describe('onboarding after a process death during authorization', () => {
     expect(wrapper.text()).not.toContain('Continuing the sign-in you started earlier.');
   });
 
+  it('activates the account retained by the completed flow', async () => {
+    backend.backendListOpenOauthFlows.mockResolvedValue([
+      {
+        state: 'flow-1',
+        account_id: 'pending-account',
+        provider: 'gmail',
+        created_at: new Date().toISOString(),
+        expires_at: new Date(Date.now() + 600_000).toISOString(),
+      },
+    ]);
+    backend.backendPollOauthFlow.mockResolvedValue({
+      status: 'completed',
+      result: { account_id: 'existing-account' },
+    });
+
+    mount(OnboardingFlow);
+    await settle();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle();
+
+    expect(accounts.setActiveAccount).toHaveBeenCalledWith('existing-account');
+  });
+
   it('does not leave the half-connected account behind when the flow ended badly', async () => {
     backend.backendListOpenOauthFlows.mockResolvedValue([
       {

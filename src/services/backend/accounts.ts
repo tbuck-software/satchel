@@ -237,7 +237,7 @@ export async function backendPollOauthFlow(state: string): Promise<BackendOauthP
 export async function backendCompleteOauthFlow(payload: {
   state: string;
   code: string;
-}): Promise<BackendOauthStatus> {
+}): Promise<BackendOauthPollResult> {
   return invoke('complete_oauth_flow', {
     input: {
       state: payload.state,

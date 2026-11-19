@@ -27,3 +27,7 @@ export function inviteAcceptsResponse(
 ): boolean {
   return isInvitation(invite) && normalizedMethod(invite) !== 'PUBLISH' && (invite.cancelled ?? 0) !== 1;
 }
+
+export function isWholeInviteSeries(invite: Pick<BackendCalendarInvite, 'recurring' | 'recurrence_id'>): boolean {
+  return Boolean(invite.recurring) && !invite.recurrence_id;
+}

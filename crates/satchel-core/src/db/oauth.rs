@@ -5,10 +5,12 @@
 //! same verifier even though the database row was consumed atomically.
 
 use chrono::{DateTime, Utc};
-use sqlx::{FromRow, SqlitePool};
+use sqlx::{types::Json, FromRow, Sqlite, SqlitePool, Transaction};
 use thiserror::Error;
 
 use crate::utils::{crypto, oauth::OAuthGrantRequest};
+
+use super::accounts::OAuthAccountConnection;
 
 #[derive(Clone)]
 pub struct NewOAuthFlowSession {
@@ -41,6 +43,7 @@ pub enum OAuthFlowProgress {
     Exchanging,
     /// The flow ended for this message key.
     Failed(String),
+    Completed(OAuthAccountConnection),
 }
 
 /// A flow seen without spending it.
@@ -77,6 +80,8 @@ struct StoredOAuthFlowStatus {
     created_at: String,
     expires_at: String,
     error_key: Option<String>,
+    completed_connection: Option<Json<OAuthAccountConnection>>,
+    authorizing: bool,
 }
 
 #[derive(Debug, Error)]
@@ -225,104 +230,73 @@ impl<'a> OAuthFlowRepository<'a> {
         })
     }
 
-    /// End a flow for good and record why, as one message key.
-    ///
-    /// The verifier goes first so a later callback cannot revive an already
-    /// failed flow; the key stays behind so a poll after a restart can say
-    /// what happened instead of "unknown flow".
-    pub async fn fail(&self, state: &str, error_key: &str) -> Result<(), OAuthFlowError> {
+    /// End an authorization that has not yet handed its verifier to an exchange.
+    pub async fn cancel_authorization(
+        &self,
+        state: &str,
+        error_key: &str,
+    ) -> Result<(), OAuthFlowError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let removed = sqlx::query_as::<_, StoredOAuthFlowStatus>(
-            "DELETE FROM oauth_flow_sessions
-             WHERE state = ?
-             RETURNING state, account_id, provider, created_at, expires_at, NULL AS error_key",
+        let removed = sqlx::query_as::<_, (String, String, String, String)>(
+            "DELETE FROM oauth_flow_sessions WHERE state = ?
+             RETURNING account_id, provider, created_at, expires_at",
         )
         .bind(state)
         .fetch_optional(&mut *transaction)
         .await?;
-        match removed {
-            Some(session) => {
-                sqlx::query(
-                    "INSERT INTO oauth_flow_outcomes
-                     (state, account_id, provider, created_at, expires_at, error_key)
-                     VALUES (?, ?, ?, ?, ?, ?)
-                     ON CONFLICT(state) DO UPDATE SET error_key = excluded.error_key",
-                )
-                .bind(state)
-                .bind(session.account_id)
-                .bind(session.provider)
-                .bind(session.created_at)
-                .bind(session.expires_at)
-                .bind(error_key)
-                .execute(&mut *transaction)
-                .await?;
-            }
-            // The verifier was already spent, so only the outcome row is left.
-            // A recorded failure is never overwritten by a later one.
-            None => {
-                sqlx::query(
-                    "UPDATE oauth_flow_outcomes SET error_key = ?
-                     WHERE state = ? AND error_key IS NULL",
-                )
-                .bind(error_key)
-                .bind(state)
-                .execute(&mut *transaction)
-                .await?;
-            }
+        if let Some((account_id, provider, created_at, expires_at)) = removed {
+            sqlx::query(
+                "INSERT INTO oauth_flow_outcomes
+                 (state, account_id, provider, created_at, expires_at, error_key)
+                 VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .bind(state)
+            .bind(account_id)
+            .bind(provider)
+            .bind(created_at)
+            .bind(expires_at)
+            .bind(error_key)
+            .execute(&mut *transaction)
+            .await?;
         }
         transaction.commit().await?;
         Ok(())
     }
 
-    /// Drop what is left of a flow that finished.
-    ///
-    /// From here on the account itself is the answer; a row left behind would
-    /// make a completed sign-in look like one still worth resuming.
-    pub async fn complete(&self, state: &str) -> Result<(), OAuthFlowError> {
-        sqlx::query("DELETE FROM oauth_flow_outcomes WHERE state = ?")
-            .bind(state)
-            .execute(self.pool)
-            .await?;
+    /// Record a failure after this caller spent the verifier.
+    pub async fn fail_exchange(&self, state: &str, error_key: &str) -> Result<(), OAuthFlowError> {
+        sqlx::query(
+            "UPDATE oauth_flow_outcomes SET error_key = ?
+             WHERE state = ? AND error_key IS NULL AND completed_connection IS NULL",
+        )
+        .bind(error_key)
+        .bind(state)
+        .execute(self.pool)
+        .await?;
         Ok(())
     }
 
-    /// Read a flow without spending it. `consume` stays the only way to the
-    /// verifier, so this can be called on every poll.
+    /// Read both halves in one SQLite snapshot while a callback may consume the verifier.
     pub async fn status(
         &self,
         state: &str,
         now: DateTime<Utc>,
     ) -> Result<Option<OAuthFlowStatus>, OAuthFlowError> {
-        let live = sqlx::query_as::<_, StoredOAuthFlowStatus>(
-            "SELECT state, account_id, provider, created_at, expires_at, NULL AS error_key
-             FROM oauth_flow_sessions
-             WHERE state = ? AND expires_at > ?",
+        let row = sqlx::query_as::<_, StoredOAuthFlowStatus>(
+            "SELECT state, account_id, provider, created_at, expires_at, NULL AS error_key,
+                    NULL AS completed_connection, 1 AS authorizing
+             FROM oauth_flow_sessions WHERE state = ? AND expires_at > ?
+             UNION ALL
+             SELECT state, account_id, provider, created_at, expires_at, error_key,
+                    completed_connection, 0
+             FROM oauth_flow_outcomes WHERE state = ?",
         )
         .bind(state)
         .bind(now.to_rfc3339())
-        .fetch_optional(self.pool)
-        .await?;
-        if let Some(live) = live {
-            return decode_status(live, OAuthFlowProgress::Authorizing).map(Some);
-        }
-
-        let outcome = sqlx::query_as::<_, StoredOAuthFlowStatus>(
-            "SELECT state, account_id, provider, created_at, expires_at, error_key
-             FROM oauth_flow_outcomes
-             WHERE state = ?",
-        )
         .bind(state)
         .fetch_optional(self.pool)
         .await?;
-        outcome
-            .map(|outcome| {
-                let progress = match outcome.error_key.clone() {
-                    Some(key) => OAuthFlowProgress::Failed(key),
-                    None => OAuthFlowProgress::Exchanging,
-                };
-                decode_status(outcome, progress)
-            })
-            .transpose()
+        row.map(decode_status).transpose()
     }
 
     /// Every flow a restarted app could still finish, newest first.
@@ -331,40 +305,59 @@ impl<'a> OAuthFlowRepository<'a> {
         now: DateTime<Utc>,
     ) -> Result<Vec<OAuthFlowStatus>, OAuthFlowError> {
         let now = now.to_rfc3339();
-        let mut flows = Vec::new();
-        for row in sqlx::query_as::<_, StoredOAuthFlowStatus>(
-            "SELECT state, account_id, provider, created_at, expires_at, NULL AS error_key
-             FROM oauth_flow_sessions
-             WHERE expires_at > ?
-             ORDER BY created_at DESC",
-        )
-        .bind(&now)
-        .fetch_all(self.pool)
-        .await?
-        {
-            flows.push(decode_status(row, OAuthFlowProgress::Authorizing)?);
-        }
-        for row in sqlx::query_as::<_, StoredOAuthFlowStatus>(
-            "SELECT state, account_id, provider, created_at, expires_at, error_key
+        sqlx::query_as::<_, StoredOAuthFlowStatus>(
+            "SELECT state, account_id, provider, created_at, expires_at, NULL AS error_key,
+                    NULL AS completed_connection, 1 AS authorizing
+             FROM oauth_flow_sessions WHERE expires_at > ?
+             UNION ALL
+             SELECT state, account_id, provider, created_at, expires_at, error_key,
+                    completed_connection, 0
              FROM oauth_flow_outcomes
-             WHERE error_key IS NULL AND expires_at > ?
+             WHERE error_key IS NULL AND completed_connection IS NULL AND expires_at > ?
              ORDER BY created_at DESC",
         )
         .bind(&now)
+        .bind(&now)
         .fetch_all(self.pool)
         .await?
-        {
-            flows.push(decode_status(row, OAuthFlowProgress::Exchanging)?);
-        }
-        flows.sort_by_key(|flow| std::cmp::Reverse(flow.created_at));
-        Ok(flows)
+        .into_iter()
+        .map(decode_status)
+        .collect()
     }
 }
 
-fn decode_status(
-    stored: StoredOAuthFlowStatus,
-    progress: OAuthFlowProgress,
-) -> Result<OAuthFlowStatus, OAuthFlowError> {
+pub(super) async fn complete_exchange(
+    transaction: &mut Transaction<'_, Sqlite>,
+    state: &str,
+    session_account_id: &str,
+    connection: &OAuthAccountConnection,
+) -> Result<(), sqlx::Error> {
+    let updated = sqlx::query(
+        "UPDATE oauth_flow_outcomes SET completed_connection = ?
+         WHERE state = ? AND account_id = ? AND error_key IS NULL AND completed_connection IS NULL",
+    )
+    .bind(Json(connection))
+    .bind(state)
+    .bind(session_account_id)
+    .execute(&mut **transaction)
+    .await?;
+    if updated.rows_affected() != 1 {
+        return Err(sqlx::Error::RowNotFound);
+    }
+    Ok(())
+}
+
+fn decode_status(stored: StoredOAuthFlowStatus) -> Result<OAuthFlowStatus, OAuthFlowError> {
+    let progress = match (
+        stored.authorizing,
+        stored.error_key,
+        stored.completed_connection,
+    ) {
+        (true, _, _) => OAuthFlowProgress::Authorizing,
+        (_, Some(error), _) => OAuthFlowProgress::Failed(error),
+        (_, _, Some(Json(connection))) => OAuthFlowProgress::Completed(connection),
+        _ => OAuthFlowProgress::Exchanging,
+    };
     Ok(OAuthFlowStatus {
         state: stored.state,
         account_id: stored.account_id,
@@ -659,7 +652,10 @@ mod tests {
         let repository = OAuthFlowRepository::new(&pool);
 
         repository.create(new_session(now)).await.unwrap();
-        repository.fail("state", "backend.errors.a").await.unwrap();
+        repository
+            .cancel_authorization("state", "backend.errors.a")
+            .await
+            .unwrap();
         assert_eq!(
             repository
                 .status("state", now)
@@ -679,7 +675,10 @@ mod tests {
         second.state = "second".into();
         repository.create(second).await.unwrap();
         repository.consume("second", now).await.unwrap();
-        repository.fail("second", "backend.errors.b").await.unwrap();
+        repository
+            .fail_exchange("second", "backend.errors.b")
+            .await
+            .unwrap();
         assert_eq!(
             repository
                 .status("second", now)
@@ -700,9 +699,28 @@ mod tests {
         let repository = OAuthFlowRepository::new(&pool);
         repository.create(new_session(now)).await.unwrap();
         repository.consume("state", now).await.unwrap();
-        repository.complete("state").await.unwrap();
+        let connection = OAuthAccountConnection {
+            account_id: "account".into(),
+            provider: "gmail".into(),
+            has_refresh_token: true,
+            expires_at: None,
+            granted_scopes: None,
+        };
+        let mut tx = pool.begin().await.unwrap();
+        complete_exchange(&mut tx, "state", "account", &connection)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
 
-        assert!(repository.status("state", now).await.unwrap().is_none());
+        assert_eq!(
+            repository
+                .status("state", now)
+                .await
+                .unwrap()
+                .unwrap()
+                .progress,
+            OAuthFlowProgress::Completed(connection),
+        );
         assert!(repository.open_flows(now).await.unwrap().is_empty());
     }
 
@@ -722,7 +740,10 @@ mod tests {
         let mut failed = new_session(now + chrono::Duration::seconds(2));
         failed.state = "failed".into();
         repository.create(failed).await.unwrap();
-        repository.fail("failed", "backend.errors.a").await.unwrap();
+        repository
+            .cancel_authorization("failed", "backend.errors.a")
+            .await
+            .unwrap();
 
         let open = repository.open_flows(now).await.unwrap();
         let states: Vec<&str> = open.iter().map(|flow| flow.state.as_str()).collect();

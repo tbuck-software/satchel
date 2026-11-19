@@ -195,7 +195,7 @@ async fn queues_each_logical_rsvp_once_and_leaves_it_ready_for_the_worker() {
     queue_invite_response(&state, &pool, accepted.clone())
         .await
         .expect("queue first response");
-    queue_invite_response(&state, &pool, accepted)
+    queue_invite_response(&state, &pool, accepted.clone())
         .await
         .expect("repeat response is idempotent");
 
@@ -226,4 +226,10 @@ async fn queues_each_logical_rsvp_once_and_leaves_it_ready_for_the_worker() {
             .await
             .expect("count changed response");
     assert_eq!(queued, 2);
+    queue_invite_response(&state, &pool, accepted)
+        .await
+        .unwrap();
+    let distinct: i64 = sqlx::query_scalar("SELECT COUNT(DISTINCT json_extract(payload, '$.message_id_header')) FROM sync_queue WHERE action_type = 'send_message'")
+        .fetch_one(&pool).await.unwrap();
+    assert_eq!(distinct, 3);
 }

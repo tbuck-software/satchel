@@ -433,6 +433,18 @@ async fn prepare_referenced_attachment(
         // part ID from the decrypted content names another part there. Older
         // decrypted rows still carry such an ID; it is never sent.
         return Err("backend.errors.decryptedAttachmentUnavailable".into());
+    } else if message_id.starts_with("m-import-") {
+        let part_id = remote_part_id.ok_or("backend.errors.messageNotAvailableLocally")?;
+        let source: Option<Vec<u8>> =
+            sqlx::query_scalar("SELECT original_source FROM messages WHERE id = ?")
+                .bind(&message_id)
+                .fetch_one(pool)
+                .await
+                .map_err(|error| error.to_string())?;
+        let source = source.ok_or("backend.errors.messageNotAvailableLocally")?;
+        tokio::task::spawn_blocking(move || imported_attachment(&source, &part_id))
+            .await
+            .map_err(|error| error.to_string())??
     } else {
         let remote_part_id = remote_part_id
             .ok_or_else(|| "backend.errors.messageNotAvailableLocally".to_string())?;
@@ -506,6 +518,27 @@ async fn prepare_referenced_attachment(
             cached_path: path_string,
         },
         reference,
+    })
+}
+
+fn imported_attachment(
+    source: &[u8],
+    part_id: &str,
+) -> Result<crate::providers::traits::FetchedAttachment, String> {
+    let parsed = if part_id.starts_with("msg-") {
+        super::backup::parse_msg_bytes(source)
+    } else {
+        crate::providers::imap::parse_raw_rfc822(source)
+    }?;
+    let part = parsed
+        .attachments
+        .into_iter()
+        .find(|part| part.remote_part_id == part_id)
+        .ok_or("backend.errors.messageNotAvailableLocally")?;
+    Ok(crate::providers::traits::FetchedAttachment {
+        filename: part.filename.or(part.content_id),
+        content_type: part.content_type,
+        bytes: part.bytes,
     })
 }
 

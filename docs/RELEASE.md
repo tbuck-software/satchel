@@ -344,6 +344,16 @@ URI listed in `.env.example`. Outlook client secrets are never release inputs.
 Google app branding and scope verification are separate provider-side steps;
 publishing the GitHub repository does not complete them.
 
+The signed Android workflow requires the repository variables
+`SATCHEL_ANDROID_GMAIL_CLIENT_ID` and `SATCHEL_ANDROID_OUTLOOK_CLIENT_ID`.
+It falls back to `SATCHEL_GMAIL_CLIENT_ID` and `SATCHEL_OUTLOOK_CLIENT_ID`
+when the same public registrations cover both builds. The default callback is
+`de.tbuck.satchel://oauth/callback`. For a registered fixed-port loopback
+callback, use `SATCHEL_ANDROID_GMAIL_REDIRECT_URI` or
+`SATCHEL_ANDROID_OUTLOOK_REDIRECT_URI`. A Google Desktop registration can
+provide its public installed-app credential in
+`SATCHEL_ANDROID_GMAIL_DESKTOP_CLIENT_SECRET`.
+
 Generated dependency notices, font notices, the project license, and bundled
 WASM components are included as app resources. Each release includes its
 updater manifest, signatures, standalone installers, and SHA-256 checksums.

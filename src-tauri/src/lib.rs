@@ -36,20 +36,6 @@ use tauri::{Emitter, Manager};
 use tokio::sync::Mutex;
 
 #[derive(Clone, Debug)]
-pub enum OAuthFlowResult {
-    Pending,
-    Completed {
-        account_id: String,
-        provider: String,
-        connected: bool,
-        has_refresh_token: bool,
-        expires_at: Option<String>,
-        granted_scopes: Option<Vec<String>>,
-    },
-    Failed(String),
-}
-
-#[derive(Clone, Debug)]
 pub struct UnlockedPgpSession {
     pub key_id: String,
     pub passphrase: String,
@@ -71,7 +57,6 @@ pub struct AppState {
     pub(crate) sync_activity: Arc<connection_state::SyncActivity>,
     pub plugin_runtime: Arc<PluginRuntime>,
     pub idle_control: Arc<std::sync::OnceLock<sync::idle::IdleControl>>,
-    pub oauth_results: Arc<Mutex<std::collections::HashMap<String, OAuthFlowResult>>>,
     pub pgp_unlock_sessions: Arc<Mutex<std::collections::HashMap<String, UnlockedPgpSession>>>,
     pub smime_unlock_sessions: Arc<Mutex<std::collections::HashMap<String, UnlockedSmimeSession>>>,
     pub pending_open_with: Arc<commands::open_with::PendingOpenWith>,
@@ -97,7 +82,6 @@ impl AppState {
             events,
             plugin_runtime: Arc::new(plugin_runtime),
             idle_control: Arc::new(std::sync::OnceLock::new()),
-            oauth_results: Arc::new(Mutex::new(std::collections::HashMap::new())),
             pgp_unlock_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
             smime_unlock_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
             pending_open_with: Arc::new(commands::open_with::PendingOpenWith::default()),
@@ -684,6 +668,9 @@ pub fn run() {
             }
             #[cfg(desktop)]
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() != "main" {
+                    return;
+                }
                 // Hide to tray instead of quitting unless the user explicitly chose Quit.
                 if let Some(state) = window
                     .app_handle()

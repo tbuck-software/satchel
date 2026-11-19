@@ -90,6 +90,10 @@ pub async fn init(pool: &sqlx::SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query("PRAGMA journal_mode = WAL;")
         .execute(pool)
         .await?;
+    run_migrations(pool).await
+}
+
+pub(crate) async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     migrator().run(pool).await?;
     Ok(())
 }

@@ -8,6 +8,7 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { LinkInteraction, MailContextInteraction } from '@/utils/externalLinks';
 import { visibleLinkText } from '@/utils/linkLabel';
 import { buildEmailCsp } from '@/utils/emailCsp';
+import AppButton from '@/components/ui/AppButton.vue';
 
 const props = withDefaults(defineProps<{
   html: string;
@@ -65,6 +66,8 @@ type LinkHotspot = {
   href: string;
   /** Read on interaction: the visible label needs computed styles, too costly per refresh. */
   anchor: HTMLAnchorElement;
+  /** Only the first line box is a tab stop. */
+  accessibleName: string | null;
   left: number;
   top: number;
   width: number;
@@ -74,6 +77,8 @@ type LinkHotspot = {
 const frameRef = ref<HTMLIFrameElement | null>(null);
 const hostRef = ref<HTMLElement | null>(null);
 const linkHotspots = ref<LinkHotspot[]>([]);
+const selectionHotspots = ref<DOMRect[]>([]);
+let selectionFrameId: number | null = null;
 let hotspotFrameId: number | null = null;
 let frameDocument: Document | null = null;
 let contentResizeObserver: ResizeObserver | null = null;
@@ -392,12 +397,18 @@ function collectLinkHotspots() {
   for (const [index, anchor] of Array.from(doc.querySelectorAll('a')).entries()) {
     const href = anchor.getAttribute('href');
     if (!href) continue;
-    for (const [rectIndex, rect] of Array.from(anchor.getClientRects()).entries()) {
-      if (rect.width < 1 || rect.height < 1) continue;
+    const rects = Array.from(anchor.getClientRects()).filter(rect => rect.width >= 1 && rect.height >= 1);
+    if (rects.length === 0) continue;
+    const name = anchor.getAttribute('aria-label')?.trim()
+      || anchor.textContent?.trim()
+      || anchor.querySelector('img')?.alt
+      || href;
+    for (const [rectIndex, rect] of rects.entries()) {
       next.push({
         key: `${index}-${rectIndex}`,
         href,
         anchor,
+        accessibleName: rectIndex === 0 ? name : null,
         left: rect.left,
         top: rect.top,
         width: rect.width,
@@ -434,6 +445,57 @@ function hotspotContextMenu(event: MouseEvent, hotspot: LinkHotspot) {
     x: event.clientX, y: event.clientY, link: hotspotInteraction(hotspot),
     selection: frameRef.value?.contentWindow?.getSelection()?.toString() ?? '',
   });
+}
+
+function onContextMenuKey(event: KeyboardEvent, hotspot?: LinkHotspot) {
+  if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return;
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+  event.preventDefault();
+  event.stopPropagation();
+  emit('context-menu', {
+    x: rect.left, y: rect.top,
+    link: hotspot ? hotspotInteraction(hotspot) : null,
+    selection: frameRef.value?.contentDocument?.getSelection()?.toString() ?? '',
+  });
+}
+
+/** WebKit's selection still changes in the frame even when its listener cannot run. */
+function trackSelection() {
+  const selection = frameRef.value?.contentDocument?.getSelection();
+  const rects = selection && !selection.isCollapsed && selection.rangeCount
+    ? Array.from(selection.getRangeAt(0).getClientRects()).filter(rect => rect.width > 0 && rect.height > 0)
+    : [];
+  if (rects.length !== selectionHotspots.value.length || rects.some((rect, index) => {
+    const previous = selectionHotspots.value[index];
+    return !previous || rect.x !== previous.x || rect.y !== previous.y
+      || rect.width !== previous.width || rect.height !== previous.height;
+  })) {
+    selectionHotspots.value = rects;
+  }
+  selectionFrameId = requestAnimationFrame(trackSelection);
+}
+
+function startSelectionTracking() {
+  if (selectionFrameId === null) trackSelection();
+}
+
+function stopSelectionTracking() {
+  if (selectionFrameId === null) return;
+  cancelAnimationFrame(selectionFrameId);
+  selectionFrameId = null;
+  selectionHotspots.value = [];
+}
+
+function selectionContextMenu(event: MouseEvent) {
+  emit('context-menu', {
+    x: event.clientX, y: event.clientY, link: null,
+    selection: frameRef.value?.contentDocument?.getSelection()?.toString() ?? '',
+  });
+}
+
+function clearSelection() {
+  frameRef.value?.contentDocument?.getSelection()?.removeAllRanges();
+  selectionHotspots.value = [];
 }
 
 function onFrameMouseOver(event: Event) {
@@ -476,23 +538,16 @@ function onFrameKeyDown(event: KeyboardEvent) {
  * The frame forwards keys through `onFrameKeyDown`, but WebKit never runs that
  * listener, so in WKWebView a click into the text left every shortcut dead
  * until the next click outside. The selection stays in the frame; `onCopy`
- * keeps Cmd+C working on it. Tab is left alone: whoever tabs into the mail's
- * links meant to go there.
+ * keeps Cmd+C working on it. Tab reaches the parent document's link targets.
  */
-let lastTabAt = -Infinity;
-
-function onWindowKeyDown(event: KeyboardEvent) {
-  if (event.key === 'Tab') lastTabAt = performance.now();
-}
-
 function onWindowBlur() {
   // The parent's activeElement moves to the frame once the blur is through.
   window.setTimeout(() => {
     const frame = frameRef.value;
     if (!frame || document.activeElement !== frame) return;
-    if (performance.now() - lastTabAt < 500) return;
     lastClickedFrame = frame;
     hostRef.value?.focus({ preventScroll: true });
+    startSelectionTracking();
   }, 0);
 }
 
@@ -523,14 +578,13 @@ function onCopy(event: ClipboardEvent) {
 }
 
 onMounted(() => {
-  window.addEventListener('keydown', onWindowKeyDown, true);
   window.addEventListener('blur', onWindowBlur);
   document.addEventListener('beforecopy', onBeforeCopy);
   document.addEventListener('copy', onCopy);
 });
 
 onBeforeUnmount(() => {
-  window.removeEventListener('keydown', onWindowKeyDown, true);
+  stopSelectionTracking();
   window.removeEventListener('blur', onWindowBlur);
   document.removeEventListener('beforecopy', onBeforeCopy);
   document.removeEventListener('copy', onCopy);
@@ -703,23 +757,40 @@ onBeforeUnmount(() => {
     class="satchel-email-host"
     :class="{ 'satchel-email-host--pass-through-touch-scroll': props.passThroughTouchScroll }"
     tabindex="-1"
+    @keydown="onContextMenuKey($event)"
+    @focusout="stopSelectionTracking"
+    @pointerenter="startSelectionTracking"
+    @pointerleave="stopSelectionTracking"
   >
     <iframe
       ref="frameRef"
       class="satchel-email-document"
       :title="$t('mail.document.frameTitle')"
       sandbox="allow-same-origin"
+      tabindex="-1"
       referrerpolicy="no-referrer"
       :srcdoc="sourceDocument"
       @load="startSettleLoop"
     />
-    <!-- The links are announced by the anchors inside the frame; these targets
-         only carry the pointer, hence aria-hidden. -->
-    <div class="satchel-email-hotspots" aria-hidden="true">
+    <div class="satchel-email-hotspots">
       <div
+        v-for="(rect, index) in selectionHotspots"
+        :key="index"
+        class="satchel-email-selection"
+        aria-hidden="true"
+        :style="{ left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` }"
+        @pointerdown.left="clearSelection"
+        @contextmenu.prevent.stop="selectionContextMenu"
+      />
+      <AppButton
         v-for="hotspot in linkHotspots"
-        :key="hotspot.key"
+        :key="`${hotspot.key}-${hotspot.href}`"
         class="satchel-email-hotspot"
+        variant="link"
+        role="link"
+        :tabindex="hotspot.accessibleName ? 0 : -1"
+        :aria-hidden="!hotspot.accessibleName || undefined"
+        :aria-label="hotspot.accessibleName ?? undefined"
         :style="{
           left: `${hotspot.left}px`,
           top: `${hotspot.top}px`,
@@ -729,6 +800,7 @@ onBeforeUnmount(() => {
         @mouseenter="emit('link-hover', hotspotInteraction(hotspot))"
         @mouseleave="emit('link-hover', null)"
         @click="emit('open-link', hotspotInteraction(hotspot))"
+        @keydown="onContextMenuKey($event, hotspot)"
         @contextmenu.prevent.stop="hotspotContextMenu($event, hotspot)"
       />
     </div>
@@ -754,15 +826,27 @@ onBeforeUnmount(() => {
 .satchel-email-hotspots {
   position: absolute;
   inset: 0;
-  /* Only the hotspots themselves take the pointer, so text selection inside
-     the mail keeps working. */
+  /* Text and links keep their positions inside the frame's viewport. */
+  overflow: clip;
   pointer-events: none;
 }
 
+.satchel-email-selection,
 .satchel-email-hotspot {
   position: absolute;
   pointer-events: auto;
+}
+
+.satchel-email-selection {
+  cursor: text;
+}
+
+.satchel-email-hotspot {
   cursor: pointer;
+}
+
+.satchel-email-hotspot:focus-visible {
+  outline-offset: calc(-1 * var(--space-2xs));
 }
 
 /*

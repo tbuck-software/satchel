@@ -37,6 +37,8 @@ mod tests {
                 "background_sync",
                 "contacts",
                 "deep_links",
+                "directory_backup",
+                "document_backup",
                 "file_associations",
                 "mobile",
                 "native_crypto",

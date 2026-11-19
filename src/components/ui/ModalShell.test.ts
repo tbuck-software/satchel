@@ -35,6 +35,23 @@ afterEach(() => {
 });
 
 describe('modal shell', () => {
+  it.each([true, false])('unlocks scrolling after both modals close (outer first: %s)', (outerFirst) => {
+    document.body.style.overflow = 'auto';
+    const outer = openShell({ label: 'Settings' });
+    const inner = openShell({ label: 'Confirmation' });
+    const closingOrder = outerFirst ? [outer, inner] : [inner, outer];
+    try {
+      closingOrder[0]?.unmount();
+      expect(document.body.style.overflow).toBe('hidden');
+      closingOrder[1]?.unmount();
+      expect(document.body.style.overflow).toBe('auto');
+    } finally {
+      closingOrder[0]?.unmount();
+      closingOrder[1]?.unmount();
+      document.body.style.overflow = '';
+    }
+  });
+
   it('is a bounded dialog when there is room', () => {
     useUiStore().isSinglePane = false;
     const wrapper = openShell({ label: 'Einstellungen' });

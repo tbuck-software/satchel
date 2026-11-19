@@ -14,6 +14,7 @@ const { archiveMock, toggleDoneMock, setAsideMock, setPinnedMock, trashMock, set
 
 vi.mock('@/composables/useThreadActions', () => ({
   useThreadActions: () => ({
+    canTrash: () => true,
     archive: archiveMock,
     toggleDone: toggleDoneMock,
     setAside: setAsideMock,

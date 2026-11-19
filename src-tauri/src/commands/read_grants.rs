@@ -16,6 +16,8 @@ use crate::commands::error::{CommandError, CommandResult};
 pub struct ReadGrants {
     files: Mutex<HashSet<PathBuf>>,
     folders: Mutex<HashSet<PathBuf>>,
+    #[cfg(mobile)]
+    documents: Mutex<std::collections::HashMap<String, tauri_plugin_dialog::FilePath>>,
 }
 
 fn refused(path: &Path) -> CommandError {
@@ -40,6 +42,39 @@ impl ReadGrants {
 
     pub fn grant_folder(&self, path: &Path) {
         insert(&self.folders, path);
+    }
+
+    #[cfg(mobile)]
+    fn grant_document(&self, file: tauri_plugin_dialog::FilePath) -> Option<String> {
+        let key = file.to_string();
+        self.documents.lock().ok()?.insert(key.clone(), file);
+        Some(key)
+    }
+
+    pub(super) async fn open_file(
+        &self,
+        app: &tauri::AppHandle,
+        source: &str,
+    ) -> CommandResult<(tokio::fs::File, Option<super::document_io::DocumentAccess>)> {
+        #[cfg(desktop)]
+        let _ = app;
+        #[cfg(mobile)]
+        {
+            let document = self
+                .documents
+                .lock()
+                .ok()
+                .and_then(|grants| grants.get(source).cloned());
+            if let Some(url) = document {
+                let options = tauri_plugin_fs::OpenOptions::new().read(true).to_owned();
+                let (file, access) = super::document_io::open_document(app, url, options).await?;
+                return Ok((file, Some(access)));
+            }
+        }
+        let file = tokio::fs::File::open(self.file(Path::new(source))?)
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok((file, None))
     }
 
     /// The canonical path of a granted file, or a refusal.
@@ -87,15 +122,19 @@ pub async fn choose_open_file(
     extensions: Vec<String>,
 ) -> CommandResult<Option<String>> {
     let extensions: Vec<&str> = extensions.iter().map(String::as_str).collect();
-    let Some(path) = app
+    let Some(chosen) = app
         .dialog()
         .file()
         .add_filter(&filter_name, &extensions)
         .blocking_pick_file()
-        .and_then(|chosen| chosen.into_path().ok())
     else {
         return Ok(None);
     };
+    #[cfg(mobile)]
+    if matches!(chosen, tauri_plugin_dialog::FilePath::Url(_)) {
+        return Ok(state.read_grants.grant_document(chosen));
+    }
+    let path = chosen.into_path().map_err(|error| error.to_string())?;
     state.read_grants.grant_file(&path);
     Ok(Some(path.to_string_lossy().into_owned()))
 }

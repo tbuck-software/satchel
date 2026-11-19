@@ -659,8 +659,39 @@ impl<'a> CalendarRepository<'a> {
         Ok(())
     }
 
+    /// Reserve a response in the transaction that will also enqueue its mail.
+    /// A concurrent identical response shares the existing delivery.
+    pub async fn change_rsvp_in_transaction(
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        invite: &CalendarInviteRecord,
+        status: &str,
+    ) -> Result<bool, CalendarError> {
+        let current: (String, String) =
+            sqlx::query_as("SELECT rsvp_status, updated_at FROM calendar_invites WHERE id = ?")
+                .bind(&invite.id)
+                .fetch_optional(&mut **tx)
+                .await?
+                .ok_or(CalendarError::InviteNotFound)?;
+        if current.0 == status {
+            return Ok(false);
+        }
+        if current.1 != invite.updated_at {
+            return Err(CalendarError::EventChanged);
+        }
+        Self::write_rsvp(&mut **tx, &invite.id, status).await?;
+        Ok(true)
+    }
+
     pub async fn update_rsvp_status(
         &self,
+        invite_id: &str,
+        status: &str,
+    ) -> Result<(), CalendarError> {
+        Self::write_rsvp(self.pool, invite_id, status).await
+    }
+
+    async fn write_rsvp<'e>(
+        executor: impl sqlx::Executor<'e, Database = sqlx::Sqlite>,
         invite_id: &str,
         status: &str,
     ) -> Result<(), CalendarError> {
@@ -669,7 +700,7 @@ impl<'a> CalendarRepository<'a> {
                 .bind(status)
                 .bind(chrono::Utc::now().to_rfc3339())
                 .bind(invite_id)
-                .execute(self.pool)
+                .execute(executor)
                 .await?;
         if result.rows_affected() == 0 {
             return Err(CalendarError::InviteNotFound);

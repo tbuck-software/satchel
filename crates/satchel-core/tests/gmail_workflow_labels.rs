@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use chrono::TimeZone;
 use satchel_core::providers::gmail::GmailProvider;
 use satchel_core::providers::traits::{
-    MailProvider, MarkerTarget, MessageRef, WorkflowMarker, WorkflowMarkerReport,
+    FlagUpdate, MailProvider, MarkerTarget, MessageRef, WorkflowMarker, WorkflowMarkerReport,
     WorkflowMarkerWrite,
 };
 use satchel_core::workflow::remote_marker::Snooze;
@@ -27,6 +27,7 @@ struct Request {
 static LABELS_DOWN: AtomicBool = AtomicBool::new(false);
 /// Another device has created `Satchel/Done` as `Label_77` while set.
 static LABEL_77_EXISTS: AtomicBool = AtomicBool::new(false);
+static REJECT_BATCH_TAIL: AtomicBool = AtomicBool::new(false);
 
 fn labels() -> Value {
     let mut listed = json!({"labels":[
@@ -95,6 +96,13 @@ fn route(request: &Request) -> (&'static str, Value) {
         return ("204 No Content", Value::Null);
     }
     if line.contains("/messages/batchModify") {
+        let ids = request.body["ids"].as_array().expect("batch ids");
+        if ids.len() > 1000
+            || (REJECT_BATCH_TAIL.load(Ordering::SeqCst)
+                && ids.last().and_then(Value::as_str) == Some("batch-id-1000"))
+        {
+            return ("400 Bad Request", json!({}));
+        }
         return ("204 No Content", Value::Null);
     }
     if line.contains("/messages/m1") {
@@ -351,4 +359,40 @@ async fn done_and_snooze_travel_as_satchel_labels() {
         .expect("retried page");
     assert_eq!(retried.workflow_marker, Some(WorkflowMarker::Done));
     assert!(retried.mailbox_ids.is_empty());
+
+    let refs = (0..1001)
+        .map(|i| reference(&format!("batch-id-{i}")))
+        .collect::<Vec<_>>();
+    requests.lock().unwrap().clear();
+    let flags = FlagUpdate {
+        read: Some(true),
+        starred: Some(true),
+    };
+    REJECT_BATCH_TAIL.store(true, Ordering::SeqCst);
+    assert!(provider.set_flags(&refs, flags.clone()).await.is_err());
+    REJECT_BATCH_TAIL.store(false, Ordering::SeqCst);
+    provider.set_flags(&refs, flags).await.unwrap();
+    let writes = batch_modifies(&requests);
+    assert_eq!(writes.len(), 4);
+    assert_eq!(&writes[..2], &writes[2..]);
+    assert_eq!(writes[0]["ids"].as_array().unwrap().len(), 1000);
+    assert_eq!(writes[1]["ids"], json!(["batch-id-1000"]));
+    assert_eq!(writes[1]["addLabelIds"], json!(["STARRED"]));
+    assert_eq!(writes[1]["removeLabelIds"], json!(["UNREAD"]));
+
+    requests.lock().unwrap().clear();
+    provider.move_messages(&refs, "Label_1").await.unwrap();
+    let writes = batch_modifies(&requests);
+    assert_eq!(writes.len(), 2);
+    assert_eq!(writes[0]["ids"].as_array().unwrap().len(), 1000);
+    assert_eq!(writes[1]["ids"], json!(["batch-id-1000"]));
+    assert_eq!(writes[1]["addLabelIds"], json!(["Label_1"]));
+
+    requests.lock().unwrap().clear();
+    assert!(provider
+        .delete_messages(&refs[..1])
+        .await
+        .unwrap_err()
+        .is_permanent());
+    assert!(requests.lock().unwrap().is_empty());
 }

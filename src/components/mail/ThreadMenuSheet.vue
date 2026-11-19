@@ -18,6 +18,7 @@ const props = defineProps<{
   open: boolean;
   isStarred: boolean;
   isAside: boolean;
+  canDelete: boolean;
   /** The newest message's actions; null until it has reported them. */
   message: MessageMenu | null;
 }>();
@@ -56,7 +57,7 @@ function act(action: 'togglePin' | 'setAside' | 'delete') {
           :icon="props.isAside ? 'inbox' : 'aside'"
           @select="act('setAside')"
         />
-        <MenuItem :label="$t('common.delete')" tone="danger" @select="act('delete')">
+        <MenuItem v-if="props.canDelete" :label="$t('common.delete')" tone="danger" @select="act('delete')">
           <template #icon>
             <AppIcon>
               <path d="M2 4h12M5 4V2.5A1.5 1.5 0 016.5 1h3A1.5 1.5 0 0111 2.5V4" />

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import type { Attachment } from '@/types/mail';
 import { useAttachmentActions } from '@/composables/useAttachmentActions';
 import { useAttachmentOpen } from '@/composables/useAttachmentOpen';
@@ -51,51 +51,51 @@ const fileKind = computed(() => FILE_KINDS[extension.value] ?? 'other');
 
 const thumbnailUrl = ref('');
 const rootRef = ref<HTMLElement | null>(null);
-let observer: IntersectionObserver | null = null;
-
 function revoke() {
   if (thumbnailUrl.value) URL.revokeObjectURL(thumbnailUrl.value);
   thumbnailUrl.value = '';
 }
 
-async function loadThumbnail() {
-  if (thumbnailUrl.value || !isThumbnailable.value) return;
-  try {
-    const data = await attachmentActions.downloadAttachment(props.attachment.id);
-    const { attachmentBytes } = await import('@/utils/attachmentBytes');
-    const bytes = await attachmentBytes(data);
-    thumbnailUrl.value = URL.createObjectURL(
-      new Blob([bytes as BlobPart], { type: props.attachment.contentType }),
-    );
-  } catch {
-    // A thumbnail is decoration: the card still opens and still saves, and a
-    // toast about a picture nobody asked to see would be noise.
-  }
-}
-
 // Only once the card is on screen. A thread with twenty photos would
 // otherwise fetch twenty files before the first one is scrolled to.
-watch(rootRef, (element) => {
-  observer?.disconnect();
-  observer = null;
-  if (!element || !isThumbnailable.value) return;
-  if (typeof IntersectionObserver === 'undefined') {
-    void loadThumbnail();
-    return;
-  }
-  observer = new IntersectionObserver((entries) => {
-    if (!entries.some((entry) => entry.isIntersecting)) return;
-    observer?.disconnect();
-    observer = null;
-    void loadThumbnail();
-  });
-  observer.observe(element);
-}, { immediate: true });
+watch(
+  [rootRef, isThumbnailable, () => props.attachment.id, () => props.attachment.contentType],
+  ([element, eligible, id, type], _previous, onCleanup) => {
+    if (!element || !eligible) return;
+    let active = true;
+    let observer: IntersectionObserver | undefined;
+    onCleanup(() => {
+      active = false;
+      observer?.disconnect();
+      revoke();
+    });
 
-onBeforeUnmount(() => {
-  observer?.disconnect();
-  revoke();
-});
+    async function loadThumbnail() {
+      if (!active) return;
+      try {
+        const data = await attachmentActions.downloadAttachment(id);
+        if (!active) return;
+        const { attachmentBytes } = await import('@/utils/attachmentBytes');
+        const bytes = await attachmentBytes(data);
+        if (active) thumbnailUrl.value = URL.createObjectURL(new Blob([bytes as BlobPart], { type }));
+      } catch {
+        // The attachment can still be opened or saved when a thumbnail fails.
+      }
+    }
+
+    if (typeof IntersectionObserver === 'undefined') {
+      void loadThumbnail();
+      return;
+    }
+    observer = new IntersectionObserver((entries) => {
+      if (!observer || !entries.some((entry) => entry.isIntersecting)) return;
+      observer.disconnect();
+      observer = undefined;
+      void loadThumbnail();
+    });
+    observer.observe(element);
+  },
+);
 </script>
 
 <template>

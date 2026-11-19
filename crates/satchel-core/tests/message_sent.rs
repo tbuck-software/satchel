@@ -224,6 +224,7 @@ async fn persists_attachment_and_signature_metadata() {
         filename: "hello.txt".to_string(),
         mime_type: "text/plain".to_string(),
         size: 6,
+        content_base64: "aGVsbG8K".into(),
         content_id: Some("<hello@example.com>".to_string()),
         inline: true,
     }];
@@ -244,13 +245,14 @@ async fn persists_attachment_and_signature_metadata() {
     assert_eq!(message.2.as_deref(), Some("signature-1"));
     assert_eq!(message.3.as_deref(), Some("short"));
 
-    let attachment: (String, String, i64, Option<String>, i64) = sqlx::query_as(
-        "SELECT filename, content_type, size, content_id, is_inline FROM attachments WHERE message_id = ?",
+    let attachment: (String, String, i64, Option<String>, i64, String) = sqlx::query_as(
+        "SELECT filename, content_type, size, content_id, is_inline, content_base64 FROM attachments WHERE message_id = ?",
     )
     .bind(&result.message_id)
     .fetch_one(&pool)
     .await
     .expect("attachment metadata");
+    assert_eq!(attachment.5, "aGVsbG8K");
     assert_eq!(attachment.0, "hello.txt");
     assert_eq!(attachment.1, "text/plain");
     assert_eq!(attachment.2, 6);

@@ -3,7 +3,7 @@ use serde::Serialize;
 use sqlx::Row;
 use sqlx::SqlitePool;
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Emitter, Manager};
 
@@ -890,44 +890,58 @@ async fn publish_message_export(
 
 #[tauri::command]
 pub async fn export_message(
+    app: tauri::AppHandle,
     state: tauri::State<'_, crate::AppState>,
     pool: tauri::State<'_, SqlitePool>,
     path: String,
     message_id: String,
 ) -> CommandResult<()> {
-    state.write_grants.take(std::path::Path::new(&path))?;
-    write_message_export(pool.inner(), &path, &message_id)
-        .await
-        .map_err(CommandError::from)
+    let destination = state.write_grants.take_export(&app, &path)?;
+    write_message_export(
+        pool.inner(),
+        &destination.path().to_string_lossy(),
+        &message_id,
+    )
+    .await?;
+    destination.publish(&app).await
 }
 
 #[tauri::command]
 pub async fn export_mailbox(
+    app: tauri::AppHandle,
     state: tauri::State<'_, crate::AppState>,
     pool: tauri::State<'_, SqlitePool>,
     path: String,
     account_id: Option<String>,
 ) -> CommandResult<ExportResult> {
-    state.write_grants.take(std::path::Path::new(&path))?;
-    write_mailbox_export(pool.inner(), &path, account_id.as_deref())
-        .await
-        .map_err(CommandError::from)
+    let destination = state.write_grants.take_export(&app, &path)?;
+    let mut result = write_mailbox_export(
+        pool.inner(),
+        &destination.path().to_string_lossy(),
+        account_id.as_deref(),
+    )
+    .await?;
+    destination.publish(&app).await?;
+    result.path = path;
+    Ok(result)
 }
 
 #[tauri::command]
 pub async fn export_platform_data(
+    app: tauri::AppHandle,
     state: tauri::State<'_, crate::AppState>,
     pool: tauri::State<'_, SqlitePool>,
     path: String,
     redact_sensitive: Option<bool>,
 ) -> CommandResult<PlatformDataResult> {
-    state.write_grants.take(std::path::Path::new(&path))?;
+    let destination = state.write_grants.take_export(&app, &path)?;
     let (export, row_count) =
         collect_platform_export(pool.inner(), redact_sensitive.unwrap_or(true)).await?;
     let json = serde_json::to_string_pretty(&export).map_err(|err| err.to_string())?;
-    tokio::fs::write(&path, json)
+    tokio::fs::write(destination.path(), json)
         .await
         .map_err(|err| format!("write {path}: {err}"))?;
+    destination.publish(&app).await?;
 
     Ok(PlatformDataResult {
         path,
@@ -943,13 +957,11 @@ pub async fn import_platform_data(
     pool: tauri::State<'_, SqlitePool>,
     path: String,
 ) -> CommandResult<PlatformDataResult> {
-    state.read_grants.file(Path::new(&path))?;
-    crate::commands::file_limits::guard_import_size(std::path::Path::new(&path)).await?;
-    let raw = tokio::fs::read_to_string(&path)
-        .await
-        .map_err(|err| format!("read {path}: {err}"))?;
+    let (file, _access) = state.read_grants.open_file(&app, &path).await?;
+    crate::commands::file_limits::guard_import_size(Path::new(&path)).await?;
+    let raw = crate::commands::file_limits::read_bounded(file).await?;
     let parsed: PlatformDataExport =
-        serde_json::from_str(&raw).map_err(|err| format!("parse platform export: {err}"))?;
+        serde_json::from_slice(&raw).map_err(|err| format!("parse platform export: {err}"))?;
     if parsed.schema_version != 1 {
         return Err(format!(
             "unsupported platform export schema version {}",
@@ -1209,12 +1221,27 @@ pub async fn import_mbox(
     path: String,
     account_id: String,
 ) -> CommandResult<ImportResult> {
-    check_import_source(
-        window.label(),
-        &path,
-        &state.read_grants,
-        &state.viewer_files,
-    )?;
+    let (file, _access) = if window
+        .label()
+        .starts_with(super::message_file::VIEWER_LABEL_PREFIX)
+    {
+        check_import_source(
+            window.label(),
+            &path,
+            &state.read_grants,
+            &state.viewer_files,
+        )?;
+        let file = tokio::fs::File::open(&path)
+            .await
+            .map_err(|error| error.to_string())?;
+        (file, None)
+    } else {
+        state.read_grants.open_file(&app, &path).await?
+    };
+    let mut reader = tokio::io::BufReader::new(file);
+    use tokio::io::AsyncBufReadExt;
+    let prefix = reader.fill_buf().await.map_err(|error| error.to_string())?;
+    let outlook_file = prefix.starts_with(&[0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
     let account = sqlx::query_as::<_, (String,)>("SELECT email FROM accounts WHERE id = ? LIMIT 1")
         .bind(&account_id)
         .fetch_one(pool.inner())
@@ -1222,12 +1249,9 @@ pub async fn import_mbox(
         .map_err(|err| err.to_string())?;
     let folder_id = ensure_import_folder(pool.inner(), &account_id).await?;
 
-    if is_msg_path(&path) {
-        // One file, one message — here the file ceiling is the message ceiling.
-        crate::commands::file_limits::guard_import_size(std::path::Path::new(&path)).await?;
-        let raw_bytes = tokio::fs::read(&path)
-            .await
-            .map_err(|err| format!("read {path}: {err}"))?;
+    if is_msg_path(&path) || outlook_file {
+        crate::commands::file_limits::guard_import_size(Path::new(&path)).await?;
+        let raw_bytes = crate::commands::file_limits::read_bounded(reader).await?;
         let parsed = parse_msg_bytes(&raw_bytes)?;
         let imported = import_parsed_message(
             &app,
@@ -1256,9 +1280,7 @@ pub async fn import_mbox(
         .is_some_and(|value| value.eq_ignore_ascii_case("eml"))
     {
         crate::commands::file_limits::guard_import_size(Path::new(&path)).await?;
-        let raw = tokio::fs::read(&path)
-            .await
-            .map_err(|error| error.to_string())?;
+        let raw = crate::commands::file_limits::read_bounded(reader).await?;
         let imported = import_one_message(
             &app,
             pool.inner(),
@@ -1279,14 +1301,13 @@ pub async fn import_mbox(
         });
     }
 
-    let bytes_total = tokio::fs::metadata(&path)
+    let bytes_total = reader
+        .get_ref()
+        .metadata()
         .await
         .map(|meta| meta.len())
         .unwrap_or(0);
-    let file = tokio::fs::File::open(&path)
-        .await
-        .map_err(|err| format!("read {path}: {err}"))?;
-    let mut entries = MboxEntries::new(tokio::io::BufReader::new(file));
+    let mut entries = MboxEntries::new(reader);
 
     IMPORT_CANCELLED.store(false, Ordering::SeqCst);
     let mut progress = ImportProgress {
@@ -1901,6 +1922,7 @@ pub async fn create_backup(
     target_dir: String,
     passphrase: Option<String>,
     acknowledge_unprotected_key: Option<bool>,
+    document: Option<bool>,
 ) -> CommandResult<BackupEntry> {
     let passphrase = passphrase.filter(|value| !value.is_empty());
     if let Some(passphrase) = passphrase.as_deref() {
@@ -1913,17 +1935,97 @@ pub async fn create_backup(
             "backend.errors.backupPassphraseOrAcknowledgementRequired",
         ));
     }
-    let root = std::path::PathBuf::from(&target_dir);
+    let profile = profile_dir(&app)?;
+    let export_keys = |dest: &Path| copy_master_keys(&profile, dest, passphrase.as_deref());
+    if document == Some(true) {
+        let destination = state.write_grants.take_export(&app, &target_dir)?;
+        let temporary = super::document_io::temporary_directory(&app)?;
+        let mut entry = create_backup_in(
+            pool.inner(),
+            temporary.path(),
+            chrono::Utc::now(),
+            export_keys,
+        )
+        .await?;
+        let root = PathBuf::from(&entry.path);
+        let archive_path = destination.path().to_owned();
+        tokio::task::spawn_blocking(move || pack_backup_document(&root, &archive_path))
+            .await
+            .map_err(|error| error.to_string())??;
+        destination.publish(&app).await?;
+        entry.path = target_dir;
+        return Ok(entry);
+    }
+    let root = state.write_grants.take(Path::new(&target_dir))?;
     if !root.is_dir() {
         return Err(format!("{target_dir} is not a directory").into());
     }
-    let root = state.write_grants.take(&root)?;
-    let profile = profile_dir(&app)?;
-    create_backup_in(pool.inner(), &root, chrono::Utc::now(), |dest| {
-        copy_master_keys(&profile, dest, passphrase.as_deref())
-    })
-    .await
-    .map_err(Into::into)
+    create_backup_in(pool.inner(), &root, chrono::Utc::now(), export_keys)
+        .await
+        .map_err(Into::into)
+}
+
+const BACKUP_DATABASE: &str = "satchel.db";
+const MAX_BACKUP_METADATA_BYTES: u64 = 64 * 1024;
+const PORTABLE_BACKUP_FILES: [&str; 4] = [
+    BACKUP_DATABASE,
+    MASTER_KEY_FILES[0],
+    satchel_core::backup::BACKUP_MANIFEST,
+    satchel_core::backup::publication::COMPLETED,
+];
+
+fn pack_backup_document(source: &Path, destination: &Path) -> Result<(), String> {
+    let parent = destination
+        .parent()
+        .ok_or("missing backup destination parent")?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
+    let mut archive = tar::Builder::new(temporary.as_file_mut());
+    for name in PORTABLE_BACKUP_FILES {
+        archive
+            .append_path_with_name(source.join(name), name)
+            .map_err(|e| e.to_string())?;
+    }
+    archive
+        .into_inner()
+        .map_err(|e| e.to_string())?
+        .sync_all()
+        .map_err(|e| e.to_string())?;
+    temporary.persist(destination).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn unpack_backup_document(input: impl std::io::Read, destination: &Path) -> std::io::Result<()> {
+    use std::io::{Error, ErrorKind};
+
+    let invalid = || Error::new(ErrorKind::InvalidData, "invalid Satchel backup archive");
+    // The only accepted entries are ordinary files with literal names. Raw
+    // iteration also rejects long-name/PAX metadata instead of interpreting it.
+    let mut archive = tar::Archive::new(input);
+    for entry in archive.entries()?.raw(true) {
+        let mut entry = entry?;
+        let path = entry.path_bytes();
+        let name = PORTABLE_BACKUP_FILES
+            .into_iter()
+            .find(|name| path.as_ref() == name.as_bytes())
+            .ok_or_else(invalid)?;
+        let size = entry.size();
+        if !entry.header().entry_type().is_file()
+            || (name != BACKUP_DATABASE && size > MAX_BACKUP_METADATA_BYTES)
+        {
+            return Err(invalid());
+        }
+        let mut output = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(destination.join(name))?;
+        if std::io::copy(&mut entry, &mut output)? != size {
+            return Err(invalid());
+        }
+    }
+    if !satchel_core::backup::publication::portable_backup_is_complete(destination) {
+        return Err(invalid());
+    }
+    Ok(())
 }
 
 /// Shared creation path; the injected exporter lets tests exercise failures
@@ -2082,9 +2184,26 @@ pub async fn restore_backup(
     state: tauri::State<'_, crate::AppState>,
     path: String,
     passphrase: Option<String>,
+    document: Option<bool>,
 ) -> CommandResult<RestoreStaged> {
-    state.read_grants.folder_or_entry(Path::new(&path))?;
-    let source = std::path::PathBuf::from(&path);
+    if document == Some(true) {
+        let (file, _access) = state.read_grants.open_file(&app, &path).await?;
+        let file = file.into_std().await;
+        let temporary = super::document_io::temporary_directory(&app)?;
+        let temporary = tokio::task::spawn_blocking(move || {
+            unpack_backup_document(file, temporary.path())?;
+            Ok::<_, std::io::Error>(temporary)
+        })
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| {
+            tracing::warn!(%error, "portable backup could not be read");
+            CommandError::new("backend.errors.restoreDatabaseInvalid")
+        })?;
+        let db = temporary.path().join(BACKUP_DATABASE);
+        return stage_backup(&app, temporary.path(), &db, path, passphrase.as_deref()).await;
+    }
+    let source = state.read_grants.folder_or_entry(Path::new(&path))?;
     let candidate = if source.is_dir() {
         source.clone()
     } else {
@@ -2102,24 +2221,35 @@ pub async fn restore_backup(
         return Err(format!("no satchel.db under {}", candidate.display()).into());
     }
 
-    // Refuse a corrupt backup before it can displace a working database.
-    let facts = inspect_database(&db).await?;
+    let source = candidate.to_string_lossy().into_owned();
+    stage_backup(&app, &candidate, &db, source, passphrase.as_deref()).await
+}
 
-    let profile = profile_dir(&app)?;
+async fn stage_backup(
+    app: &tauri::AppHandle,
+    candidate: &Path,
+    db: &Path,
+    source: String,
+    passphrase: Option<&str>,
+) -> CommandResult<RestoreStaged> {
+    // Refuse a corrupt backup before it can displace a working database.
+    let facts = inspect_database(db).await?;
+
+    let profile = profile_dir(app)?;
     std::fs::create_dir_all(&profile).map_err(|err| err.to_string())?;
     let pending = profile.join(format!("satchel.db{RESTORE_PENDING_SUFFIX}"));
     // Before `stage_restore`: an unopenable key must not leave a staged file
     // behind for the next start to apply.
     let keys = crate::utils::crypto::backup_master_keys(
-        &candidate,
-        passphrase.as_deref().filter(|value| !value.is_empty()),
+        candidate,
+        passphrase.filter(|value| !value.is_empty()),
     )?;
     let current_key = crate::utils::crypto::load_or_create_master_key(&profile).ok();
-    satchel_core::backup::stage_restore(&profile, &db, &keys, current_key.as_ref()).await?;
+    satchel_core::backup::stage_restore(&profile, db, &keys, current_key.as_ref()).await?;
     let master_key_files = keys.len();
 
     Ok(RestoreStaged {
-        source: candidate.to_string_lossy().to_string(),
+        source,
         pending_path: pending.to_string_lossy().to_string(),
         account_count: facts.accounts,
         message_count: facts.messages,
@@ -2354,7 +2484,9 @@ mod tests {
         let prepared = crate::commands::attachments::prepare_attachment_in_dir(
             cache.path(),
             &pool,
-            crate::commands::attachments::DownloadAttachmentInput { attachment_id: att },
+            crate::commands::attachments::DownloadAttachmentInput {
+                attachment_id: att.clone(),
+            },
         )
         .await
         .unwrap();
@@ -2362,6 +2494,19 @@ mod tests {
             String::from_utf8(tokio::fs::read(prepared.cached_path).await.unwrap())
                 .unwrap()
                 .contains("Local attachment")
+        );
+        let restored_cache = tempfile::tempdir().unwrap();
+        let restored = crate::commands::attachments::prepare_attachment_in_dir(
+            restored_cache.path(),
+            &pool,
+            crate::commands::attachments::DownloadAttachmentInput { attachment_id: att },
+        )
+        .await
+        .unwrap();
+        assert!(Path::new(&restored.cached_path).starts_with(restored_cache.path()));
+        assert_eq!(
+            tokio::fs::read(restored.cached_path).await.unwrap(),
+            b"Local attachment"
         );
         let output = cache.path().join("export.eml");
         write_message_export(&pool, output.to_str().unwrap(), &id)
@@ -3186,6 +3331,86 @@ mod tests {
         assert!(satchel_core::backup::restore_pending(
             destination_profile.path()
         ));
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn a_backup_file_round_trips_through_document_io_with_its_manifest_and_key() {
+        let (_profile, pool) = backup_source_pool().await;
+        seed_account_with_children(&pool).await;
+        let folder = super::ensure_import_folder(&pool, "account").await.unwrap();
+        let original_cache = tempfile::tempdir().unwrap();
+        let raw = b"From: sender@example.test\r\nMessage-ID: <portable-import>\r\nContent-Type: multipart/mixed; boundary=x\r\n\r\n--x\r\nContent-Type: text/plain\r\n\r\nBody\r\n--x\r\nContent-Type: text/plain\r\nContent-Disposition: attachment; filename=local.txt\r\n\r\nPortable attachment\r\n--x--\r\n";
+        let parsed = crate::providers::imap::parse_raw_rfc822(raw).unwrap();
+        let expected_attachment = parsed.attachments[0].bytes.clone();
+        super::import_parsed_message_inner(
+            original_cache.path(),
+            &pool,
+            "account",
+            "me@example.test",
+            &folder,
+            parsed,
+            raw,
+        )
+        .await
+        .unwrap();
+        let source = tempfile::tempdir().unwrap();
+        let entry = create_backup_in(&pool, source.path(), backup_time(0), synthetic_key_export)
+            .await
+            .unwrap();
+        let archive = source.path().join("backup.tar");
+        pack_backup_document(Path::new(&entry.path), &archive).unwrap();
+        let unpacked = tempfile::tempdir().unwrap();
+        unpack_backup_document(std::fs::File::open(&archive).unwrap(), unpacked.path()).unwrap();
+        let keys = crate::utils::crypto::backup_master_keys(unpacked.path(), None).unwrap();
+        let profile = tempfile::tempdir().unwrap();
+        satchel_core::backup::stage_restore(
+            profile.path(),
+            &unpacked.path().join(BACKUP_DATABASE),
+            &keys,
+            Some(&[9; 32]),
+        )
+        .await
+        .unwrap();
+        assert!(
+            satchel_core::backup::apply_pending_restore(profile.path(), Some(&[9; 32])).unwrap()
+        );
+        drop(original_cache);
+        let restored = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new().filename(profile.path().join(BACKUP_DATABASE)),
+            )
+            .await
+            .unwrap();
+        let attachment_id = sqlx::query_scalar(
+            "SELECT a.id FROM attachments a JOIN messages m ON m.id = a.message_id
+             WHERE m.message_id_header = '<portable-import>'",
+        )
+        .fetch_one(&restored)
+        .await
+        .unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let prepared = crate::commands::attachments::prepare_attachment_in_dir(
+            cache.path(),
+            &restored,
+            crate::commands::attachments::DownloadAttachmentInput { attachment_id },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            tokio::fs::read(prepared.cached_path).await.unwrap(),
+            expected_attachment
+        );
+        restored.close().await;
+
+        let manifest = unpacked.path().join(satchel_core::backup::BACKUP_MANIFEST);
+        std::fs::write(manifest, b"{}").unwrap();
+        pack_backup_document(unpacked.path(), &archive).unwrap();
+        let invalid = tempfile::tempdir().unwrap();
+        assert!(
+            unpack_backup_document(std::fs::File::open(archive).unwrap(), invalid.path()).is_err()
+        );
         pool.close().await;
     }
 

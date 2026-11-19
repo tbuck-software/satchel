@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use sqlx::{FromRow, Sqlite, SqlitePool, Transaction};
 
 use crate::db::threads::refresh_thread_projection_tx;
+use crate::providers::gmail::GMAIL_PERMANENT_DELETE_UNAVAILABLE;
 use crate::providers::{folder_mapping::provisioned_remote_folder, traits::MessageRef};
 use crate::sync::{
     queue::{QueuedAction, SyncQueue},
@@ -879,6 +880,25 @@ impl<'a> BulkMove<'a> {
                 self.target_for(tx, account, provider).await?;
             }
         }
+        if matches!(self.target, MoveTarget::Trash) {
+            let gmail_trash: bool = sqlx::query_scalar(
+                "SELECT EXISTS(
+                    SELECT 1 FROM json_each(?) j JOIN threads t ON t.id = j.value
+                    JOIN accounts a ON a.id = t.account_id
+                    JOIN messages m ON m.thread_id = t.id
+                    JOIN folders f ON f.id = m.folder_id
+                    WHERE LOWER(a.provider) = 'gmail'
+                    GROUP BY t.id HAVING MIN(f.folder_type = 'trash') = 1
+                )",
+            )
+            .bind(json_ids(ids)?)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(|e| e.to_string())?;
+            if gmail_trash {
+                return Err(GMAIL_PERMANENT_DELETE_UNAVAILABLE.into());
+            }
+        }
         Ok(())
     }
 
@@ -995,6 +1015,9 @@ impl<'a> BulkMove<'a> {
                 && !rows.is_empty()
                 && rows.iter().all(|m| m.folder_type == "trash");
             if permanent {
+                if provider.eq_ignore_ascii_case("gmail") {
+                    return Err(GMAIL_PERMANENT_DELETE_UNAVAILABLE.into());
+                }
                 self.receipt.permanently_deleted.push(id.clone());
                 let refs = rows
                     .iter()
@@ -1363,6 +1386,37 @@ mod tests {
         let moves: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_queue WHERE json_extract(payload, '$.kind') = 'workflow_move'")
             .fetch_one(&pool).await.expect("move count");
         assert_eq!(moves, 0);
+    }
+
+    #[tokio::test]
+    async fn gmail_trash_cannot_be_permanently_deleted_with_the_current_scope() {
+        let pool = pop3_pool().await;
+        sqlx::query("UPDATE accounts SET provider = 'gmail'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE folders SET folder_type = 'trash', remote_id = 'TRASH' WHERE id = 'inbox'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let queue = SyncQueue::new();
+        let error = trash_threads(&pool, &queue, &["thread".to_string()])
+            .await
+            .unwrap_err();
+        assert_eq!(error, GMAIL_PERMANENT_DELETE_UNAVAILABLE);
+        let retained: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM messages WHERE id = 'message')")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(retained);
+        let queued: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_queue")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(queued, 0);
     }
 
     #[tokio::test]

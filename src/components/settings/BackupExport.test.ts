@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { mount } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { answerConfirms, type DialogStub } from '@/test/dialogs';
 import type { ConfirmRequest } from '@/composables/useConfirm';
@@ -18,6 +18,7 @@ const backend = vi.hoisted(() => ({
   backendListBackups: vi.fn(),
   backendPruneBackups: vi.fn(),
   backendRestoreBackup: vi.fn(),
+  backendRuntimeCapabilities: vi.fn(),
   backendCancelImport: vi.fn(),
   backendCommandsAvailable: vi.fn(() => true),
   backendSupportsNativeCommands: vi.fn(() => true),
@@ -74,6 +75,7 @@ function button(wrapper: ReturnType<typeof mount>, label: string) {
 beforeEach(() => {
   vi.clearAllMocks();
   backend.backendSupportsNativeCommands.mockReturnValue(true);
+  backend.backendRuntimeCapabilities.mockResolvedValue({ directory_backup: true, document_backup: false });
   backend.backendCredentialsStatus.mockResolvedValue({
     total_accounts: 2,
     encrypted_accounts: 2,
@@ -119,9 +121,36 @@ async function emitProgress(payload: Record<string, unknown>) {
   await Promise.resolve();
 }
 
+async function mountBackup() {
+  const wrapper = mount(BackupExport);
+  await flushPromises();
+  return wrapper;
+}
+
 describe('database backup section', () => {
+  it('uses a native document on a shell without a folder picker', async () => {
+    backend.backendRuntimeCapabilities.mockResolvedValue({ directory_backup: false, document_backup: true });
+    backend.backendChooseSavePath.mockResolvedValue('content://downloads/backup');
+    backend.backendChooseOpenFile.mockResolvedValue('content://downloads/backup');
+    const wrapper = await mountBackup();
+
+    await typeBackupPassphrase(wrapper, 'backup passphrase');
+    await button(wrapper, 'Create backup').trigger('click');
+    await vi.waitFor(() => expect(backend.backendCreateBackup).toHaveBeenCalledWith(
+      'content://downloads/backup',
+      { passphrase: 'backup passphrase', acknowledgeUnprotectedKey: false, document: true },
+    ));
+    expect(backend.backendChooseDirectory).not.toHaveBeenCalled();
+
+    await wrapper.get('input[autocomplete="off"]').setValue('restore passphrase');
+    await button(wrapper, 'Restore from file').trigger('click');
+    await vi.waitFor(() => expect(backend.backendRestoreBackup).toHaveBeenCalledWith(
+      'content://downloads/backup', 'restore passphrase', true,
+    ));
+  });
+
   it('shows the credential status on mount', async () => {
-    const wrapper = mount(BackupExport);
+    const wrapper = await mountBackup();
     await vi.waitFor(() =>
       expect(wrapper.get('[data-testid="credentials-status"]').text()).toContain('2 accounts, 2 encrypted'),
     );
@@ -129,7 +158,7 @@ describe('database backup section', () => {
   });
 
   it('rejects a short passphrase even after acknowledging an unprotected export', async () => {
-    const wrapper = mount(BackupExport);
+    const wrapper = await mountBackup();
     await wrapper.get('input[type="checkbox"]').setValue(true);
     await typeBackupPassphrase(wrapper, 'x');
     expect(button(wrapper, 'Create backup').attributes('disabled')).toBeDefined();
@@ -139,7 +168,7 @@ describe('database backup section', () => {
   });
 
   it('counts Unicode characters consistently with backend validation', async () => {
-    const wrapper = mount(BackupExport);
+    const wrapper = await mountBackup();
     await typeBackupPassphrase(wrapper, '🔒'.repeat(6));
     expect(button(wrapper, 'Create backup').attributes('disabled')).toBeDefined();
     await typeBackupPassphrase(wrapper, '🔒'.repeat(12));
@@ -147,7 +176,7 @@ describe('database backup section', () => {
   });
 
   it('creates a backup in the chosen directory and lists it', async () => {
-    const wrapper = mount(BackupExport);
+    const wrapper = await mountBackup();
     await typeBackupPassphrase(wrapper, 'backup passphrase');
     await button(wrapper, 'Create backup').trigger('click');
 
@@ -164,7 +193,7 @@ describe('database backup section', () => {
   });
 
   it('stages a restore for the next start after confirmation', async () => {
-    const wrapper = mount(BackupExport);
+    const wrapper = await mountBackup();
     await button(wrapper, 'Show backups').trigger('click');
     await vi.waitFor(() => expect(wrapper.text()).toContain('satchel-20260828-101500'));
     // The backend opens the folder dialog, so list, restore and prune read a folder it granted.
@@ -187,7 +216,7 @@ describe('database backup section', () => {
 
   it('does nothing when the restore is not confirmed', async () => {
     confirms.reply(false);
-    const wrapper = mount(BackupExport);
+    const wrapper = await mountBackup();
     await button(wrapper, 'Show backups').trigger('click');
     await vi.waitFor(() => expect(wrapper.text()).toContain('satchel-20260828-101500'));
 
@@ -198,7 +227,7 @@ describe('database backup section', () => {
   });
 
   it('will not back up without a passphrase or an explicit acknowledgement', async () => {
-    const wrapper = mount(BackupExport);
+    const wrapper = await mountBackup();
 
     expect(button(wrapper, 'Create backup').attributes('disabled')).toBeDefined();
     await button(wrapper, 'Create backup').trigger('click');
@@ -207,7 +236,7 @@ describe('database backup section', () => {
   });
 
   it('backs up without a passphrase once the folder is acknowledged', async () => {
-    const wrapper = mount(BackupExport);
+    const wrapper = await mountBackup();
     const acknowledgement = wrapper.find('input[type="checkbox"]');
     await acknowledgement.setValue(true);
 
@@ -226,7 +255,7 @@ describe('database backup section', () => {
   });
 
   it('sends the restore passphrase for a wrapped backup', async () => {
-    const wrapper = mount(BackupExport);
+    const wrapper = await mountBackup();
     await button(wrapper, 'Show backups').trigger('click');
     await vi.waitFor(() => expect(wrapper.text()).toContain('key wrapped'));
 
@@ -252,7 +281,7 @@ describe('database backup section', () => {
       restore_pending: true,
     });
     backend.backendCancelPendingRestore.mockResolvedValue(undefined);
-    const wrapper = mount(BackupExport);
+    const wrapper = await mountBackup();
     await vi.waitFor(() => expect(wrapper.text()).toContain('Discard'));
 
     await button(wrapper, 'Discard').trigger('click');
@@ -265,7 +294,7 @@ describe('database backup section', () => {
 // greyed-out button.
 describe('mbox import progress', () => {
   it('shows the bar and the counter while the import runs', async () => {
-    const wrapper = mount(BackupExport);
+    const wrapper = await mountBackup();
     await vi.waitFor(() => expect(events.handlers.has('import:progress')).toBe(true));
 
     await emitProgress({ done: 400, total: 1600, bytes_done: 250, bytes_total: 1000, eta_seconds: 120 });
@@ -280,7 +309,7 @@ describe('mbox import progress', () => {
 
   /** The first event carries no measurement yet; the bar still has to appear. */
   it('shows the bar before there is a count to show', async () => {
-    const wrapper = mount(BackupExport);
+    const wrapper = await mountBackup();
     await vi.waitFor(() => expect(events.handlers.has('import:progress')).toBe(true));
 
     await emitProgress({ bytes_total: 4_000_000_000 });
@@ -291,7 +320,7 @@ describe('mbox import progress', () => {
   });
 
   it('takes the bar away when the run ends', async () => {
-    const wrapper = mount(BackupExport);
+    const wrapper = await mountBackup();
     await vi.waitFor(() => expect(events.handlers.has('import:progress')).toBe(true));
     await emitProgress({ done: 400, total: 1600, bytes_done: 250, bytes_total: 1000 });
     await wrapper.vm.$nextTick();
@@ -310,7 +339,7 @@ describe('mbox import progress', () => {
   });
 
   it('counts tables rather than bytes for the platform import', async () => {
-    const wrapper = mount(BackupExport);
+    const wrapper = await mountBackup();
     await vi.waitFor(() => expect(events.handlers.has('import:progress')).toBe(true));
 
     await emitProgress({ kind: 'platform', done: 3, total: 12 });
@@ -329,7 +358,7 @@ describe('mbox import progress', () => {
     });
     backend.backendChooseOpenFile.mockResolvedValue('/archive.mbox');
     accountsState.emailAccounts = [{ id: 'a1', email: 'a@example.test', displayName: 'A' }];
-    const wrapper = mount(BackupExport);
+    const wrapper = await mountBackup();
     await vi.waitFor(() => expect(events.handlers.has('import:progress')).toBe(true));
 
     await button(wrapper, 'Import mbox').trigger('click');
@@ -351,7 +380,7 @@ describe('mbox import progress', () => {
     });
     backend.backendChooseOpenFile.mockResolvedValue('/archive.mbox');
     accountsState.emailAccounts = [{ id: 'a1', email: 'a@example.test', displayName: 'A' }];
-    const wrapper = mount(BackupExport);
+    const wrapper = await mountBackup();
 
     await button(wrapper, 'Import mbox').trigger('click');
 
@@ -366,7 +395,7 @@ describe('mbox import progress', () => {
     backend.backendImportMbox.mockRejectedValue(new Error('mbox unreadable'));
     backend.backendChooseOpenFile.mockResolvedValue('/archive.mbox');
     accountsState.emailAccounts = [{ id: 'a1', email: 'a@example.test', displayName: 'A' }];
-    const wrapper = mount(BackupExport);
+    const wrapper = await mountBackup();
 
     await button(wrapper, 'Import mbox').trigger('click');
 

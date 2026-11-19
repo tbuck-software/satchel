@@ -121,7 +121,7 @@ function run(action: 'pin' | 'aside' | 'waiting' | 'spam' | 'notSpam') {
         <template #icon><AppIcon><circle cx="8" cy="8" r="6" /><path d="M8 4v4l2.5 1.5" /></AppIcon></template>
         {{ t('thread.actions.snooze') }}
       </AppButton>
-      <IconButton :title="t('common.delete')" :disabled="busy" :shortcut="hint('trash')" @click="void actions.trash(ids())">
+      <IconButton v-if="actions.canTrash(threads.selectedThreadIds)" :title="t('common.delete')" :disabled="busy" :shortcut="hint('trash')" @click="void actions.trash(ids())">
         <AppIcon><path d="M2 4h12M6 4V2h4v2M4 4l1 10h6l1-10" /></AppIcon>
       </IconButton>
       <IconButton :title="anyUnread ? t('thread.actions.markRead') : t('thread.actions.markUnread')" :disabled="busy" :shortcut="hint('toggleRead')" @click="void actions.setRead(ids(), anyUnread, { undo: true })">

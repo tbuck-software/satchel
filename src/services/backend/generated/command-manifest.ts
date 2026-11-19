@@ -324,6 +324,15 @@ export default {
                         }
                     }
                 },
+                "document": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
                 "passphrase": {
                     "required": false,
                     "shape": {
@@ -2047,6 +2056,15 @@ export default {
         "restore_backup": {
             "kind": "object",
             "fields": {
+                "document": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
                 "passphrase": {
                     "required": false,
                     "shape": {
@@ -2224,6 +2242,15 @@ export default {
                     "required": true,
                     "shape": {
                         "kind": "value"
+                    }
+                },
+                "expectedRevision": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
                     }
                 },
                 "input": {

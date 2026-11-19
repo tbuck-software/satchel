@@ -46,10 +46,12 @@ test.beforeEach(async ({ page }) => {
       },
     });
   });
-
-  await page.goto('/');
-  await expect(page.getByTitle('More actions')).toBeVisible();
 });
+
+async function openPrintThread(page: Page, path = '/') {
+  await page.goto(path);
+  await expect(page.getByTitle('More actions')).toBeVisible({ timeout: 20_000 });
+}
 
 async function choosePrintScope(
   page: Page,
@@ -61,8 +63,10 @@ async function choosePrintScope(
 }
 
 test('prints the latest message in the current window when popups are unavailable', async ({ page }) => {
+  await openPrintThread(page);
   await choosePrintScope(page, 'Latest email only');
 
+  await expect.poll(() => page.evaluate(() => window.__satchelPrintProbe.printCalls)).toBe(1);
   const probe = await page.evaluate(() => window.__satchelPrintProbe);
   expect(probe.openCalls).toBe(0);
   expect(probe.printCalls).toBe(1);
@@ -73,8 +77,10 @@ test('prints the latest message in the current window when popups are unavailabl
 });
 
 test('prints every message in conversation order', async ({ page }) => {
+  await openPrintThread(page);
   await choosePrintScope(page, 'Whole conversation');
 
+  await expect.poll(() => page.evaluate(() => window.__satchelPrintProbe.printCalls)).toBe(1);
   const probe = await page.evaluate(() => window.__satchelPrintProbe);
   expect(probe.openCalls).toBe(0);
   expect(probe.printCalls).toBe(1);
@@ -84,4 +90,12 @@ test('prints every message in conversation order', async ({ page }) => {
   expect(probe.snapshots[0].indexOf(firstMessage)).toBeLessThan(
     probe.snapshots[0].indexOf(latestMessage),
   );
+});
+
+test('prints the complete body of an unopened HTML-only message', async ({ page }) => {
+  await openPrintThread(page, '/?mockHtmlOnlyPrint=1');
+  await choosePrintScope(page, 'Whole conversation');
+
+  await expect.poll(() => page.evaluate(() => window.__satchelPrintProbe.snapshots[0]))
+    .toContain('Full text of the first reply, stored only as HTML.');
 });

@@ -180,9 +180,8 @@ pub struct MessageSearchHitDto {
     pub cursor_date: String,
 }
 
-/// An operator token the parser understood but had to ignore, e.g. `in:` with
-/// an unknown mailbox or an unparseable date. Machine-readable on purpose —
-/// the user-facing (German) wording lives in the frontend.
+/// A search limitation: an ignored operator or the oldest date ranked for a
+/// broad query (`candidate_limit`). The frontend localizes the explanation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ipc-types", ts(export, export_to = "core/db/messages/"))]
@@ -319,7 +318,15 @@ impl<'a> MessageSearchRepository<'a> {
         }
 
         if !fts_match.is_empty() && !parsed.has_filters() && parsed.excluded_terms.is_empty() {
-            let hits = search_unfiltered_text_hits(pool, input, &fts_match, list.as_ref()).await?;
+            let (hits, cutoff) =
+                search_unfiltered_text_hits(pool, input, &fts_match, list.as_ref()).await?;
+            let mut warnings = parsed.warnings;
+            if let Some(date) = cutoff.filter(|date| !date.is_empty()) {
+                warnings.push(SearchWarningDto {
+                    operator: "candidate_limit".into(),
+                    value: date,
+                });
+            }
             log_perf(
                 "search_message_hits",
                 started_at,
@@ -329,7 +336,7 @@ impl<'a> MessageSearchRepository<'a> {
                     hits.len()
                 ),
             );
-            return Ok(search_page(hits, parsed.warnings, input));
+            return Ok(search_page(hits, warnings, input));
         }
 
         // Both branches deduplicate to the best hit per thread: opening a hit lands
@@ -509,6 +516,8 @@ struct RankedSearchRow {
     rowid: i64,
     rank_cost: f64,
     cursor_date: String,
+    #[sqlx(default)]
+    candidate_cutoff: Option<String>,
 }
 
 /// Upper bound on the matches an unfiltered text search ranks.
@@ -533,13 +542,17 @@ async fn search_unfiltered_text_hits(
     input: &SearchQuery,
     fts_match: &str,
     list: Option<&ListScopeFilter<'_>>,
-) -> Result<Vec<MessageSearchHitDto>, MessageSearchError> {
+) -> Result<(Vec<MessageSearchHitDto>, Option<String>), MessageSearchError> {
     let ranked =
         unfiltered_text_ranking_query(input, fts_match, UNFILTERED_SEARCH_CANDIDATES, list)
             .build_query_as::<RankedSearchRow>()
             .fetch_all(pool)
             .await?;
-    hydrate_search_hits(pool, Some(fts_match), ranked).await
+    let cutoff = ranked.first().and_then(|row| row.candidate_cutoff.clone());
+    Ok((
+        hydrate_search_hits(pool, Some(fts_match), ranked).await?,
+        cutoff,
+    ))
 }
 
 fn unfiltered_text_ranking_query(
@@ -553,8 +566,39 @@ fn unfiltered_text_ranking_query(
         .as_deref()
         .filter(|id| !id.is_empty())
         .map(str::to_string);
+    // The date of the `candidate_cap`-th newest match only when there are
+    // additional matches. Finding it reads only doclist rowids and the compact
+    // projection; bm25 then runs for the candidates alone.
     let mut query = QueryBuilder::<Sqlite>::new(
-        "SELECT hit_rowid as rowid, rank_cost, date as cursor_date FROM (
+        "WITH boundary AS (
+            SELECT cap.date
+            FROM messages_fts cap_fts
+            JOIN message_search_projection cap ON cap.message_rowid = cap_fts.rowid
+            JOIN accounts cap_acc ON cap_acc.id = cap.account_id AND cap_acc.is_active = 1
+            WHERE cap_fts.messages_fts MATCH ",
+    );
+    query.push_bind(fts_match.to_string());
+    if let Some(account_id) = &account_id {
+        query.push(" AND cap.account_id = ");
+        query.push_bind(account_id.clone());
+    } else {
+        query
+            .push(" AND ")
+            .push(crate::db::account_visibility::visible_account_sql(
+                "cap.account_id",
+            ));
+    }
+    // The cap counts the list's matches, or a scoped search would rank
+    // fewer candidates than an unscoped one.
+    if let Some(list) = list {
+        list.push(&mut query, "cap.thread_id");
+    }
+    query.push(" ORDER BY cap.date DESC LIMIT 2 OFFSET ");
+    query.push_bind(candidate_cap.max(1) - 1);
+    query.push(
+        "), cutoff AS MATERIALIZED (SELECT MAX(date) AS date FROM boundary HAVING COUNT(*) = 2)
+         SELECT hit_rowid as rowid, rank_cost, date as cursor_date,
+                (SELECT date FROM cutoff) AS candidate_cutoff FROM (
             SELECT ranked.*, ROW_NUMBER() OVER (
                 PARTITION BY thread_id ORDER BY rank_cost ASC, date DESC, id DESC
             ) as thread_rank
@@ -584,36 +628,7 @@ fn unfiltered_text_ranking_query(
     if let Some(list) = list {
         list.push(&mut query, "sp.thread_id");
     }
-    // The date of the `candidate_cap`-th newest match, or '' (every match) when
-    // there are fewer. Finding it reads only doclist rowids and the compact
-    // projection; bm25 then runs for the candidates alone.
-    query.push(
-        " AND sp.date >= COALESCE((
-            SELECT cap.date
-            FROM messages_fts cap_fts
-            JOIN message_search_projection cap ON cap.message_rowid = cap_fts.rowid
-            JOIN accounts cap_acc ON cap_acc.id = cap.account_id AND cap_acc.is_active = 1
-            WHERE cap_fts.messages_fts MATCH ",
-    );
-    query.push_bind(fts_match.to_string());
-    if let Some(account_id) = account_id {
-        query.push(" AND cap.account_id = ");
-        query.push_bind(account_id);
-    } else {
-        query
-            .push(" AND ")
-            .push(crate::db::account_visibility::visible_account_sql(
-                "cap.account_id",
-            ));
-    }
-    // The cap counts the list's matches, or a scoped search would rank
-    // fewer candidates than an unscoped one.
-    if let Some(list) = list {
-        list.push(&mut query, "cap.thread_id");
-    }
-    query.push(" ORDER BY cap.date DESC LIMIT 1 OFFSET ");
-    query.push_bind(candidate_cap.max(1) - 1);
-    query.push("), '')");
+    query.push(" AND sp.date >= COALESCE((SELECT date FROM cutoff), '')");
     query.push(") as ranked ) WHERE thread_rank = 1");
     push_search_cursor(&mut query, input, true, "date", "thread_id");
     query.push(" ORDER BY rank_cost ASC, date DESC, thread_id DESC LIMIT ");
@@ -1418,13 +1433,15 @@ mod tests {
         .fetch_one(&pool)
         .await
         .unwrap();
-        let hits = ranked(
-            unfiltered_text_ranking_query(&input(None, 500), "\"budget\"", cap, None),
-            &pool,
-        )
-        .await;
+        let hits = unfiltered_text_ranking_query(&input(None, 500), "\"budget\"", cap, None)
+            .build_query_as::<RankedSearchRow>()
+            .fetch_all(&pool)
+            .await
+            .unwrap();
         assert!(!hits.is_empty());
-        for (rowid, _) in &hits {
+        for hit in &hits {
+            assert_eq!(hit.candidate_cutoff.as_deref(), Some(cutoff.as_str()));
+            let rowid = hit.rowid;
             let date: String = sqlx::query_scalar("SELECT date FROM messages WHERE rowid = ?")
                 .bind(rowid)
                 .fetch_one(&pool)

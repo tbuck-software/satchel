@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { reactive, ref } from 'vue';
 import {
   backendCommandsAvailable,
   backendGetChatMeta,
@@ -40,6 +40,7 @@ export const useChatsStore = defineStore('chats', () => {
   const accounts = useAccountsStore();
   const items = ref<Thread[]>([]);
   const loaded = ref(false);
+  const drafts = reactive(new Map<string, string>());
   const loader = orderedLoad();
   const { loading, loadFailed } = loader;
 
@@ -81,5 +82,5 @@ export const useChatsStore = defineStore('chats', () => {
     await backendUnlockChatKey(keyId, passphrase);
   }
 
-  return { items, loaded, loading, loadFailed, load, meta, send, unlockKey, markRead };
+  return { items, loaded, loading, loadFailed, drafts, load, meta, send, unlockKey, markRead };
 });

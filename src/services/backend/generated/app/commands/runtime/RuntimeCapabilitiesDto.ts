@@ -11,6 +11,8 @@ export type RuntimeCapabilitiesDto = {
     background_sync: boolean;
     contacts: boolean;
     file_associations: boolean;
+    directory_backup: boolean;
+    document_backup: boolean;
     deep_links: boolean;
     push: boolean;
 };

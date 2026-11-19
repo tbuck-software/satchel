@@ -1,3 +1,9 @@
+<script lang="ts">
+// The first modal remembers the page's overflow. The last one to close restores it.
+let scrollLocks = 0;
+let scrollBefore = '';
+</script>
+
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue';
 import { useFocusTrap } from '@/composables/useFocusTrap';
@@ -47,23 +53,22 @@ function onBackdropClick(event: MouseEvent) {
   if (event.target === event.currentTarget) emit('dismiss');
 }
 
-// Counted, because a modal can open on top of a modal and the inner one must
-// not hand scrolling back while the outer one is still up.
-let scrollLocks = 0;
-let scrollBefore = '';
+let scrollLocked = false;
 
 function lockScroll() {
-  if (typeof document === 'undefined') return;
+  if (scrollLocked) return;
   if (scrollLocks === 0) {
     scrollBefore = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
   }
   scrollLocks += 1;
+  scrollLocked = true;
 }
 
 function unlockScroll() {
-  if (typeof document === 'undefined') return;
-  scrollLocks = Math.max(0, scrollLocks - 1);
+  if (!scrollLocked) return;
+  scrollLocked = false;
+  scrollLocks -= 1;
   if (scrollLocks === 0) document.body.style.overflow = scrollBefore;
 }
 

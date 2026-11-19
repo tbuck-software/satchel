@@ -13,7 +13,7 @@ pub use crate::db::calendar::{
 use crate::email::calendar::{
     build_invite_reply_ics, extract_ics_block, is_invitation_method, parse_invite,
 };
-use crate::sync::outbox::build_idempotent_send_action;
+use crate::sync::outbox::build_send_action;
 use crate::AppState;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -349,28 +349,30 @@ pub async fn queue_invite_response(
         ..Default::default()
     };
 
-    let idempotency_key = format!(
-        "calendar-rsvp|{}|{}|{}|{}|{}",
-        invite.account_id,
-        invite.uid,
-        parsed.recurrence_id.as_deref().unwrap_or("master"),
-        invite.sequence.unwrap_or(0),
-        normalized,
-    );
-    let action =
-        build_idempotent_send_action(invite.account_id.clone(), outgoing_input, &idempotency_key)
-            .map_err(|error| {
+    // The response and its outgoing Message-ID are one durable state change.
+    let mut tx = pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(CalendarError::from)?;
+    if !CalendarRepository::change_rsvp_in_transaction(&mut tx, &invite, rsvp_string).await? {
+        return Ok(());
+    }
+    let mut action =
+        build_send_action(invite.account_id, outgoing_input, None).map_err(|error| {
             tracing::error!(%error, invite_id = %invite.id, "calendar reply could not be queued");
             CommandError::new("backend.errors.calendarPersistenceFailed")
         })?;
-    state.queue.enqueue(pool, action).await.map_err(|error| {
-        tracing::error!(%error, invite_id = %invite.id, "calendar reply queue write failed");
-        CommandError::new("backend.errors.calendarPersistenceFailed")
-    })?;
-
-    repository
-        .update_rsvp_status(&input.invite_id, rsvp_string)
-        .await?;
+    action.status = "pending".into();
+    state
+        .queue
+        .enqueue_in_transaction(&mut tx, &action)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, invite_id = %invite.id, "calendar reply queue write failed");
+            CommandError::new("backend.errors.calendarPersistenceFailed")
+        })?;
+    tx.commit().await.map_err(CalendarError::from)?;
+    state.queue.wake_worker();
 
     Ok(())
 }

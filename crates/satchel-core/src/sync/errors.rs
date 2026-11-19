@@ -9,6 +9,9 @@ use thiserror::Error;
 
 pub type SyncResult<T> = Result<T, SyncError>;
 
+/// Replaying an IMAP COPY may duplicate messages in the destination.
+pub const IMAP_MOVE_COPY_NEEDS_REVIEW: &str = "backend.errors.imapMoveCopyNeedsReview";
+
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum SyncError {
     /// Provider asked us to slow down. The queue waits for the provider block

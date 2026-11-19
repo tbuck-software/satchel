@@ -1,6 +1,9 @@
 //! Persist provider messages and their derived local projections.
 
-use std::{collections::HashSet, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use satchel_core::db::blocked_senders::BlockedSenderRepository;
 use satchel_core::db::sender_preferences::{
@@ -14,7 +17,7 @@ use sqlx::{Acquire, SqlitePool};
 use tauri::{AppHandle, Manager};
 
 use crate::events::bus::EventBus;
-use crate::providers::traits::MessageEnvelope;
+use crate::providers::traits::{MessageEnvelope, RemoteAttachment};
 use crate::sync::attachment_processing::process_special_attachment;
 use crate::sync::folder_reconcile::{is_snooze_folder, reconcile_external_workflow_states};
 use crate::sync::gmail_reconcile::{SnapshotDeferral, SnapshotResolution};
@@ -102,6 +105,119 @@ struct StoredMessage {
     workflow_marker_changed: bool,
 }
 
+#[derive(sqlx::FromRow)]
+struct PriorMessage {
+    thread_id: Option<String>,
+    message_id_header: Option<String>,
+    remote_workflow_marker: Option<String>,
+    is_draft: bool,
+    has_attachments: bool,
+    local_revision_without_remote_id: bool,
+}
+
+#[derive(sqlx::FromRow, PartialEq, Eq, PartialOrd, Ord)]
+struct DraftAttachmentMetadata {
+    filename: Option<String>,
+    content_type: String,
+    size: Option<i64>,
+    content_id: Option<String>,
+    is_inline: bool,
+}
+
+#[derive(sqlx::FromRow)]
+struct StoredDraftAttachment {
+    #[sqlx(flatten)]
+    metadata: DraftAttachmentMetadata,
+    remote_part_id: String,
+    content_base64: Option<String>,
+}
+
+async fn provider_draft_attachments_changed(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    message_id: &str,
+    had_attachments: bool,
+    incoming: &[RemoteAttachment],
+) -> Result<bool, String> {
+    // An envelope without parts does not replace the stored attachments.
+    if incoming.is_empty() {
+        return Ok(false);
+    }
+    if !had_attachments {
+        return Ok(true);
+    }
+    let stored: Vec<StoredDraftAttachment> = sqlx::query_as(
+        "SELECT filename, content_type, size, content_id, COALESCE(is_inline, 0) AS is_inline,
+                remote_part_id, content_base64
+         FROM attachments WHERE message_id = ? AND remote_part_id IS NOT NULL",
+    )
+    .bind(message_id)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|error| error.to_string())?;
+    if stored.is_empty() {
+        // A pending local upload may have adopted the server identity without
+        // collecting its parts. Learning their metadata alone is no edit.
+        return Ok(false);
+    }
+    // A provider can assign new part IDs to an otherwise identical draft.
+    let all_bytes_known = stored.iter().all(|part| part.content_base64.is_some())
+        && incoming.iter().all(|part| part.content_base64.is_some());
+    if !all_bytes_known {
+        let known_bytes: HashMap<_, _> = stored
+            .iter()
+            .filter_map(|part| {
+                Some((
+                    part.remote_part_id.as_str(),
+                    part.content_base64.as_deref()?,
+                ))
+            })
+            .collect();
+        if incoming.iter().any(|part| {
+            part.content_base64
+                .as_deref()
+                .zip(known_bytes.get(part.remote_part_id.as_str()))
+                .is_some_and(|(incoming, stored)| incoming != *stored)
+        }) {
+            return Ok(true);
+        }
+    }
+    let mut old: Vec<_> = stored
+        .into_iter()
+        .map(|part| {
+            let bytes = if all_bytes_known {
+                part.content_base64
+            } else {
+                None
+            };
+            (part.metadata, bytes)
+        })
+        .collect();
+    let mut new: Vec<_> = incoming
+        .iter()
+        .map(|part| {
+            let metadata = DraftAttachmentMetadata {
+                filename: part
+                    .filename
+                    .as_deref()
+                    .map(satchel_core::utils::filename::safe_attachment_name),
+                content_type: part.content_type.clone(),
+                size: part.size,
+                content_id: part.content_id.clone(),
+                is_inline: part.is_inline,
+            };
+            let bytes = if all_bytes_known {
+                part.content_base64.clone()
+            } else {
+                None
+            };
+            (metadata, bytes)
+        })
+        .collect();
+    old.sort_unstable();
+    new.sort_unstable();
+    Ok(old != new)
+}
+
 pub(crate) const INGEST_BATCH_SIZE: usize = 100;
 
 pub(crate) async fn upsert_provider_messages(
@@ -151,7 +267,9 @@ pub(crate) async fn upsert_provider_messages(
                         .commit()
                         .await
                         .map_err(|error| error.to_string())?;
-                    stored.push((message, value));
+                    if let Some(value) = value {
+                        stored.push((message, value));
+                    }
                     results.push(Ok(()));
                 }
                 Err(error) => {
@@ -318,7 +436,13 @@ pub(crate) async fn upsert_gmail_snapshot_message(
         )
         .await
         {
-            Ok(value) => stored.push(value),
+            Ok(Some(value)) => stored.push(value),
+            Ok(None) => {
+                tx.rollback().await.map_err(|error| error.to_string())?;
+                return Ok(SnapshotResolution::Deferred(
+                    SnapshotDeferral::PendingMutation,
+                ));
+            }
             Err(error) => {
                 tx.rollback().await.map_err(|error| error.to_string())?;
                 let attempts = repository
@@ -421,7 +545,7 @@ async fn persist_provider_message(
     body_html: Option<&str>,
     flag_locks: &PendingFlagLocks,
     cutoff: Option<&str>,
-) -> Result<StoredMessage, String> {
+) -> Result<Option<StoredMessage>, String> {
     let flags_locked = flag_locks.holds(folder_remote_id, &message.remote_id);
     let now = chrono::Utc::now().to_rfc3339();
     let message_is_draft = provider_message_is_draft(folder_type, &message.mailbox_ids);
@@ -502,23 +626,55 @@ async fn persist_provider_message(
     } else {
         provider_message_id
     };
-    let prior_message = sqlx::query_as::<_, (Option<String>, Option<String>, Option<String>)>(
-        "SELECT thread_id, message_id_header, remote_workflow_marker FROM messages WHERE id = ?",
+    let prior_message = sqlx::query_as::<_, PriorMessage>(
+        "SELECT thread_id, message_id_header, remote_workflow_marker,
+                    COALESCE(is_draft, 0) AS is_draft,
+                    COALESCE(has_attachments, 0) AS has_attachments,
+                    (draft_revision > 0 AND remote_id IS NULL) AS local_revision_without_remote_id
+         FROM messages WHERE id = ?",
     )
     .bind(&message_id)
     .fetch_optional(&mut **tx)
     .await
     .map_err(|error| error.to_string())?;
+    if let Some(prior) = prior_message.as_ref().filter(|prior| prior.is_draft) {
+        if prior.local_revision_without_remote_id
+            || satchel_core::drafts::has_pending_upload(tx, account_id, &message_id).await?
+        {
+            if message_is_draft {
+                // Preserve the local revision across first adoption and
+                // UIDVALIDITY resets. Reattach the provider identity without
+                // changing the editor's contents or attachments.
+                sqlx::query(
+                    "UPDATE messages SET remote_id = ?, remote_uid = ?, remote_uidvalidity = ?,
+                        remote_draft_id = COALESCE(remote_draft_id, ?)
+                     WHERE id = ? AND folder_id = ? AND remote_id IS NULL",
+                )
+                .bind(&message.remote_id)
+                .bind(message.remote_id.parse::<i64>().ok())
+                .bind(message.remote_uidvalidity.map(i64::from))
+                .bind(remote_draft_id.as_deref())
+                .bind(&message_id)
+                .bind(folder_id)
+                .execute(&mut **tx)
+                .await
+                .map_err(|error| error.to_string())?;
+            }
+            return Ok(None);
+        }
+    }
     // Only a marker that changed on this copy is worth the thread's
     // reconciliation; a mailbox without markers costs nothing extra.
     let workflow_marker_changed = message.workflow_marker.is_some_and(|marker| {
         satchel_core::workflow::remote_marker::WorkflowMarker::from_column(
-            prior_message.as_ref().and_then(|row| row.2.as_deref()),
+            prior_message
+                .as_ref()
+                .and_then(|row| row.remote_workflow_marker.as_deref()),
         ) != marker
     });
     let prior_thread_id = prior_message
         .as_ref()
-        .and_then(|row| row.0.as_deref())
+        .and_then(|row| row.thread_id.as_deref())
         .filter(|value| !value.trim().is_empty())
         .map(str::to_string);
     let thread_id = resolve_provider_thread_tx(
@@ -539,7 +695,7 @@ async fn persist_provider_message(
         // Locally composed replies may already reference this synthetic header.
         prior_message
             .as_ref()
-            .and_then(|row| row.1.as_deref())
+            .and_then(|row| row.message_id_header.as_deref())
             .filter(|header| {
                 header.ends_with(".satchel.local>") || header.ends_with(".flowmail.local>")
             })
@@ -639,6 +795,20 @@ async fn persist_provider_message(
         .eq_ignore_ascii_case(account_email.trim());
     let effective_from_name = effective_from_name(message, account_display_name, sender_is_account);
     let unread_count = if message.is_read { 0 } else { 1 };
+    let draft_attachments_changed = if let Some(prior) = prior_message
+        .as_ref()
+        .filter(|prior| message_is_draft && prior.is_draft)
+    {
+        provider_draft_attachments_changed(
+            tx,
+            &message_id,
+            prior.has_attachments,
+            &message.attachments,
+        )
+        .await?
+    } else {
+        false
+    };
 
     // Display fields (subject/date/snippet/participants) only move forward:
     // backfill and multi-folder re-syncs deliver *older* messages of the same
@@ -809,6 +979,23 @@ async fn persist_provider_message(
                 WHEN excluded.is_draft = 1 THEN NULL
                 ELSE messages.draft_attachments_json
             END,
+            provider_draft_revision = messages.provider_draft_revision + CASE
+                WHEN messages.is_draft = 1 AND excluded.is_draft = 1 AND (
+                    COALESCE(messages.subject, '') IS NOT COALESCE(excluded.subject, '')
+                    OR messages.from_address IS NOT excluded.from_address
+                    OR messages.to_addresses IS NOT excluded.to_addresses
+                    OR COALESCE(messages.cc_addresses, '[]') IS NOT excluded.cc_addresses
+                    OR COALESCE(messages.bcc_addresses, '[]') IS NOT excluded.bcc_addresses
+                    OR COALESCE(messages.reply_to, '') IS NOT COALESCE(excluded.reply_to, '')
+                    OR COALESCE(messages.body_text, '') IS NOT COALESCE(
+                        CASE WHEN json_extract(excluded.trust_metadata, '$.root_crypto')
+                             THEN excluded.body_text ELSE COALESCE(excluded.body_text, messages.body_text) END, '')
+                    OR COALESCE(messages.body_html, '') IS NOT COALESCE(
+                        CASE WHEN json_extract(excluded.trust_metadata, '$.root_crypto')
+                             THEN excluded.body_html ELSE COALESCE(excluded.body_html, messages.body_html) END, '')
+                    OR ?
+                ) THEN 1 ELSE 0
+            END,
             updated_at = excluded.updated_at",
     )
     .bind(&message_id)
@@ -870,6 +1057,7 @@ async fn persist_provider_message(
     .bind(flags_locked)
     .bind(flags_locked)
     .bind(message.workflow_marker.is_some())
+    .bind(draft_attachments_changed)
     .execute(&mut **tx)
     .await
     .map_err(|err| err.to_string())?;
@@ -1065,7 +1253,7 @@ async fn persist_provider_message(
     if newly_seen && !message_is_draft && !sender_is_account {
         apply_autocrypt_header(tx, account_id, folder_type, message).await?;
     }
-    Ok(StoredMessage {
+    Ok(Some(StoredMessage {
         message_id,
         thread_id,
         was_pre_existing,
@@ -1074,7 +1262,7 @@ async fn persist_provider_message(
         message_is_sent,
         attachment_ids,
         workflow_marker_changed,
-    })
+    }))
 }
 
 /// Whether a message may change a peer's Autocrypt state at all. The spec
@@ -5144,6 +5332,173 @@ mod tests {
             .fetch_one(pool)
             .await
             .unwrap()
+        }
+
+        #[tokio::test]
+        async fn remote_draft_edits_invalidate_the_editor_revision_but_identical_ingests_do_not() {
+            for provider in ["gmail", "imap", "outlook"] {
+                let pool = draft_pool(provider).await;
+                let queue = SyncQueue::new();
+                let mut original = server_copy(provider, 1, 7);
+                original.body_html = Some("<p>Original draft</p>".into());
+                original.attachments.push(RemoteAttachment {
+                    remote_part_id: "part-1".into(),
+                    filename: Some("note.txt".into()),
+                    content_type: "text/plain".into(),
+                    size: Some(1),
+                    content_id: None,
+                    is_inline: false,
+                    content_base64: Some("YQ==".into()),
+                });
+                ingest(&pool, provider, &original).await;
+                let first = drafts::list(&pool).await.unwrap().remove(0);
+                assert_eq!(first.revision, 0, "{provider}");
+
+                let mut same = original.clone();
+                same.remote_id = server_copy(provider, 2, 7).remote_id;
+                same.is_starred = !same.is_starred;
+                same.attachments[0].remote_part_id = "part-2".into();
+                ingest(&pool, provider, &same).await;
+                assert_eq!(
+                    drafts::list(&pool).await.unwrap()[0].revision,
+                    first.revision,
+                    "{provider}"
+                );
+
+                let mut changed = same.clone();
+                changed.body_text = Some("Edited elsewhere".into());
+                changed.body_html = Some("<p>Edited elsewhere</p>".into());
+                changed.to_addresses = vec!["different@example.test".into()];
+                ingest(&pool, provider, &changed).await;
+                let second = drafts::list(&pool).await.unwrap().remove(0);
+                assert_eq!(second.id, first.id, "{provider}");
+                assert_eq!(second.revision, first.revision + 1, "{provider}");
+                assert_eq!(second.body, "Edited elsewhere", "{provider}");
+
+                let mut header_only = changed.clone();
+                header_only.body_text = None;
+                header_only.body_html = None;
+                header_only.attachments.clear();
+                ingest(&pool, provider, &header_only).await;
+                assert_eq!(
+                    drafts::list(&pool).await.unwrap()[0].revision,
+                    second.revision,
+                    "{provider}"
+                );
+
+                changed.attachments[0].content_base64 = Some("Yg==".into());
+                changed.attachments[0].remote_part_id = "part-3".into();
+                ingest(&pool, provider, &changed).await;
+                let third = drafts::list(&pool).await.unwrap().remove(0);
+                assert_eq!(third.revision, second.revision + 1, "{provider}");
+                let local_revision: i64 =
+                    sqlx::query_scalar("SELECT draft_revision FROM messages WHERE id = ?")
+                        .bind(&third.id)
+                        .fetch_one(&pool)
+                        .await
+                        .unwrap();
+                assert_eq!(local_revision, 0, "{provider}");
+
+                let mut input: drafts::DraftInput = serde_json::from_value(serde_json::json!({
+                    "id": &third.id, "account_id": "account", "body": "My edit",
+                    "expected_revision": first.revision,
+                }))
+                .unwrap();
+                assert!(matches!(
+                    drafts::save(&pool, &queue, &input).await,
+                    Err(DraftError::ChangedElsewhere)
+                ));
+                let action = build_send_action(
+                    "account".into(),
+                    serde_json::from_value(serde_json::json!({
+                        "draft_id": &third.id, "to": ["other@example.test"], "subject": "Stale", "body": "Stale",
+                    }))
+                    .unwrap(),
+                    None,
+                )
+                .unwrap();
+                assert!(matches!(
+                    drafts::enqueue_send_with_draft_revision(
+                        &pool,
+                        &queue,
+                        &action,
+                        Some(first.revision)
+                    )
+                    .await,
+                    Err(DraftError::ChangedElsewhere)
+                ));
+
+                input.expected_revision = Some(third.revision);
+                let (saved, _) = drafts::save(&pool, &queue, &input).await.unwrap();
+                assert_eq!(saved.revision, third.revision + 1, "{provider}");
+            }
+        }
+
+        #[tokio::test]
+        async fn a_provider_refresh_preserves_a_pending_draft_edit_and_attachments() {
+            for provider in ["gmail", "imap", "outlook"] {
+                let pool = draft_pool(provider).await;
+                let queue = SyncQueue::new();
+                ingest(&pool, provider, &server_copy(provider, 1, 7)).await;
+                let (draft_id, _, _) = identity(&pool).await;
+                let input = serde_json::from_value(serde_json::json!({
+                    "id": &draft_id, "account_id": "account", "to": ["new@example.test"],
+                    "subject": "Edited subject", "body": "Edited text", "from_address": "account@example.com",
+                })).unwrap();
+                let (saved, _) = drafts::save(&pool, &queue, &input).await.unwrap();
+                sqlx::query("UPDATE messages SET draft_attachments_json = '[{}]' WHERE id = ?")
+                    .bind(&draft_id)
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+
+                let mut stale = server_copy(provider, 2, 7);
+                stale.to_addresses = vec!["old@example.test".into()];
+                ingest(&pool, provider, &stale).await;
+
+                let (body, to, attachments, rev, updated): (String, String, String, i64, String) =
+                    sqlx::query_as("SELECT body_text, to_addresses, draft_attachments_json, draft_revision, updated_at FROM messages WHERE id = ?")
+                        .bind(&draft_id).fetch_one(&pool).await.unwrap();
+                assert_eq!(body, "Edited text", "{provider}");
+                assert!(to.contains("new@example.test"), "{provider}");
+                assert_eq!(attachments, "[{}]", "{provider}");
+                assert_eq!(rev, saved.revision, "{provider}");
+                assert_eq!(updated, saved.updated_at, "{provider}");
+            }
+        }
+
+        #[tokio::test]
+        async fn a_draft_reattaches_to_a_new_generation_without_overwriting_the_local_revision() {
+            let pool = draft_pool("imap").await;
+            let queue = SyncQueue::new();
+            ingest(&pool, "imap", &server_copy("imap", 1, 7)).await;
+            let (draft_id, _, _) = identity(&pool).await;
+            let input = serde_json::from_value(serde_json::json!({
+                "id": &draft_id, "account_id": "account", "body": "Local text",
+            }))
+            .unwrap();
+            drafts::save(&pool, &queue, &input).await.unwrap();
+            sqlx::query("DELETE FROM sync_queue WHERE action_type = 'sync_draft'")
+                .execute(&pool)
+                .await
+                .unwrap();
+            crate::sync::folder_reconcile::reset_local_provider_folder_with_generation(
+                &pool, "account", "drafts", 8, "now",
+            )
+            .await
+            .unwrap();
+
+            ingest(&pool, "imap", &server_copy("imap", 2, 8)).await;
+            assert_eq!(
+                identity(&pool).await,
+                (draft_id.clone(), Some("42".into()), Some(8))
+            );
+            let body: String = sqlx::query_scalar("SELECT body_text FROM messages WHERE id = ?")
+                .bind(draft_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            assert_eq!(body, "Local text");
         }
 
         /// Saves draft `d1`, records its provider id as an upload would, then

@@ -370,7 +370,7 @@ async function waitForOAuth(state: string) {
   while (Date.now() < deadline) {
     await new Promise<void>((resolve) => window.setTimeout(resolve, 900));
     const poll = await backendPollOauthFlow(state);
-    if (poll.status === 'completed') return;
+    if (poll.status === 'completed') return poll.result?.account_id;
     if (poll.status === 'failed') {
       // Keep the structured reason as the cause: the message is already a
       // sentence, and only the key still says which failure this was.
@@ -399,6 +399,7 @@ async function connectOAuth() {
   await accounts.load();
   accounts.setActiveAccount(account.id);
   let flowState = '';
+  let connectedAccountId = account.id;
   try {
     const flow = await backendStartOauthFlow({ accountId: account.id, provider: selectedProvider });
     flowState = flow.state;
@@ -410,7 +411,7 @@ async function connectOAuth() {
     if (!flow.browser_opened) {
       await openOAuthAuthorizationUrl(flow.authorization_url);
     }
-    await waitForOAuth(flow.state);
+    connectedAccountId = await waitForOAuth(flow.state) ?? account.id;
   } catch (error) {
     if (error instanceof OAuthCallbackTimeout) {
       // Keep the account and the open flow: the panel below can still spend
@@ -423,7 +424,7 @@ async function connectOAuth() {
     await accounts.load();
     throw error;
   }
-  await finishOAuthAccount(account.id, true);
+  await finishOAuthAccount(connectedAccountId, true);
 }
 
 function offerManualOauth(accountId: string, state: string, seedSignature: boolean) {
@@ -460,12 +461,18 @@ async function completeOauthManually() {
   busy.value = true;
   clearError();
   try {
-    await backendCompleteOauthFlow({
-      state: manualState.value.trim(),
-      code: manualCode.value.trim(),
-    });
+    const state = manualState.value.trim();
+    const result = await backendCompleteOauthFlow({ state, code: manualCode.value.trim() });
+    if (result.status === 'failed') {
+      throw new Error(translateBackendError(result.error) || t('onboarding.errors.cancelled'), {
+        cause: result.error,
+      });
+    }
+    const connectedAccountId = result.status === 'pending'
+      ? await waitForOAuth(state)
+      : result.result?.account_id;
     manualOauth.value = null;
-    await finishOAuthAccount(pending.accountId, pending.seedSignature);
+    await finishOAuthAccount(connectedAccountId ?? pending.accountId, pending.seedSignature);
   } catch (error) {
     await abandonManualOauth();
     showError(error);
@@ -504,9 +511,9 @@ async function resumeOAuthFlow(flow: BackendOpenOauthFlow) {
   step.value = 2;
   busy.value = true;
   try {
-    await waitForOAuth(flow.state);
+    const connectedAccountId = await waitForOAuth(flow.state);
     await accounts.load();
-    accounts.setActiveAccount(flow.account_id);
+    accounts.setActiveAccount(connectedAccountId ?? flow.account_id);
     connectedEmail.value = normalizedEmail.value;
     connectedProvider.value = provider.value;
     services.value = [

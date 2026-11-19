@@ -39,6 +39,7 @@ export async function backendSendMessage(
 ): Promise<BackendSendMessageResult> {
   return invoke<BackendSendMessageResult>('send_message', {
     accountId: payload.accountId,
+    expectedRevision: payload.expectedRevision ?? null,
     input: outgoingMessageWire(payload),
   });
 }

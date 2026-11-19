@@ -48,6 +48,7 @@ function draftState(overrides: Partial<ComposerDraftState> = {}): ComposerDraftS
 type CloseHandler = (event: { preventDefault: () => void }) => void | Promise<void>;
 
 interface HarnessOptions {
+  hasSavedDraft?: boolean;
   embedded?: boolean;
   standalone?: boolean;
   supportsBackend?: boolean;
@@ -88,6 +89,7 @@ function createHarness(options: HarnessOptions = {}) {
         supportsBackend: options.supportsBackend ?? true,
         initialized,
         currentState: () => state,
+        hasSavedDraft: () => options.hasSavedDraft ?? false,
         persistDraft,
         finishDraftPersistence,
         closeDraftWithoutSaving,
@@ -179,6 +181,21 @@ describe('useComposerCloseGuard', () => {
 
     // Matches the opening state, but the disk holds "Hello world".
     expect(closeGuard.shouldConfirmClose()).toBe(true);
+  });
+
+  it('treats clearing a saved draft as a change', async () => {
+    const { closeGuard, setState, persistDraft, requestClose } = harness({
+      state: draftState({ subject: 'Saved subject' }),
+      hasSavedDraft: true,
+    });
+    closeGuard.captureBaseline();
+    await closeGuard.installStandaloneCloseGuard();
+    setState(draftState());
+
+    expect(closeGuard.shouldConfirmClose()).toBe(true);
+    requestClose();
+    await flushPromises();
+    expect(persistDraft).toHaveBeenCalledOnce();
   });
 
   it('does not treat the plain-text switch alone as unsaved, since it is not stored', () => {

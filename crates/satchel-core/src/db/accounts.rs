@@ -109,12 +109,13 @@ pub struct OAuthAccountStatus {
     pub connected_at: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct OAuthAccountConnection {
     pub account_id: String,
     pub provider: String,
     pub has_refresh_token: bool,
     pub expires_at: Option<String>,
+    pub granted_scopes: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -815,6 +816,39 @@ impl<'a> AccountRepository<'a> {
         identity: &OAuthIdentity,
         now: &str,
     ) -> Result<OAuthAccountConnection, AccountError> {
+        self.connect_oauth_inner(session_account_id, client, token, identity, now, None)
+            .await
+    }
+
+    pub async fn connect_oauth_for_flow(
+        &self,
+        session_account_id: &str,
+        client: &oauth::OAuthClientConfig,
+        token: &OAuthTokenPayload,
+        identity: &OAuthIdentity,
+        now: &str,
+        state: &str,
+    ) -> Result<OAuthAccountConnection, AccountError> {
+        self.connect_oauth_inner(
+            session_account_id,
+            client,
+            token,
+            identity,
+            now,
+            Some(state),
+        )
+        .await
+    }
+
+    async fn connect_oauth_inner(
+        &self,
+        session_account_id: &str,
+        client: &oauth::OAuthClientConfig,
+        token: &OAuthTokenPayload,
+        identity: &OAuthIdentity,
+        now: &str,
+        state: Option<&str>,
+    ) -> Result<OAuthAccountConnection, AccountError> {
         let provider = client.provider;
         let normalized_email = identity.email.trim().to_lowercase();
         if normalized_email.is_empty() {
@@ -900,6 +934,10 @@ impl<'a> AccountRepository<'a> {
             connection
         };
 
+        if let Some(state) = state {
+            super::oauth::complete_exchange(&mut transaction, state, session_account_id, &result)
+                .await?;
+        }
         transaction.commit().await?;
         Ok(result)
     }
@@ -1098,6 +1136,7 @@ fn oauth_connection(
             .as_deref()
             .is_some_and(|token| !token.trim().is_empty()),
         expires_at: stored.expires_at,
+        granted_scopes: oauth::granted_scopes(stored.scope.as_deref()),
     })
 }
 

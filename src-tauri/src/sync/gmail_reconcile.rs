@@ -209,7 +209,23 @@ pub(crate) async fn gmail_snapshot_message_pinned_tx(
         crate::sync::folder_reconcile::PendingMutations::All,
     )
     .await?;
-    Ok(pending.iter().any(|(_, id)| id == remote_id))
+    if pending.iter().any(|(_, id)| id == remote_id) {
+        return Ok(true);
+    }
+    let drafts: Vec<String> = sqlx::query_scalar(
+        "SELECT id FROM messages WHERE account_id = ? AND remote_id = ? AND is_draft = 1",
+    )
+    .bind(account_id)
+    .bind(remote_id)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|error| error.to_string())?;
+    for id in drafts {
+        if satchel_core::drafts::has_pending_upload(tx, account_id, &id).await? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// The drafts behind a vanished message that the server still has.

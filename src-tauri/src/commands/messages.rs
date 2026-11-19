@@ -2384,7 +2384,11 @@ pub async fn send_message(
     pool: tauri::State<'_, SqlitePool>,
     account_id: String,
     input: OutgoingMessageInput,
+    expected_revision: Option<i64>,
 ) -> CommandResult<SendMessageResult> {
+    if input.draft_id.is_some() != expected_revision.is_some() {
+        return Err(satchel_core::drafts::DraftError::ChangedElsewhere.into());
+    }
     send_message_inner(
         app,
         state.inner(),
@@ -2392,6 +2396,7 @@ pub async fn send_message(
         account_id,
         input,
         SendMode::Composer,
+        expected_revision,
     )
     .await
 }
@@ -2403,6 +2408,7 @@ pub(crate) async fn send_message_inner(
     account_id: String,
     input: OutgoingMessageInput,
     mode: SendMode,
+    expected_revision: Option<i64>,
 ) -> CommandResult<SendMessageResult> {
     let mut input = input;
     // Only Satchel's own sends (a rule's forward) are automatic.
@@ -2442,9 +2448,14 @@ pub(crate) async fn send_message_inner(
     let action = build_send_action(account_id.clone(), input.clone(), scheduled_for)?;
     let queued_id = action.id.clone();
 
-    satchel_core::drafts::enqueue_send_with_draft(pool, &state.queue, &action)
-        .await
-        .map_err(CommandError::from)?;
+    satchel_core::drafts::enqueue_send_with_draft_revision(
+        pool,
+        &state.queue,
+        &action,
+        expected_revision,
+    )
+    .await
+    .map_err(CommandError::from)?;
 
     if let Some(when) = scheduled_for {
         let event_name = if undo_delay_active {
@@ -2642,6 +2653,7 @@ pub async fn persist_sent_message_record(
                     filename: attachment.filename.clone(),
                     mime_type: attachment.mime_type.clone(),
                     size: attachment_decoded_size(&attachment.content_base64),
+                    content_base64: attachment.content_base64.clone(),
                     content_id: attachment.content_id.clone(),
                     inline: attachment.inline,
                 })

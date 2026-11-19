@@ -16,6 +16,10 @@ pub struct RegisteredPlugin {
     pub enabled: bool,
     pub root_dir: PathBuf,
     pub component_path: Option<PathBuf>,
+    #[cfg(desktop)]
+    #[serde(skip)]
+    #[cfg_attr(feature = "ipc-types", ts(skip))]
+    pub(super) component_digest: Option<[u8; 32]>,
     pub api_version: String,
     pub capabilities: Vec<PluginCapability>,
     pub event_subscriptions: Vec<String>,
@@ -268,8 +272,10 @@ impl PluginRegistry {
             let trust = metadata.trust.unwrap_or_default();
             let signature = metadata.signature;
             let component_path = resolve_component_artifact(&path, &package_name);
-            let signature_check =
+            let (signature_check, component_digest) =
                 verify_plugin_signature(component_path.as_deref(), signature.as_deref());
+            #[cfg(mobile)]
+            let _ = component_digest;
             let signature_verified = matches!(signature_check, SignatureCheck::TrustedSignature);
             let manifest_errors = validate_plugin_manifest(
                 &package_name,
@@ -288,6 +294,8 @@ impl PluginRegistry {
                 enabled,
                 root_dir: path.clone(),
                 component_path,
+                #[cfg(desktop)]
+                component_digest,
                 api_version,
                 capabilities,
                 event_subscriptions,
@@ -361,43 +369,38 @@ const SATCHEL_PLUGIN_TRUSTED_KEYS: &[&str] =
 fn verify_plugin_signature(
     component_path: Option<&Path>,
     signature: Option<&str>,
-) -> SignatureCheck {
+) -> (SignatureCheck, Option<[u8; 32]>) {
     let Some(signature) = signature.map(str::trim).filter(|value| !value.is_empty()) else {
-        return SignatureCheck::Missing;
+        return (SignatureCheck::Missing, None);
     };
-    let Some(component_path) = component_path else {
-        return if signature.starts_with("sha256:") {
+    let Some(bytes) = component_path.and_then(|path| fs::read(path).ok()) else {
+        let check = if signature.starts_with("sha256:") {
             SignatureCheck::DigestMismatched
         } else {
             SignatureCheck::UntrustedSignature
         };
+        return (check, None);
     };
-    let Ok(bytes) = fs::read(component_path) else {
-        return if signature.starts_with("sha256:") {
-            SignatureCheck::DigestMismatched
-        } else {
-            SignatureCheck::UntrustedSignature
-        };
-    };
+    let digest: [u8; 32] = Sha256::digest(&bytes).into();
     if let Some(expected) = signature.strip_prefix("sha256:") {
-        let actual = Sha256::digest(&bytes)
+        let actual = digest
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>();
         return if actual.eq_ignore_ascii_case(expected.trim()) {
-            SignatureCheck::DigestMatched
+            (SignatureCheck::DigestMatched, Some(digest))
         } else {
-            SignatureCheck::DigestMismatched
+            (SignatureCheck::DigestMismatched, None)
         };
     }
     if let Some(encoded) = signature.strip_prefix("ed25519:") {
         return if verify_ed25519_signature(&bytes, encoded.trim()) {
-            SignatureCheck::TrustedSignature
+            (SignatureCheck::TrustedSignature, Some(digest))
         } else {
-            SignatureCheck::UntrustedSignature
+            (SignatureCheck::UntrustedSignature, None)
         };
     }
-    SignatureCheck::UntrustedSignature
+    (SignatureCheck::UntrustedSignature, None)
 }
 
 fn verify_ed25519_signature(message: &[u8], encoded_signature: &str) -> bool {
@@ -565,6 +568,10 @@ mod tests {
     use super::*;
     use ring::signature::KeyPair;
 
+    fn verify_plugin_signature(path: Option<&Path>, signature: Option<&str>) -> SignatureCheck {
+        super::verify_plugin_signature(path, signature).0
+    }
+
     fn write_component(content: &[u8]) -> tempfile::TempDir {
         let dir = tempfile::tempdir().expect("temp dir");
         std::fs::write(dir.path().join("component.wasm"), content).expect("write artifact");
@@ -578,6 +585,8 @@ mod tests {
             enabled: manifest_errors.is_empty(),
             root_dir: PathBuf::from("/plugins/example"),
             component_path: None,
+            #[cfg(desktop)]
+            component_digest: None,
             api_version: SATCHEL_PLUGIN_API_VERSION.into(),
             capabilities: Vec::new(),
             event_subscriptions: Vec::new(),

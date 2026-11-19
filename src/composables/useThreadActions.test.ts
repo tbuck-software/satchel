@@ -1,5 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { useAccountsStore } from '@/stores/accounts';
 
 const trashMock = vi.fn();
 const spamMock = vi.fn();
@@ -528,6 +529,21 @@ describe('useThreadActions', () => {
     trashMock.mockResolvedValueOnce({ undo_token: null, undo_thread_ids: [], permanently_deleted: ['thread-1'] });
     await useThreadActions().trash(['thread-1']);
     expect(toasts.at(-1)?.action).toBeUndefined();
+  });
+
+  it('keeps a mixed selection when Gmail cannot permanently delete one of its threads', async () => {
+    useAccountsStore().accounts = [{ id: 'acc-1', provider: 'gmail' } as never];
+    mailboxState.mailboxes = [{ account_id: 'acc-1', name: 'Trash', mailbox_type: 'trash' }];
+    threadState.threads = [
+      seedThread({ id: 'inbox', accountId: 'acc-1', mailboxNames: ['INBOX'] }),
+      seedThread({ id: 'trashed', accountId: 'acc-1', mailboxNames: ['Trash'] }),
+    ];
+    const actions = useThreadActions();
+    expect(actions.canTrash(['inbox'])).toBe(true);
+    expect(actions.canTrash(['inbox', 'trashed'])).toBe(false);
+    await actions.trash(['inbox', 'trashed']);
+    expect(trashMock).not.toHaveBeenCalled();
+    expect(toasts.at(-1)).toMatchObject({ tone: 'error' });
   });
 
   it('separates permanent deletion from the undoable part of a mixed batch', async () => {

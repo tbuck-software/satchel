@@ -4,14 +4,12 @@ use chrono::Utc;
 use sqlx::{FromRow, Sqlite, SqlitePool};
 use thiserror::Error;
 
-/// Metadata needed to show an outgoing attachment on its persisted message.
-///
-/// The attachment bytes remain an app/provider concern. Core only stores the
-/// metadata that belongs to the message record.
+/// A locally sent attachment remains readable even without a remote Sent folder.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SentAttachmentMetadata {
     pub filename: String,
     pub mime_type: String,
+    pub content_base64: String,
     /// Approximate decoded byte size calculated at the compose boundary.
     pub size: i64,
     pub content_id: Option<String>,
@@ -232,8 +230,8 @@ impl<'a> SentMessageRepository<'a> {
         for attachment in &request.attachments {
             let attachment_id = format!("att-{}", uuid::Uuid::new_v4());
             sqlx::query(
-                "INSERT INTO attachments (id, message_id, filename, content_type, size, content_id, storage_path, is_inline, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)",
+                "INSERT INTO attachments (id, message_id, filename, content_type, size, content_id, storage_path, is_inline, created_at, content_base64)
+                 VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)",
             )
             .bind(&attachment_id)
             .bind(&message_id)
@@ -243,6 +241,7 @@ impl<'a> SentMessageRepository<'a> {
             .bind(attachment.content_id.as_deref())
             .bind(if attachment.inline { 1 } else { 0 })
             .bind(&now)
+            .bind(&attachment.content_base64)
             .execute(&mut *tx)
             .await?;
         }

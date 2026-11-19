@@ -1960,7 +1960,10 @@ mod tests {
         let job = new_job(&pool, now, 2).await;
         tick(&pool, &queue, now).await.expect("tick");
         pause_job(&pool, &job, now).await.expect("pause");
-        assert_eq!(queue_rows(&pool).await.len(), 1);
+        let queued = sole_queue_id(&pool).await;
+        assert!(queue.peek_next_ready(&pool).await.unwrap().is_none());
+        assert!(queue.ready_account_heads(&pool).await.unwrap().is_empty());
+        assert!(queue.claim_ready(&pool, &queued).await.unwrap().is_none());
 
         let later = now + Duration::seconds(5);
         let paused = pause_after_restart(&pool, later, later, false)

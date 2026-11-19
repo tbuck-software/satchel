@@ -193,6 +193,7 @@ impl SyncQueue {
                 FROM sync_queue
                 WHERE status IN ('pending', 'scheduled')
                   AND (id NOT LIKE 'notification:%' OR COALESCE(updated_at_ms, 0) <= ?)
+                  AND NOT EXISTS (SELECT 1 FROM paused_merge_actions WHERE queue_id = sync_queue.id)
                   AND NOT EXISTS (SELECT 1 FROM accounts WHERE accounts.id = sync_queue.account_id AND is_active = 0)
                   AND NOT EXISTS (SELECT 1 FROM sync_queue_dependencies d JOIN sync_queue predecessor ON predecessor.id = d.depends_on WHERE d.action_id = sync_queue.id)
                   AND (action_type NOT IN ('send_message', 'rule_forward') OR
@@ -422,6 +423,7 @@ impl SyncQueue {
                     submission_started_at, rate_limit_rounds
              FROM sync_queue
              WHERE status IN ('pending', 'scheduled')
+               AND NOT EXISTS (SELECT 1 FROM paused_merge_actions WHERE queue_id = sync_queue.id)
                AND NOT EXISTS (SELECT 1 FROM accounts WHERE accounts.id = sync_queue.account_id AND is_active = 0)
                AND NOT EXISTS (SELECT 1 FROM sync_queue_dependencies d JOIN sync_queue predecessor ON predecessor.id = d.depends_on WHERE d.action_id = sync_queue.id)
                AND (id NOT LIKE 'notification:%' OR COALESCE(updated_at_ms, 0) <= ?)
@@ -461,6 +463,7 @@ impl SyncQueue {
                     submission_started_at, rate_limit_rounds
              FROM sync_queue
              WHERE id = ?
+               AND NOT EXISTS (SELECT 1 FROM paused_merge_actions WHERE queue_id = sync_queue.id)
                AND NOT EXISTS (SELECT 1 FROM accounts WHERE accounts.id = sync_queue.account_id AND is_active = 0)
                AND NOT EXISTS (SELECT 1 FROM sync_queue_dependencies d JOIN sync_queue predecessor ON predecessor.id = d.depends_on WHERE d.action_id = sync_queue.id)
                AND status IN ('pending', 'scheduled')
@@ -848,6 +851,7 @@ impl SyncQueue {
             "SELECT MIN(COALESCE(next_retry_at, scheduled_for, created_at))
              FROM sync_queue
              WHERE status IN ('pending', 'scheduled')
+               AND NOT EXISTS (SELECT 1 FROM paused_merge_actions WHERE queue_id = sync_queue.id)
                AND NOT EXISTS (SELECT 1 FROM accounts WHERE accounts.id = sync_queue.account_id AND is_active = 0)
                AND NOT EXISTS (SELECT 1 FROM sync_queue_dependencies d JOIN sync_queue predecessor ON predecessor.id = d.depends_on WHERE d.action_id = sync_queue.id)
                AND (id NOT LIKE 'notification:%' OR COALESCE(updated_at_ms, 0) <= ?)",
@@ -1069,13 +1073,15 @@ impl SyncQueue {
         let changed = sqlx::query(
             "UPDATE sync_queue SET status = 'pending', retry_count = 0, next_retry_at = NULL, last_error = NULL,
              updated_at = ?, updated_at_ms = CASE WHEN id LIKE 'notification:%' THEN 0 ELSE ? END
-             WHERE id = ? AND action_type IN (?, ?) AND status = 'failed'",
+             WHERE id = ? AND action_type IN (?, ?) AND status = 'failed'
+               AND COALESCE(last_error, '') <> ?",
         )
         .bind(Utc::now().to_rfc3339())
         .bind(Utc::now().timestamp_millis())
         .bind(id)
         .bind(crate::sync::remote_mutations::ACTION_REMOTE_MUTATION)
         .bind(ACTION_SYNC_DRAFT)
+        .bind(crate::sync::errors::IMAP_MOVE_COPY_NEEDS_REVIEW)
         .execute(pool)
         .await
         .map_err(|e| e.to_string())?
@@ -1093,12 +1099,14 @@ impl SyncQueue {
             "UPDATE sync_queue
              SET status = 'pending', retry_count = 0, next_retry_at = NULL,
                  last_error = NULL, updated_at = ?, updated_at_ms = CASE WHEN id LIKE 'notification:%' THEN 0 ELSE ? END
-             WHERE action_type IN (?, ?) AND status = 'failed'",
+             WHERE action_type IN (?, ?) AND status = 'failed'
+               AND COALESCE(last_error, '') <> ?",
         )
         .bind(&now)
         .bind(now_ms)
         .bind(crate::sync::remote_mutations::ACTION_REMOTE_MUTATION)
         .bind(ACTION_SYNC_DRAFT)
+        .bind(crate::sync::errors::IMAP_MOVE_COPY_NEEDS_REVIEW)
         .execute(pool)
         .await
         .map_err(|err| err.to_string())?
@@ -1920,7 +1928,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn manual_sync_retry_requeues_drafts_and_mutations_but_not_mail() {
+    async fn manual_sync_retry_skips_mail_and_uncertain_imap_copies() {
         let pool = fresh_pool().await;
         let queue = SyncQueue::new();
         let draft = QueuedAction::new("acc-1".into(), ACTION_SYNC_DRAFT, json!({}));
@@ -1929,9 +1937,20 @@ mod tests {
             crate::sync::remote_mutations::ACTION_REMOTE_MUTATION,
             json!({}),
         );
+        let possible_copy = QueuedAction::new(
+            "acc-1".into(),
+            crate::sync::remote_mutations::ACTION_REMOTE_MUTATION,
+            json!({"kind": "workflow_move"}),
+        );
         let failed_mail = QueuedAction::new("acc-1".into(), ACTION_SEND_MESSAGE, json!({}));
         let unknown_mail = QueuedAction::new("acc-1".into(), ACTION_SEND_MESSAGE, json!({}));
-        for action in [&draft, &mutation, &failed_mail, &unknown_mail] {
+        for action in [
+            &draft,
+            &mutation,
+            &failed_mail,
+            &unknown_mail,
+            &possible_copy,
+        ] {
             queue.enqueue(&pool, (*action).clone()).await.unwrap();
         }
         for action in [&draft, &mutation, &failed_mail] {
@@ -1944,6 +1963,18 @@ mod tests {
             .mark_delivery_unknown(&pool, &unknown_mail.id)
             .await
             .unwrap();
+        queue
+            .mark_failed_permanent(
+                &pool,
+                &possible_copy.id,
+                crate::sync::errors::IMAP_MOVE_COPY_NEEDS_REVIEW,
+            )
+            .await
+            .unwrap();
+        assert!(!queue
+            .requeue_failed_sync_action(&pool, &possible_copy.id)
+            .await
+            .unwrap());
 
         assert_eq!(
             queue.requeue_failed_remote_mutations(&pool).await.unwrap(),
@@ -1953,6 +1984,7 @@ mod tests {
         assert_eq!(status_of(&pool, &mutation.id).await, "pending");
         assert_eq!(status_of(&pool, &failed_mail.id).await, "failed");
         assert_eq!(status_of(&pool, &unknown_mail.id).await, "delivery_unknown");
+        assert_eq!(status_of(&pool, &possible_copy.id).await, "failed");
     }
 
     #[tokio::test]

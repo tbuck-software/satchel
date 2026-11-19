@@ -11,6 +11,7 @@ import {
   type BackendTrashReceipt,
 } from '@/services/backend';
 import { translateBackendError } from '@/utils/backendErrors';
+import { useAccountsStore } from '@/stores/accounts';
 import { useMailboxesStore } from '@/stores/mailboxes';
 import { useThreadsStore } from '@/stores/threads';
 import { useTopicsStore } from '@/stores/topics';
@@ -69,6 +70,7 @@ export function useThreadActions() {
   const route = useRoute();
   const router = useRouter();
   const threads = useThreadsStore();
+  const accounts = useAccountsStore();
   const mailboxes = useMailboxesStore();
   const topics = useTopicsStore();
   const ui = useUiStore();
@@ -486,7 +488,23 @@ export function useThreadActions() {
     });
   }
 
+  function canTrash(threadIds: readonly string[]): boolean {
+    return threadIds.every((id) => {
+      const thread = threads.find(id);
+      if (!thread?.mailboxNames?.length
+        || accounts.accounts.find(account => account.id === thread.accountId)?.provider !== 'gmail') {
+        return true;
+      }
+      return !thread.mailboxNames.every(name => mailboxes.mailboxes.some(mailbox =>
+        mailbox.account_id === thread.accountId && mailbox.name === name && mailbox.mailbox_type === 'trash'));
+    });
+  }
+
   async function trash(threadIds: string[]): Promise<void> {
+    if (!canTrash(threadIds)) {
+      toast.error(t('backend.errors.gmailPermanentDeleteUnavailable'));
+      return;
+    }
     await fileWithReceipt(threadIds, (ids) => threads.trashThreads(ids), {
       failed: t('thread.result.trashFailed'),
       result: (count) => tc('thread.result.trashed', count),
@@ -759,6 +777,7 @@ export function useThreadActions() {
     sweepSender,
     moveToFolder,
     trash,
+    canTrash,
     setPinned,
     togglePinned,
     togglePriority,

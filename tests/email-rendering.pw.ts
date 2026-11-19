@@ -112,6 +112,38 @@ test('opening a link from the context menu keeps the destination protection', as
   await expect(page.getByRole('alertdialog', { name: 'Check the link before opening' })).toBeVisible();
 });
 
+test('opens a mail link with Tab and Enter', async ({ page }) => {
+  await renderMail(page, '<p>Choose a destination.</p><a href="https://localhost/login">Sign in</a>');
+  await expect(page.locator('.satchel-email-hotspot').first()).toBeVisible();
+  await page.locator('.satchel-email-host').focus();
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('link', { name: 'Sign in' })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('alertdialog', { name: 'Check the link before opening' })).toBeVisible({ timeout: 5000 });
+});
+
+test('opens the message actions on selected HTML text', async ({ page }) => {
+  const mail = await renderMail(page, '<p><strong>Selectable introduction.</strong></p><a href="https://localhost/login">Sign in</a>');
+  const text = mail.getByText('Selectable introduction.');
+  await expect(text).toBeVisible();
+  const point = await text.evaluate(element => {
+    const doc = element.ownerDocument;
+    const range = doc.createRange();
+    range.selectNodeContents(element);
+    const selection = doc.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const rect = range.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  });
+  const frame = await page.locator('iframe.satchel-email-document').boundingBox();
+  if (!frame) throw new Error('mail frame not found');
+  await page.mouse.move(frame.x + point.x, frame.y + point.y);
+  await expect(page.locator('.satchel-email-selection').first()).toBeVisible();
+  await page.mouse.click(frame.x + point.x, frame.y + point.y, { button: 'right' });
+  await expect(page.getByRole('menuitem', { name: 'Copy selected text' })).toBeVisible();
+});
+
 test('blends sender canvas backgrounds into the dark reader while retaining coloured panels', async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('satchel.theme', 'dark'));
   const mail = await renderMail(page, `

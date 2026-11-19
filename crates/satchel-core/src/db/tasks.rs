@@ -214,7 +214,6 @@ struct ListState {
 struct TaskState {
     list_id: String,
     pending_op: Option<String>,
-    remote_id: Option<String>,
     due_at: Option<String>,
     due_tz: Option<String>,
     start_at: Option<String>,
@@ -333,7 +332,9 @@ impl<'a> TaskRepository<'a> {
              LEFT JOIN accounts a ON a.id = l.account_id
              -- A calendar that also holds events shows as a task list once it
              -- holds a task, so an account does not sprout a list per calendar.
-             WHERE NOT (l.mixed = 1 AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.list_id = l.id))
+             WHERE NOT (l.mixed = 1 AND NOT EXISTS (
+                 SELECT 1 FROM tasks t WHERE t.list_id = l.id AND t.delete_confirmed_at IS NULL
+             ))
              ORDER BY l.account_id IS NOT NULL, a.created_at, l.name COLLATE NOCASE, l.id",
         )
         .fetch_all(self.pool)
@@ -493,7 +494,7 @@ impl<'a> TaskRepository<'a> {
 
     async fn task_state(&self, id: &str) -> Result<TaskState, TaskError> {
         sqlx::query_as::<_, TaskState>(
-            "SELECT list_id, pending_op, remote_id, due_at, due_tz, start_at, reminder_at,
+            "SELECT list_id, pending_op, due_at, due_tz, start_at, reminder_at,
                     completed_at, rrule, recurrence, updated_at
              FROM tasks WHERE id = ? AND COALESCE(pending_op, '') <> 'delete'",
         )
@@ -642,36 +643,34 @@ impl<'a> TaskRepository<'a> {
         self.get(id).await
     }
 
-    /// Local tasks and tasks the server never saw go at once; the others
-    /// wait, hidden, for the server to confirm.
+    /// Hide the task immediately. Keep the complete VTODO until Undo expires.
     pub async fn delete(&self, id: &str) -> Result<(), TaskError> {
         let state = self.task_state(id).await?;
         let list = self.list_state(&state.list_id).await?;
         if list.read_only && !list.gone {
             return Err(TaskError::ListReadOnly);
         }
-        // A list the server dropped cannot take the deletion any more.
-        if list.provider == LOCAL_PROVIDER || list.gone || state.remote_id.is_none() {
-            sqlx::query("DELETE FROM tasks WHERE id = ?")
-                .bind(id)
-                .execute(self.pool)
-                .await?;
-        } else {
-            sqlx::query("UPDATE tasks SET pending_op = 'delete', updated_at = ? WHERE id = ?")
-                .bind(now())
-                .bind(id)
-                .execute(self.pool)
-                .await?;
-        }
+        let local_only = list.provider == LOCAL_PROVIDER || list.gone;
+        sqlx::query(
+            "UPDATE tasks SET pending_op = 'delete', updated_at = ?1,
+                    delete_confirmed_at = CASE WHEN ?2 OR remote_id IS NULL THEN ?1 END
+             WHERE id = ?3",
+        )
+        .bind(now())
+        .bind(local_only)
+        .bind(id)
+        .execute(self.pool)
+        .await?;
         Ok(())
     }
 
-    /// Restore a task removed by [`Self::delete`] (undo). A task whose deletion
-    /// already reached the server is gone; that is reported as not found.
     pub async fn undelete(&self, id: &str) -> Result<TaskRecord, TaskError> {
         let result = sqlx::query(
             "UPDATE tasks SET pending_op = CASE
-                    WHEN remote_payload IS NULL THEN 'create' ELSE 'update' END,
+                    WHEN EXISTS(SELECT 1 FROM task_lists l WHERE l.id = tasks.list_id
+                                AND (l.provider = 'local' OR l.gone = 1)) THEN NULL
+                    WHEN remote_id IS NULL THEN 'create' ELSE 'update' END,
+                    delete_confirmed_at = NULL, push_retry_at = NULL, push_failures = 0,
                     updated_at = ?
              WHERE id = ? AND pending_op = 'delete'",
         )
@@ -683,6 +682,30 @@ impl<'a> TaskRepository<'a> {
             return Err(TaskError::TaskNotFound);
         }
         self.get(id).await
+    }
+
+    /// A concurrent Undo still needs the original UID and calendar properties
+    /// when it recreates the resource the server just removed.
+    pub async fn confirm_remote_delete(&self, id: &str) -> Result<(), TaskError> {
+        sqlx::query(
+            "UPDATE tasks SET remote_id = NULL, remote_version = NULL,
+                    delete_confirmed_at = CASE WHEN pending_op = 'delete' THEN ? END,
+                    pending_op = CASE WHEN pending_op = 'delete' THEN 'delete' ELSE 'create' END,
+                    push_retry_at = NULL, push_failures = 0 WHERE id = ?",
+        )
+        .bind(now())
+        .bind(id)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn prune_deleted(&self) -> Result<(), TaskError> {
+        sqlx::query("DELETE FROM tasks WHERE delete_confirmed_at < ?")
+            .bind((chrono::Utc::now() - chrono::Duration::hours(1)).to_rfc3339())
+            .execute(self.pool)
+            .await?;
+        Ok(())
     }
 
     /// Claim reminders that are due, at most 25 at a time, so each shows once.
@@ -866,7 +889,7 @@ impl<'a> TaskRepository<'a> {
         ignore_backoff: bool,
     ) -> Result<Vec<PendingTask>, TaskError> {
         sqlx::query_as::<_, PendingTask>(&format!(
-            "{PENDING_SELECT} WHERE list_id = ? AND pending_op IS NOT NULL
+            "{PENDING_SELECT} WHERE list_id = ? AND pending_op IS NOT NULL AND delete_confirmed_at IS NULL
                AND (? OR push_retry_at IS NULL OR push_retry_at <= ?)
              ORDER BY updated_at"
         ))
@@ -908,7 +931,9 @@ impl<'a> TaskRepository<'a> {
         sqlx::query(
             "UPDATE tasks SET remote_id = ?, remote_version = ?, remote_payload = ?,
                     push_failures = 0, push_retry_at = NULL,
-                    pending_op = CASE WHEN updated_at = ? AND NOT ? THEN NULL ELSE 'update' END
+                    delete_confirmed_at = NULL,
+                    pending_op = CASE WHEN pending_op = 'delete' THEN 'delete'
+                                      WHEN updated_at = ? AND NOT ? THEN NULL ELSE 'update' END
              WHERE id = ?",
         )
         .bind(remote_id)
@@ -1128,7 +1153,10 @@ impl<'a> TaskRepository<'a> {
             if seen.contains(&remote_id) {
                 continue;
             }
-            if pending.as_deref() == Some("update") {
+            if pending.as_deref() == Some("delete") {
+                self.confirm_remote_delete(&id).await?;
+                removal.removed += 1;
+            } else if pending.as_deref() == Some("update") {
                 self.keep_as_local(&id).await?;
                 removal.kept_local += 1;
             } else {
@@ -1260,6 +1288,9 @@ mod tests {
         assert_eq!(repo.list_tasks(true).await.unwrap().len(), 1);
         repo.delete(&task.id).await.unwrap();
         assert!(repo.list_tasks(true).await.unwrap().is_empty());
+        let restored = repo.undelete(&task.id).await.unwrap();
+        assert_eq!(restored.id, task.id);
+        assert!(!restored.pending);
     }
 
     #[tokio::test]
@@ -1313,6 +1344,27 @@ mod tests {
         let restored = repo.undelete(&task.id).await.unwrap();
         assert_eq!(restored.title, "Draft v2");
         assert_eq!(repo.pending(&list).await.unwrap()[0].pending_op, "update");
+
+        // The server's DELETE reply arrives after the user undid the deletion.
+        repo.confirm_remote_delete(&task.id).await.unwrap();
+        let recreate = repo.pending(&list).await.unwrap().remove(0);
+        assert_eq!(recreate.pending_op, "create");
+        assert_eq!(recreate.uid, pending.uid);
+        assert_eq!(recreate.remote_payload.as_deref(), Some("RAW"));
+        assert!(recreate.remote_id.is_none());
+
+        // Undo after a confirmed deletion preserves the same VTODO as well.
+        repo.mark_pushed(&recreate, "/new.ics", Some("v2"), "RAW", false)
+            .await
+            .unwrap();
+        repo.delete(&task.id).await.unwrap();
+        repo.confirm_remote_delete(&task.id).await.unwrap();
+        assert!(repo.list_tasks(true).await.unwrap().is_empty());
+        assert!(repo.pending(&list).await.unwrap().is_empty());
+        repo.undelete(&task.id).await.unwrap();
+        let recreate = repo.pending(&list).await.unwrap().remove(0);
+        assert_eq!(recreate.uid, pending.uid);
+        assert_eq!(recreate.remote_payload.as_deref(), Some("RAW"));
     }
 
     #[tokio::test]

@@ -33,7 +33,7 @@ function fit() {
   element.style.height = `${Math.min(element.scrollHeight, MAX_ROWS_PX)}px`;
 }
 
-watch(text, () => void nextTick(fit));
+watch(text, () => void nextTick(fit), { immediate: true });
 
 function submit() {
   if (props.sending || props.disabled || !text.value.trim()) return;

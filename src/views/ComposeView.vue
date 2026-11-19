@@ -499,6 +499,7 @@ const {
   draftId,
   serverRevision: draftRevision,
   saveError,
+  recordDraftConflict,
   saveAsNewDraft,
   persist: persistDraft,
   startAutosave,
@@ -533,6 +534,7 @@ const {
   supportsBackend,
   initialized,
   currentState: currentDraftState,
+  hasSavedDraft: () => draftRevision.value !== null,
   persistDraft,
   finishDraftPersistence,
   closeDraftWithoutSaving,
@@ -557,7 +559,7 @@ async function closeWithoutSaving() {
   await closeGuardWithoutSaving();
 }
 
-/** Another window or app sent or discarded this draft; saving under its id cannot succeed. */
+/** Another editor changed or removed this draft. */
 function draftConflict() {
   return saveError.value?.kind === 'conflict';
 }
@@ -612,9 +614,10 @@ const sendBlocker = computed(() => composerSendBlocker({
   scheduledFor: scheduledFor.value,
   mergeRecipients: mergeSource.value ? mergeSource.value.rows.length : null,
 }, scheduleClock.now.value));
-const canSend = computed(() => sendBlocker.value === null);
+const canSend = computed(() => sendBlocker.value === null && !draftConflict());
 /** What the sender can do about a disabled Send button, if anything. */
 const sendBlockedHint = computed(() => {
+  if (draftConflict()) return saveError.value?.message ?? null;
   const blocker = sendBlocker.value;
   if (!blocker) return null;
   switch (blocker.reason) {
@@ -684,7 +687,7 @@ async function loadDraft() {
 async function applyDraft(draft: BackendDraft) {
   if (draft.content_error) throw new Error(translateBackendError(draft.content_error) ?? t('drafts.unavailable'));
   draftId.value = draft.id;
-  draftRevision.value = draft.revision ?? null;
+  draftRevision.value = draft.revision ?? 0;
   contextThreadId.value = draft.thread_id ?? null;
   accountId.value = draft.account_id;
   aliasEmail.value =
@@ -1140,7 +1143,8 @@ function sendPayload(account: { id: string; displayName: string; senderName?: st
     fromAddress: fromAddress.value,
     fromName: account.senderName ?? account.displayName,
     replyTo: replyTo.value,
-    draftId: draftId.value,
+    draftId: draftRevision.value === null ? null : draftId.value,
+    expectedRevision: draftRevision.value,
     scheduledFor: scheduledFor.value,
     followUpAt: followUpAt.value,
     smimeSignWithCertId: smimeSignCertId.value,
@@ -1173,6 +1177,8 @@ async function send() {
   let sendCommitted = false;
   try {
     await pauseDraftPersistence();
+    // A save already in flight can discover a conflict while Send is waiting.
+    if (draftConflict()) return;
     status.value = null;
     const result = await composerTransport.sendMessage(sendPayload(activeAccount.value));
     sendCommitted = true;
@@ -1226,7 +1232,7 @@ async function send() {
   } catch (err) {
     if (sendCommitted) {
       console.warn('post-send refresh failed', err);
-    } else {
+    } else if (!recordDraftConflict(err)) {
       // The draft stays put and the window stays open: this is the one outcome
       // the user must not be able to mistake for progress.
       const raw = err instanceof Error ? err.message : String(err);

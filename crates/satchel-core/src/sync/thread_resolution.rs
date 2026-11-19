@@ -492,7 +492,7 @@ pub async fn deduplicate_spark_draft_versions(
         serde_json::to_string(&message.to_addresses).unwrap_or_else(|_| "[]".to_string());
     let rows = sqlx::query_as::<_, (String, String)>(
         "SELECT id, thread_id FROM messages
-         WHERE account_id = ? AND folder_id = ? AND is_draft = 1
+         WHERE account_id = ? AND folder_id = ? AND is_draft = 1 AND draft_revision = 0
            AND LOWER(TRIM(COALESCE(message_id_header, ''))) LIKE '%@spark>'
            AND LOWER(TRIM(COALESCE(in_reply_to, ''))) = LOWER(?)
            AND LOWER(TRIM(COALESCE(subject, ''))) = LOWER(TRIM(?))
@@ -523,17 +523,9 @@ pub async fn deduplicate_spark_draft_versions(
         if duplicate_id == keep_id {
             continue;
         }
-        sqlx::query("DELETE FROM attachments WHERE message_id = ?")
-            .bind(duplicate_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|err| err.to_string())?;
-        sqlx::query("DELETE FROM messages WHERE id = ? AND is_draft = 1")
-            .bind(duplicate_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|err| err.to_string())?;
-        touched.insert(thread_id.clone());
+        if delete_cached_draft_tx(&mut tx, duplicate_id).await? {
+            touched.insert(thread_id.clone());
+        }
     }
     tx.commit().await.map_err(|err| err.to_string())?;
 
@@ -716,7 +708,7 @@ pub async fn reconcile_sent_draft_autosaves(
                 from_address, to_addresses, cc_addresses, bcc_addresses,
                 subject, date
          FROM messages
-         WHERE account_id = ? AND is_draft = 1
+         WHERE account_id = ? AND is_draft = 1 AND draft_revision = 0
            AND LOWER(TRIM(COALESCE(message_id_header, ''))) LIKE '%@spark>'",
     )
     .bind(account_id)
@@ -776,18 +768,7 @@ pub async fn reconcile_sent_draft_autosaves(
         .await
         .map_err(|err| err.to_string())?;
     for draft in obsolete {
-        sqlx::query("DELETE FROM attachments WHERE message_id = ?")
-            .bind(&draft.id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|err| err.to_string())?;
-        let removed = sqlx::query("DELETE FROM messages WHERE id = ? AND is_draft = 1")
-            .bind(&draft.id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|err| err.to_string())?
-            .rows_affected();
-        if removed > 0 {
+        if delete_cached_draft_tx(&mut tx, &draft.id).await? {
             touched_threads.insert(draft.thread_id);
         }
     }
@@ -810,7 +791,7 @@ pub async fn deduplicate_cached_draft_autosaves(
                 from_address, to_addresses, cc_addresses, bcc_addresses,
                 subject, date
          FROM messages
-         WHERE account_id = ? AND is_draft = 1
+         WHERE account_id = ? AND is_draft = 1 AND draft_revision = 0
            AND (
              LOWER(TRIM(COALESCE(message_id_header, ''))) LIKE '%@spark>'
              OR LOWER(TRIM(COALESCE(message_id_header, ''))) LIKE '%@imap.satchel.local>'
@@ -833,18 +814,10 @@ pub async fn deduplicate_cached_draft_autosaves(
         .await
         .map_err(|err| err.to_string())?;
     for row in obsolete {
-        sqlx::query("DELETE FROM attachments WHERE message_id = ?")
-            .bind(&row.id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|err| err.to_string())?;
-        removed += sqlx::query("DELETE FROM messages WHERE id = ? AND is_draft = 1")
-            .bind(&row.id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|err| err.to_string())?
-            .rows_affected();
-        touched_threads.insert(row.thread_id);
+        if delete_cached_draft_tx(&mut tx, &row.id).await? {
+            removed += 1;
+            touched_threads.insert(row.thread_id);
+        }
     }
     tx.commit().await.map_err(|err| err.to_string())?;
 
@@ -852,6 +825,31 @@ pub async fn deduplicate_cached_draft_autosaves(
         refresh_provider_thread_projection(pool, &thread_id).await?;
     }
     Ok(removed)
+}
+
+/// A provider autosave heuristic can remove cached versions. A local edit
+/// may have arrived after the scan, so recheck the revision under the write lock.
+async fn delete_cached_draft_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    draft_id: &str,
+) -> Result<bool, String> {
+    sqlx::query(
+        "DELETE FROM attachments WHERE message_id IN (
+            SELECT id FROM messages WHERE id = ? AND is_draft = 1 AND draft_revision = 0
+        )",
+    )
+    .bind(draft_id)
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| error.to_string())?;
+    let deleted =
+        sqlx::query("DELETE FROM messages WHERE id = ? AND is_draft = 1 AND draft_revision = 0")
+            .bind(draft_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(|error| error.to_string())?
+            .rows_affected();
+    Ok(deleted > 0)
 }
 
 /// Merge threads that were split because a reply synced before its parent

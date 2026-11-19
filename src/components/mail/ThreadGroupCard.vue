@@ -54,6 +54,7 @@ const {
   shouldSuppressClick,
 } = useRowSwipe({
   enabled: () => !props.busy,
+  actionEnabled: (action) => action !== 'trash' || threadActions.canTrash(threadIds.value),
   actionLabel: (action) => {
     switch (action) {
       case 'toggle-read': return isUnread.value

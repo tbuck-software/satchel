@@ -27,6 +27,7 @@ const props = withDefaults(
     isMuted?: boolean;
     /** The filter marked it, or it sits in Spam: the menu offers Not spam. */
     canMarkNotSpam?: boolean;
+    canDelete?: boolean;
     showBack?: boolean;
     senderAddress?: string;
     canReply?: boolean;
@@ -51,6 +52,7 @@ const props = withDefaults(
     isDone: false,
     isMuted: false,
     canMarkNotSpam: false,
+    canDelete: true,
     showBack: false,
     senderAddress: '',
     canReply: true,
@@ -250,7 +252,7 @@ function runExport(format: ExportFormat) {
       <IconButton size="lg" :title="targetLabel($t('thread.toolbar.setReminder'))" :shortcut="hint('moveSnoozed')" @click="emit('snooze')">
         <AppIcon size="lg"><circle cx="8" cy="8" r="6"/><path d="M8 4v4l2.5 1.5"/></AppIcon>
       </IconButton>
-      <IconButton size="lg" tone="danger" :title="targetLabel($t('common.delete'))" :shortcut="hint('trash')" @click="emit('delete')">
+      <IconButton v-if="canDelete" size="lg" tone="danger" :title="targetLabel($t('common.delete'))" :shortcut="hint('trash')" @click="emit('delete')">
         <AppIcon size="lg"><path d="M2 4h12M5 4V2.5A1.5 1.5 0 016.5 1h3A1.5 1.5 0 0111 2.5V4"/><path d="M13 4v9.5a1.5 1.5 0 01-1.5 1.5h-7A1.5 1.5 0 013 13.5V4"/></AppIcon>
       </IconButton>
     </div>

@@ -1,9 +1,9 @@
 use chrono::{DateTime, Utc};
 use satchel_core::db::{
-    accounts::{AccountRepository, OAuthAccountStatus},
+    accounts::{AccountRepository, OAuthAccountConnection, OAuthAccountStatus},
     oauth::{
         NewOAuthFlowSession, OAuthFlowError, OAuthFlowProgress, OAuthFlowRepository,
-        OAuthFlowStatus,
+        OAuthFlowSession, OAuthFlowStatus,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -17,7 +17,7 @@ use tokio::{
 use crate::{
     commands::error::{CommandError, CommandResult},
     utils::oauth,
-    AppState, OAuthFlowResult,
+    AppState,
 };
 
 /// The default callback transport. Explicit loopback registrations also need
@@ -232,12 +232,6 @@ pub async fn start_oauth_flow(
         })
         .await
         .map_err(oauth_flow_command_error)?;
-    state
-        .oauth_results
-        .lock()
-        .await
-        .insert(oauth_state.clone(), OAuthFlowResult::Pending);
-
     if let Some(listener) = listener {
         let app_state = state.inner().clone();
         let db = pool.inner().clone();
@@ -273,33 +267,17 @@ pub async fn complete_oauth_flow(
     state: tauri::State<'_, AppState>,
     pool: tauri::State<'_, SqlitePool>,
     input: CompleteOAuthInput,
-) -> CommandResult<OAuthStatus> {
-    let flow_state = input.state.clone();
-    match complete_oauth_flow_inner(state.inner(), pool.inner(), input).await {
-        Ok(status) => Ok(status),
-        Err(err) => {
-            fail_oauth_flow(state.inner(), pool.inner(), &flow_state, &err).await;
-            Err(err)
-        }
-    }
+) -> CommandResult<OAuthFlowPollResponse> {
+    complete_oauth_flow_inner(state.inner(), pool.inner(), input).await
 }
 
-/// Where a flow stands.
-///
-/// The in-memory map answers the common case in one lock; everything else is
-/// reconstructed from the database, because a process death between the
-/// authorization and the callback wipes the map but not the flow.
+/// Poll the durable outcome of this exact state, including across a restart.
 #[tauri::command]
 pub async fn poll_oauth_flow(
-    state: tauri::State<'_, AppState>,
     pool: tauri::State<'_, SqlitePool>,
     input: PollOAuthInput,
 ) -> CommandResult<OAuthFlowPollResponse> {
-    let stored = state.oauth_results.lock().await.get(&input.state).cloned();
-    match stored {
-        Some(result) => Ok(poll_response_from_memory(result)),
-        None => resolve_persisted_oauth_flow(pool.inner(), &input.state, chrono::Utc::now()).await,
-    }
+    resolve_persisted_oauth_flow(pool.inner(), &input.state, Utc::now()).await
 }
 
 /// Flows a freshly started app could still finish, newest first.
@@ -320,12 +298,10 @@ pub async fn list_open_oauth_flows(
 /// looking pending: the caller would watch a spinner until it times out.
 #[tauri::command]
 pub async fn abort_oauth_flow(
-    state: tauri::State<'_, AppState>,
     pool: tauri::State<'_, SqlitePool>,
     input: AbortOAuthInput,
 ) -> CommandResult<()> {
-    fail_oauth_flow(
-        state.inner(),
+    cancel_oauth_authorization(
         pool.inner(),
         &input.state,
         &CommandError::new("backend.errors.oauthAuthorizationCancelled"),
@@ -334,29 +310,18 @@ pub async fn abort_oauth_flow(
     Ok(())
 }
 
-fn poll_response_from_memory(stored: OAuthFlowResult) -> OAuthFlowPollResponse {
-    match stored {
-        OAuthFlowResult::Pending => pending_poll_response(),
-        OAuthFlowResult::Completed {
-            account_id,
-            provider,
-            connected,
-            has_refresh_token,
-            expires_at,
-            granted_scopes,
-        } => OAuthFlowPollResponse {
-            status: "completed".to_string(),
-            result: Some(OAuthStatus {
-                account_id,
-                provider,
-                connected,
-                has_refresh_token,
-                expires_at,
-                granted_scopes,
-            }),
-            error: None,
-        },
-        OAuthFlowResult::Failed(error) => failed_poll_response(error),
+fn completed_poll_response(connection: OAuthAccountConnection) -> OAuthFlowPollResponse {
+    OAuthFlowPollResponse {
+        status: "completed".to_string(),
+        result: Some(OAuthStatus {
+            account_id: connection.account_id,
+            provider: connection.provider,
+            connected: true,
+            has_refresh_token: connection.has_refresh_token,
+            expires_at: connection.expires_at,
+            granted_scopes: connection.granted_scopes,
+        }),
+        error: None,
     }
 }
 
@@ -391,42 +356,12 @@ async fn resolve_persisted_oauth_flow(
     match status.progress {
         OAuthFlowProgress::Authorizing => Ok(pending_poll_response()),
         OAuthFlowProgress::Failed(error) => Ok(failed_poll_response(error)),
-        // The verifier was spent, so an exchange ran. Whether it landed is
-        // written on the account, not on the flow.
-        OAuthFlowProgress::Exchanging => {
-            let connected = AccountRepository::new(pool)
-                .oauth_status(&status.account_id)
-                .await
-                .ok()
-                .filter(|account| oauth_connected_since(account, status.created_at));
-            match connected {
-                Some(account) => Ok(OAuthFlowPollResponse {
-                    status: "completed".to_string(),
-                    result: Some(account.into()),
-                    error: None,
-                }),
-                // Still exchanging, or the process died mid-exchange. Only the
-                // session deadline tells the two apart.
-                None if now <= status.expires_at => Ok(pending_poll_response()),
-                None => Ok(failed_poll_response(
-                    CommandError::new("backend.errors.oauthFlowNotFound").encoded(),
-                )),
-            }
-        }
+        OAuthFlowProgress::Completed(connection) => Ok(completed_poll_response(connection)),
+        OAuthFlowProgress::Exchanging if now <= status.expires_at => Ok(pending_poll_response()),
+        OAuthFlowProgress::Exchanging => Ok(failed_poll_response(
+            CommandError::new("backend.errors.oauthFlowNotFound").encoded(),
+        )),
     }
-}
-
-/// Whether the account carries credentials this flow could have established.
-///
-/// An account reconnecting itself already had credentials; only ones written
-/// after the flow began prove that this flow finished.
-fn oauth_connected_since(account: &OAuthAccountStatus, started_at: DateTime<Utc>) -> bool {
-    account.connected
-        && account
-            .connected_at
-            .as_deref()
-            .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
-            .is_some_and(|connected_at| connected_at.with_timezone(&Utc) >= started_at)
 }
 
 #[tauri::command]
@@ -445,13 +380,43 @@ async fn complete_oauth_flow_inner(
     state: &AppState,
     pool: &SqlitePool,
     input: CompleteOAuthInput,
-) -> CommandResult<OAuthStatus> {
-    let flow_state = input.state.clone();
-    let session = OAuthFlowRepository::new(pool)
-        .consume(&flow_state, chrono::Utc::now())
-        .await
-        .map_err(oauth_flow_command_error)?;
+) -> CommandResult<OAuthFlowPollResponse> {
+    let repository = OAuthFlowRepository::new(pool);
+    let session = match repository.consume(&input.state, Utc::now()).await {
+        Ok(session) => session,
+        Err(OAuthFlowError::NotFoundOrExpired) => {
+            return resolve_persisted_oauth_flow(pool, &input.state, Utc::now()).await;
+        }
+        Err(error) => {
+            // Only decryption or decoding errors happen after the verifier is spent.
+            let claimed = matches!(
+                error,
+                OAuthFlowError::CredentialAccess { .. } | OAuthFlowError::InvalidSession { .. }
+            );
+            let error = oauth_flow_command_error(error);
+            if claimed {
+                fail_oauth_exchange(&repository, &input.state, &error).await;
+            }
+            return Err(error);
+        }
+    };
+    match exchange_oauth_code(pool, &input, session).await {
+        Ok(connection) => {
+            restart_account_poller(state, &connection.account_id);
+            Ok(completed_poll_response(connection))
+        }
+        Err(error) => {
+            fail_oauth_exchange(&repository, &input.state, &error).await;
+            Err(error)
+        }
+    }
+}
 
+async fn exchange_oauth_code(
+    pool: &SqlitePool,
+    input: &CompleteOAuthInput,
+    session: OAuthFlowSession,
+) -> CommandResult<OAuthAccountConnection> {
     let provider = oauth::OAuthProvider::parse(&session.provider)
         .map_err(|error| oauth_configuration_error("invalid stored OAuth provider", error))?;
     let mut provider_config = provider
@@ -492,32 +457,17 @@ async fn complete_oauth_flow_inner(
         return Err(CommandError::new("backend.errors.oauthAccountMismatch"));
     }
     let now = chrono::Utc::now().to_rfc3339();
-    let target_account = AccountRepository::new(pool)
-        .connect_oauth(
+    AccountRepository::new(pool)
+        .connect_oauth_for_flow(
             &session.account_id,
             &provider_config,
             &token,
             &identity,
             &now,
+            &input.state,
         )
         .await
-        .map_err(CommandError::from)?;
-
-    let status = OAuthStatus {
-        account_id: target_account.account_id,
-        provider: target_account.provider,
-        connected: true,
-        has_refresh_token: target_account.has_refresh_token,
-        expires_at: target_account.expires_at,
-        granted_scopes: oauth::granted_scopes(token.scope.as_deref()),
-    };
-    restart_account_poller(state, &status.account_id);
-    mark_oauth_completed(state, &flow_state, &status).await;
-    if let Err(error) = OAuthFlowRepository::new(pool).complete(&flow_state).await {
-        tracing::warn!(error = ?error, "finished OAuth flow could not be cleared");
-    }
-
-    Ok(status)
+        .map_err(CommandError::from)
 }
 
 fn restart_account_poller(state: &AppState, account_id: &str) {
@@ -601,7 +551,7 @@ async fn listen_for_oauth_callback(
             })
             .await;
         }
-        Err(error) => fail_oauth_flow(&state, &pool, &expected_state, &error).await,
+        Err(error) => cancel_oauth_authorization(&pool, &expected_state, &error).await,
     }
 }
 
@@ -667,8 +617,7 @@ async fn handle_callback_query(
             .filter(|value| !value.trim().is_empty())
             .unwrap_or(error);
         tracing::info!(%detail, "OAuth authorization was not completed");
-        fail_oauth_flow(
-            state,
+        cancel_oauth_authorization(
             pool,
             expected_state,
             &CommandError::new("backend.errors.oauthAuthorizationCancelled"),
@@ -686,8 +635,7 @@ async fn handle_callback_query(
     }
 
     let Some(code) = query.code else {
-        fail_oauth_flow(
-            state,
+        cancel_oauth_authorization(
             pool,
             expected_state,
             &CommandError::new("backend.errors.oauthCallbackInvalid"),
@@ -714,7 +662,11 @@ async fn handle_callback_query(
     )
     .await
     {
-        Ok(status) => http_response(
+        Ok(response) if response.status == "pending" => http_response(202, "Accepted", ""),
+        Ok(OAuthFlowPollResponse {
+            result: Some(status),
+            ..
+        }) => http_response(
             200,
             "OK",
             &render_oauth_page(
@@ -726,18 +678,15 @@ async fn handle_callback_query(
                 true,
             ),
         ),
-        Err(err) => {
-            fail_oauth_flow(state, pool, expected_state, &err).await;
-            http_response(
-                500,
-                "Internal Server Error",
-                &render_oauth_page(
-                    &strings.oauth_failed_title,
-                    &strings.oauth_failed_message,
-                    false,
-                ),
-            )
-        }
+        _ => http_response(
+            500,
+            "Internal Server Error",
+            &render_oauth_page(
+                &strings.oauth_failed_title,
+                &strings.oauth_failed_message,
+                false,
+            ),
+        ),
     }
 }
 
@@ -853,47 +802,22 @@ fn provider_label<'a>(provider: &'a str, fallback: &'a str) -> &'a str {
     }
 }
 
-async fn mark_oauth_completed(state: &AppState, flow_state: &str, status: &OAuthStatus) {
-    state.oauth_results.lock().await.insert(
-        flow_state.to_string(),
-        OAuthFlowResult::Completed {
-            account_id: status.account_id.clone(),
-            provider: status.provider.clone(),
-            connected: status.connected,
-            has_refresh_token: status.has_refresh_token,
-            expires_at: status.expires_at.clone(),
-            granted_scopes: status.granted_scopes.clone(),
-        },
-    );
-}
-
-/// Record a terminal failure where it survives a restart, then in memory.
-///
-/// The database is written first: a poll after a process death has nowhere
-/// else to look, and the in-memory map is only the fast path in front of it.
-async fn fail_oauth_flow(
-    state: &AppState,
-    pool: &SqlitePool,
-    flow_state: &str,
-    error: &CommandError,
-) {
+async fn cancel_oauth_authorization(pool: &SqlitePool, state: &str, error: &CommandError) {
     if let Err(persistence) = OAuthFlowRepository::new(pool)
-        .fail(flow_state, &error.encoded())
+        .cancel_authorization(state, &error.encoded())
         .await
     {
-        tracing::error!(error = ?persistence, "failed OAuth flow could not be recorded");
+        tracing::error!(error = ?persistence, "cancelled OAuth authorization could not be recorded");
     }
-    mark_oauth_failed(state, flow_state, error.encoded()).await;
 }
 
-async fn mark_oauth_failed(state: &AppState, flow_state: &str, message: String) {
-    let mut results = state.oauth_results.lock().await;
-    let should_replace = !matches!(
-        results.get(flow_state),
-        Some(OAuthFlowResult::Completed { .. })
-    );
-    if should_replace {
-        results.insert(flow_state.to_string(), OAuthFlowResult::Failed(message));
+async fn fail_oauth_exchange(
+    repository: &OAuthFlowRepository<'_>,
+    state: &str,
+    error: &CommandError,
+) {
+    if let Err(persistence) = repository.fail_exchange(state, &error.encoded()).await {
+        tracing::error!(error = ?persistence, "failed OAuth exchange could not be recorded");
     }
 }
 
@@ -1176,13 +1100,71 @@ mod tests {
         let now = Utc::now();
         insert_outcome(&pool, now, now + Duration::minutes(15), None).await;
 
-        // Exchange under way: the account has nothing yet.
-        let pending = resolve_persisted_oauth_flow(&pool, "flow", now)
+        // The duplicate callback sees the in-flight exchange and cannot fail it.
+        let app = crate::AppState::default();
+        let input = super::CompleteOAuthInput {
+            state: "flow".into(),
+            code: "duplicate".into(),
+        };
+        let duplicate = super::complete_oauth_flow_inner(&app, &pool, input.clone())
             .await
-            .expect("poll");
-        assert_eq!(pending.status, "pending");
+            .expect("duplicate callback");
+        assert_eq!(duplicate.status, "pending");
+        super::cancel_oauth_authorization(
+            &pool,
+            "flow",
+            &CommandError::new("backend.errors.oauthAuthorizationCancelled"),
+        )
+        .await;
+        assert_eq!(
+            resolve_persisted_oauth_flow(&pool, "flow", now)
+                .await
+                .unwrap()
+                .status,
+            "pending"
+        );
 
-        connect_account(&pool, now + Duration::seconds(2)).await;
+        satchel_core::utils::crypto::seed_master_key_for_tests();
+        let empty_config =
+            crate::commands::accounts::encrypt_account_config("account", "{}").unwrap();
+        sqlx::query("UPDATE accounts SET config = ? WHERE id = 'account'")
+            .bind(empty_config)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let connection = satchel_core::db::accounts::AccountRepository::new(&pool)
+            .connect_oauth_for_flow(
+                "account",
+                &super::oauth::OAuthClientConfig {
+                    provider: super::oauth::OAuthProvider::Gmail,
+                    client_id: "fixture".into(),
+                    client_secret: None,
+                    redirect_uri: "http://127.0.0.1:1/x".into(),
+                    auth_url: String::new(),
+                    token_url: String::new(),
+                    scopes: vec![],
+                },
+                &super::oauth::OAuthTokenPayload {
+                    access_token: "fixture-access".into(),
+                    refresh_token: Some("fixture-refresh".into()),
+                    token_type: Some("Bearer".into()),
+                    scope: Some("mail".into()),
+                    expires_at: None,
+                },
+                &super::oauth::OAuthIdentity {
+                    email: "user@example.com".into(),
+                    display_name: None,
+                },
+                &now.to_rfc3339(),
+                "flow",
+            )
+            .await
+            .expect("store grant and flow outcome atomically");
+        assert_eq!(connection.account_id, "account");
+        let duplicate = super::complete_oauth_flow_inner(&app, &pool, input)
+            .await
+            .expect("completed duplicate");
+        assert_eq!(duplicate.status, "completed");
         let completed = resolve_persisted_oauth_flow(&pool, "flow", now)
             .await
             .expect("poll");
@@ -1194,19 +1176,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn credentials_older_than_the_flow_do_not_pass_as_its_result() {
+    async fn a_token_refresh_does_not_complete_an_unfinished_authorization() {
         let pool = pool_with_account().await;
         let now = Utc::now();
-        // A re-authorization: the account was already connected when it began.
-        connect_account(&pool, now - Duration::days(3)).await;
+        // Refresh rewrites connected_at while the reconnect is in progress.
         insert_outcome(&pool, now, now + Duration::minutes(15), None).await;
+        connect_account(&pool, now + Duration::seconds(2)).await;
 
         let pending = resolve_persisted_oauth_flow(&pool, "flow", now)
             .await
             .expect("poll");
         assert_eq!(pending.status, "pending");
 
-        // Once the deadline passes without new credentials it is over.
+        // Only this state’s own completion can keep it from expiring.
         let over = resolve_persisted_oauth_flow(&pool, "flow", now + Duration::minutes(16))
             .await
             .expect("poll");

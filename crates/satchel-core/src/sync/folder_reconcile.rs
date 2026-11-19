@@ -13,11 +13,12 @@ use crate::providers::gmail::gmail_label_is_state_view;
 use crate::providers::traits::{MessageRef, RemoteMessageRemoval, RemoteMessageState};
 use crate::sync::remote_mutations::{remote_move_thread_id_from_json, RemoteMutationPayload};
 
-use super::thread_resolution::refresh_provider_thread_projection;
+use crate::db::threads::refresh_thread_projections_batch_tx;
 
 #[derive(Debug, Default)]
 pub struct ImapSnapshotChanges {
     pub relocated_threads: HashSet<String>,
+    pub flag_threads: HashSet<String>,
     /// Threads with a copy whose Satchel workflow marker changed on the
     /// server; `workflow_markers::reconcile_remote_workflow_markers` next.
     pub marker_threads: HashSet<String>,
@@ -461,9 +462,8 @@ fn generations_agree(snapshot: Option<u32>, local: Option<u32>) -> bool {
 /// Reconcile one folder against a provider snapshot.
 ///
 /// `snapshot_uidvalidity` is the generation the snapshot's remote ids belong
-/// to. If it disagrees with the folder's own, every local row would look
-/// missing and be deleted along with its threads, tags and topics — so the
-/// removal half is skipped and only matching ids have their flags updated.
+/// to. If it disagrees with the folder's own, even a matching UID can
+/// identify a different message. Skip the whole snapshot.
 pub async fn reconcile_imap_folder_snapshot(
     pool: &SqlitePool,
     account_id: &str,
@@ -488,35 +488,38 @@ pub async fn reconcile_imap_folder_snapshot(
             .map_err(|err| err.to_string())?
             .flatten()
             .and_then(|value| u32::try_from(value).ok());
-    let may_delete = generations_agree(snapshot_uidvalidity, local_uidvalidity);
+    if !generations_agree(snapshot_uidvalidity, local_uidvalidity) {
+        return Ok(ImapSnapshotChanges {
+            skipped_stale_generation: true,
+            ..ImapSnapshotChanges::default()
+        });
+    }
 
     let pending_refs =
         pending_remote_message_refs(&mut *tx, account_id, PendingMutations::All).await?;
-    let local_rows =
-        sqlx::query_as::<_, (String, String, Option<String>, i64, i64, Option<String>)>(
-            "SELECT id, thread_id, remote_id, is_read, is_starred, remote_workflow_marker
+    let local_rows = sqlx::query_as::<_, (String, String, String, i64, i64, Option<String>, bool)>(
+        "SELECT id, thread_id, remote_id, is_read, is_starred, remote_workflow_marker,
+                    COALESCE(is_draft, 0)
          FROM messages
-         WHERE account_id = ? AND folder_id = ?",
-        )
-        .bind(account_id)
-        .bind(folder_id)
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(|err| err.to_string())?;
+         WHERE account_id = ? AND folder_id = ? AND remote_id IS NOT NULL",
+    )
+    .bind(account_id)
+    .bind(folder_id)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|err| err.to_string())?;
 
     let now = chrono::Utc::now().to_rfc3339();
     let normalized_folder = remote_folder_id.to_ascii_lowercase();
-    let mut projection_threads = HashSet::new();
-    let mut changes = ImapSnapshotChanges {
-        skipped_stale_generation: !may_delete,
-        ..ImapSnapshotChanges::default()
-    };
+    let mut changes = ImapSnapshotChanges::default();
 
-    for (message_id, thread_id, remote_id, is_read, is_starred, stored_marker) in local_rows {
-        let Some(remote_id) = remote_id else {
-            continue;
-        };
+    for (message_id, thread_id, remote_id, is_read, is_starred, stored_marker, is_draft) in
+        local_rows
+    {
         if pending_refs.contains(&(normalized_folder.clone(), remote_id.clone())) {
+            continue;
+        }
+        if is_draft && crate::drafts::has_pending_upload(&mut tx, account_id, &message_id).await? {
             continue;
         }
 
@@ -559,12 +562,8 @@ pub async fn reconcile_imap_folder_snapshot(
                 .execute(&mut *tx)
                 .await
                 .map_err(|err| err.to_string())?;
-                projection_threads.insert(thread_id);
+                changes.flag_threads.insert(thread_id);
             }
-            continue;
-        }
-
-        if !may_delete {
             continue;
         }
 
@@ -578,14 +577,18 @@ pub async fn reconcile_imap_folder_snapshot(
             .execute(&mut *tx)
             .await
             .map_err(|err| err.to_string())?;
-        projection_threads.insert(thread_id.clone());
         changes.relocated_threads.insert(thread_id);
     }
 
+    let projection_threads = changes
+        .flag_threads
+        .union(&changes.relocated_threads)
+        .cloned()
+        .collect::<Vec<_>>();
+    refresh_thread_projections_batch_tx(&mut tx, &projection_threads, &now)
+        .await
+        .map_err(|error| error.to_string())?;
     tx.commit().await.map_err(|err| err.to_string())?;
-    for thread_id in projection_threads {
-        refresh_provider_thread_projection(pool, &thread_id).await?;
-    }
     Ok(changes)
 }
 
@@ -623,9 +626,32 @@ async fn reset_local_provider_folder_inner(
         .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(|err| err.to_string())?;
+    // A local Sent copy or a draft without a server UID does not belong to
+    // the obsolete generation. An edited draft keeps its content and its
+    // stable draft ID (the IMAP Message-ID) while losing only the invalid UID.
+    sqlx::query(
+        "UPDATE messages SET remote_id = NULL, remote_uid = NULL, remote_uidvalidity = NULL,
+                remote_workflow_marker = NULL
+         WHERE account_id = ? AND folder_id = ? AND is_draft = 1
+           AND (remote_id IS NOT NULL OR remote_uid IS NOT NULL)
+           AND (draft_revision > 0 OR id IN (
+               SELECT json_extract(payload, '$.input.id') FROM sync_queue
+               WHERE account_id = ? AND action_type = ?
+                 AND status IN ('pending', 'scheduled', 'sending', 'failed')
+                 AND json_valid(payload)
+           ))",
+    )
+    .bind(account_id)
+    .bind(folder_id)
+    .bind(account_id)
+    .bind(crate::sync::queue::ACTION_SYNC_DRAFT)
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| err.to_string())?;
     let thread_ids = sqlx::query_scalar::<_, String>(
         "SELECT DISTINCT thread_id FROM messages
-         WHERE account_id = ? AND folder_id = ? AND NULLIF(TRIM(thread_id), '') IS NOT NULL",
+         WHERE account_id = ? AND folder_id = ? AND NULLIF(TRIM(thread_id), '') IS NOT NULL
+           AND (remote_id IS NOT NULL OR remote_uid IS NOT NULL)",
     )
     .bind(account_id)
     .bind(folder_id)
@@ -647,19 +673,23 @@ async fn reset_local_provider_folder_inner(
     }
     sqlx::query(
         "DELETE FROM attachments
-         WHERE message_id IN (SELECT id FROM messages WHERE account_id = ? AND folder_id = ?)",
+         WHERE message_id IN (SELECT id FROM messages WHERE account_id = ? AND folder_id = ?
+           AND (remote_id IS NOT NULL OR remote_uid IS NOT NULL))",
     )
     .bind(account_id)
     .bind(folder_id)
     .execute(&mut *tx)
     .await
     .map_err(|err| err.to_string())?;
-    sqlx::query("DELETE FROM messages WHERE account_id = ? AND folder_id = ?")
-        .bind(account_id)
-        .bind(folder_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|err| err.to_string())?;
+    sqlx::query(
+        "DELETE FROM messages WHERE account_id = ? AND folder_id = ?
+                   AND (remote_id IS NOT NULL OR remote_uid IS NOT NULL)",
+    )
+    .bind(account_id)
+    .bind(folder_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| err.to_string())?;
     tx.commit().await.map_err(|err| err.to_string())?;
 
     Ok(thread_ids.into_iter().collect())
@@ -680,8 +710,8 @@ pub async fn reconcile_remote_message_removals(
         .await
         .map_err(|err| err.to_string())?;
     for removal in removals {
-        let rows = sqlx::query_as::<_, (String, String)>(
-            "SELECT m.id, m.thread_id
+        let rows = sqlx::query_as::<_, (String, String, bool)>(
+            "SELECT m.id, m.thread_id, COALESCE(m.is_draft, 0)
              FROM messages m
              JOIN folders f ON f.id = m.folder_id
              WHERE m.account_id = ? AND m.remote_id = ?
@@ -698,7 +728,12 @@ pub async fn reconcile_remote_message_removals(
         .await
         .map_err(|err| err.to_string())?;
 
-        for (message_id, thread_id) in rows {
+        for (message_id, thread_id, is_draft) in rows {
+            if is_draft
+                && crate::drafts::has_pending_upload(&mut tx, account_id, &message_id).await?
+            {
+                continue;
+            }
             sqlx::query("DELETE FROM attachments WHERE message_id = ?")
                 .bind(&message_id)
                 .execute(&mut *tx)
@@ -712,11 +747,14 @@ pub async fn reconcile_remote_message_removals(
             touched_threads.insert(thread_id);
         }
     }
+    refresh_thread_projections_batch_tx(
+        &mut tx,
+        &touched_threads.iter().cloned().collect::<Vec<_>>(),
+        &chrono::Utc::now().to_rfc3339(),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
     tx.commit().await.map_err(|err| err.to_string())?;
-
-    for thread_id in &touched_threads {
-        refresh_provider_thread_projection(pool, thread_id).await?;
-    }
     Ok(touched_threads)
 }
 
@@ -847,8 +885,6 @@ pub fn should_snapshot_folder(provider: &str, folder_type: &str, folder_name: &s
         && (!folder_name.trim().is_empty() || !folder_type.trim().is_empty())
 }
 
-const SECONDARY_FOLDER_SNAPSHOT_INTERVAL_HOURS: i64 = 24;
-
 pub fn folder_snapshot_due(
     provider: &str,
     folder_type: &str,
@@ -856,13 +892,7 @@ pub fn folder_snapshot_due(
     last_snapshot_at: Option<&str>,
     now: chrono::DateTime<chrono::Utc>,
 ) -> bool {
-    if !provider.eq_ignore_ascii_case("imap")
-        || folder_type == "inbox"
-        || folder_type == "archive"
-        || folder_type == "drafts"
-        || folder_type == "aside"
-        || is_snooze_folder(folder_name)
-    {
+    if !provider.eq_ignore_ascii_case("imap") {
         return true;
     }
     let Some(last_snapshot_at) =
@@ -870,8 +900,14 @@ pub fn folder_snapshot_due(
     else {
         return true;
     };
-    now.signed_duration_since(last_snapshot_at.with_timezone(&chrono::Utc))
-        >= chrono::Duration::hours(SECONDARY_FOLDER_SNAPSHOT_INTERVAL_HOURS)
+    let interval = if matches!(folder_type, "inbox" | "archive" | "drafts" | "aside")
+        || is_snooze_folder(folder_name)
+    {
+        chrono::Duration::minutes(5)
+    } else {
+        chrono::Duration::hours(24)
+    };
+    now.signed_duration_since(last_snapshot_at) >= interval
 }
 
 #[cfg(test)]
@@ -887,63 +923,46 @@ mod tests {
 
     #[tokio::test]
     async fn failed_imap_generation_reset_keeps_the_old_generation_with_its_uids() {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .expect("pool");
-        sqlx::query("CREATE TABLE folders (id TEXT PRIMARY KEY, account_id TEXT, uidvalidity INTEGER, updated_at TEXT)")
-            .execute(&pool).await.expect("folders");
-        sqlx::query("CREATE TABLE messages (id TEXT PRIMARY KEY, account_id TEXT, folder_id TEXT, thread_id TEXT)")
-            .execute(&pool).await.expect("messages");
-        sqlx::query("CREATE TABLE attachments (message_id TEXT)")
-            .execute(&pool)
-            .await
-            .expect("attachments");
-        sqlx::query("INSERT INTO folders VALUES ('inbox', 'account', 17, 'old')")
-            .execute(&pool)
-            .await
-            .expect("folder");
-        sqlx::query("INSERT INTO messages VALUES ('message', 'account', 'inbox', 'thread')")
-            .execute(&pool)
-            .await
-            .expect("message");
+        let pool = snapshot_pool(Some(17)).await;
         sqlx::query("CREATE TRIGGER reject_reset BEFORE DELETE ON messages BEGIN SELECT RAISE(ABORT, 'reset failed'); END")
             .execute(&pool).await.expect("trigger");
 
-        super::reset_local_provider_folder_with_generation(&pool, "account", "inbox", 18, "new")
+        super::reset_local_provider_folder_with_generation(&pool, "account", "folder", 18, "new")
             .await
             .expect_err("reset must fail");
 
         let generation: i64 =
-            sqlx::query_scalar("SELECT uidvalidity FROM folders WHERE id = 'inbox'")
+            sqlx::query_scalar("SELECT uidvalidity FROM folders WHERE id = 'folder'")
                 .fetch_one(&pool)
                 .await
                 .expect("generation");
         let old_uid_count: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM messages WHERE id = 'message'")
+            sqlx::query_scalar("SELECT COUNT(*) FROM messages WHERE remote_id IS NOT NULL")
                 .fetch_one(&pool)
                 .await
                 .expect("message count");
-        assert_eq!((generation, old_uid_count), (17, 1));
+        assert_eq!((generation, old_uid_count), (17, 3));
 
         sqlx::query("DROP TRIGGER reject_reset")
             .execute(&pool)
             .await
             .expect("remove trigger");
         let affected = super::reset_local_provider_folder_with_generation(
-            &pool, "account", "inbox", 18, "new",
+            &pool, "account", "folder", 18, "new",
         )
         .await
         .expect("reset");
-        assert_eq!(affected, HashSet::from(["thread".to_string()]));
+        assert_eq!(
+            affected,
+            HashSet::from(["thread-1".into(), "thread-2".into(), "thread-3".into()])
+        );
         let generation: i64 =
-            sqlx::query_scalar("SELECT uidvalidity FROM folders WHERE id = 'inbox'")
+            sqlx::query_scalar("SELECT uidvalidity FROM folders WHERE id = 'folder'")
                 .fetch_one(&pool)
                 .await
                 .expect("new generation");
         let old_uid_count: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM messages WHERE id = 'message'")
+            sqlx::query_scalar("SELECT COUNT(*) FROM messages WHERE remote_id IS NOT NULL")
                 .fetch_one(&pool)
                 .await
                 .expect("old message count");
@@ -986,7 +1005,7 @@ mod tests {
     }
 
     #[test]
-    fn secondary_imap_snapshots_run_daily_while_drafts_remain_immediate() {
+    fn imap_snapshots_are_throttled_even_for_primary_folders() {
         let now = chrono::DateTime::parse_from_rfc3339("2026-08-11T12:00:00Z")
             .expect("now")
             .with_timezone(&chrono::Utc);
@@ -1004,13 +1023,23 @@ mod tests {
             Some("2026-08-10T11:00:00Z"),
             now,
         ));
-        assert!(folder_snapshot_due(
-            "imap",
-            "drafts",
-            "Drafts",
-            Some("2026-08-11T11:59:59Z"),
-            now,
-        ));
+        for kind in ["inbox", "archive", "drafts", "aside"] {
+            assert!(folder_snapshot_due("imap", kind, kind, None, now));
+            assert!(!folder_snapshot_due(
+                "imap",
+                kind,
+                kind,
+                Some("2026-08-11T11:59:59Z"),
+                now
+            ));
+            assert!(folder_snapshot_due(
+                "imap",
+                kind,
+                kind,
+                Some("2026-08-11T11:55:00Z"),
+                now
+            ));
+        }
     }
 
     #[tokio::test]
@@ -1464,6 +1493,132 @@ mod tests {
                 workflow_marker: None,
             })
             .collect()
+    }
+
+    #[tokio::test]
+    async fn imap_flag_changes_report_the_thread_and_commit_with_its_projection() {
+        let pool = snapshot_pool(Some(111)).await;
+        let mut states = snapshot_states(&["1", "3"]);
+        states[0].is_read = Some(true);
+        states[0].is_starred = Some(true);
+        sqlx::query(
+            "CREATE TRIGGER fail_projection BEFORE UPDATE ON threads WHEN NEW.id = 'thread-1'
+             BEGIN SELECT RAISE(ABORT, 'projection failed'); END",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            reconcile_imap_folder_snapshot(&pool, "account", "folder", "INBOX", &states, Some(111))
+                .await
+                .unwrap_err(),
+            "thread persistence failed"
+        );
+        assert_eq!(snapshot_counts(&pool).await, (3, 3));
+        let read: bool = sqlx::query_scalar("SELECT is_read FROM messages WHERE id = 'message-1'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert!(!read);
+        sqlx::query("DROP TRIGGER fail_projection")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let changes =
+            reconcile_imap_folder_snapshot(&pool, "account", "folder", "INBOX", &states, Some(111))
+                .await
+                .unwrap();
+        assert_eq!(changes.flag_threads, HashSet::from(["thread-1".into()]));
+        assert_eq!(
+            changes.relocated_threads,
+            HashSet::from(["thread-2".into()])
+        );
+        let unread_count: i64 =
+            sqlx::query_scalar("SELECT unread_count FROM threads WHERE id = 'thread-1'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(unread_count, 0);
+        assert_eq!(snapshot_counts(&pool).await, (2, 2));
+    }
+
+    #[tokio::test]
+    async fn imap_generation_reset_keeps_local_messages_and_detaches_edited_drafts() {
+        use crate::sync::queue::{QueuedAction, SyncQueue, ACTION_SYNC_DRAFT};
+
+        let pool = snapshot_pool(Some(111)).await;
+        sqlx::query(
+            "UPDATE messages SET remote_id = NULL, is_sent = 1, body_text = 'local sent' WHERE id = 'message-1'",
+        ).execute(&pool).await.unwrap();
+        sqlx::query(
+            "UPDATE messages SET is_draft = 1, draft_revision = 4, remote_uid = 2,
+                remote_uidvalidity = 111, remote_draft_id = 'stable-draft', body_text = 'local edit'
+             WHERE id = 'message-2'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO messages (id, account_id, folder_id, thread_id, remote_id, remote_uid,
+                remote_draft_id, remote_uidvalidity, is_draft, draft_revision, body_text,
+                from_address, to_addresses, date, created_at, updated_at)
+             VALUES ('legacy-draft', 'account', 'folder', 'thread-2', '4', 4, 'legacy-stable-draft',
+                     111, 1, 0, 'legacy local edit', 'a@example.test', '[]', '', '', 'legacy-date')",
+        ).execute(&pool).await.unwrap();
+        SyncQueue::new()
+            .enqueue(
+                &pool,
+                QueuedAction::new(
+                    "account".into(),
+                    ACTION_SYNC_DRAFT,
+                    serde_json::json!({"input": {"id": "legacy-draft"}, "revision": "legacy-date"}),
+                ),
+            )
+            .await
+            .unwrap();
+        for id in ["legacy-draft", "message-1", "message-2", "message-3"] {
+            sqlx::query("INSERT INTO attachments (id, message_id, content_type, created_at) VALUES (?, ?, 'text/plain', '')")
+                .bind(id).bind(id).execute(&pool).await.unwrap();
+        }
+        let removed = super::reset_local_provider_folder_with_generation(
+            &pool, "account", "folder", 112, "now",
+        )
+        .await
+        .unwrap();
+        assert_eq!(removed, HashSet::from(["thread-3".into()]));
+        let rows = sqlx::query_as::<_, (String, String, Option<String>, Option<i64>, Option<i64>, Option<String>)>(
+            "SELECT m.id, m.body_text, m.remote_id, m.remote_uid, m.remote_uidvalidity, m.remote_draft_id
+             FROM messages m JOIN attachments a ON a.message_id = m.id ORDER BY m.id",
+        ).fetch_all(&pool).await.unwrap();
+        assert_eq!(
+            rows,
+            [
+                (
+                    "legacy-draft".into(),
+                    "legacy local edit".into(),
+                    None,
+                    None,
+                    None,
+                    Some("legacy-stable-draft".into())
+                ),
+                (
+                    "message-1".into(),
+                    "local sent".into(),
+                    None,
+                    None,
+                    None,
+                    None
+                ),
+                (
+                    "message-2".into(),
+                    "local edit".into(),
+                    None,
+                    None,
+                    None,
+                    Some("stable-draft".into())
+                ),
+            ]
+        );
     }
 
     /// A snapshot from another UIDVALIDITY names UIDs that mean nothing here.
