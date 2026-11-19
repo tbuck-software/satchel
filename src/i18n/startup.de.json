@@ -1086,6 +1086,9 @@
     "providerFeatures": {
       "title": "Provider-Features"
     },
+    "pushDevices": {
+      "failed": "Verbindung fehlgeschlagen. Prüfe das Netzwerk und die Meldung auf dem Rechner und versuche es erneut."
+    },
     "rules": {
       "empty": "Noch keine Regeln angelegt.",
       "title": "Automatische Regeln"

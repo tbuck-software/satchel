@@ -73,6 +73,8 @@ See [docs/RELEASE.md](docs/RELEASE.md) for installers, release channels, signing
 and distribution. [SECURITY.md](SECURITY.md) explains how to report vulnerabilities.
 [PRIVACY.md](PRIVACY.md) describes account data, local storage and network access.
 
+On Android, a paired computer can wake Satchel for new mail while the phone sleeps. [Set up a push device](tooling/push-device/README.md).
+
 ## Development
 
 The repo is on pnpm; `pnpm-lock.yaml` is the lockfile CI installs from, and an

@@ -3268,6 +3268,23 @@
       "refreshed": "{count} Labels/Kategorien aktualisiert.",
       "title": "Provider-Features"
     },
+    "pushDevices": {
+      "add": "Gerät hinzufügen",
+      "connect": "Verbinden",
+      "connecting": "Verbindung und Testsignal werden geprüft …",
+      "copied": "Kopiert",
+      "copy": "Befehl kopieren",
+      "copyFailed": "Markiere den Befehl und kopiere ihn von Hand.",
+      "description": "Ein eingeschalteter Rechner kann dein Handy bei neuer Post wecken. Die E-Mail ruft dein Handy selbst ab.",
+      "expired": "Die Kopplung ist abgelaufen. Über „Gerät hinzufügen“ bekommst du einen neuen Befehl.",
+      "failed": "Verbindung fehlgeschlagen. Prüfe das Netzwerk und die Meldung auf dem Rechner und versuche es erneut.",
+      "found": "Mit {name} verbinden? Die Google Play-Dienste stellen Wecksignale an Satchel zu.",
+      "instruction": "Führe diesen Befehl auf dem Rechner aus, während beide Geräte im selben Netzwerk sind. Das geht auch per SSH. Der Befehl gilt zehn Minuten.",
+      "paired": "Wartet auf das erste Wecksignal",
+      "remove": "Entfernen",
+      "title": "Push-Geräte",
+      "verified": "Wecksignal empfangen"
+    },
     "ruleActions": {
       "account": "Konto",
       "accountHint": "Eine Regel, die E-Mails verschiebt, gehört zu dem Konto, in dessen Ordner sie verschiebt.",

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -26,6 +27,7 @@
       OnBackPressedDispatcher, which is the API the gesture drives.
     -->
     <application
+        android:name=".background.PushApplication"
         android:allowBackup="false"
         android:enableOnBackInvokedCallback="true"
         android:fullBackupContent="false"
@@ -100,6 +102,20 @@
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Hält die IMAP-IDLE-Verbindung offen, damit neue E-Mails ohne Server sofort ankommen." />
+        </service>
+
+        <provider android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup" android:exported="false"
+            tools:node="merge">
+            <meta-data android:name="androidx.work.WorkManagerInitializer" tools:node="remove" />
+        </provider>
+
+        <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="false" />
+        <meta-data android:name="firebase_analytics_collection_enabled" android:value="false" />
+        <service android:name=".background.MailPushService" android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
         </service>
 
         <!-- Native notification mutations run away from the Tauri/Activity

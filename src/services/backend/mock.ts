@@ -1643,7 +1643,27 @@ function mergeJobById(id: unknown): MockMergeJob {
   return job;
 }
 
+const mockPushDevices: { id: string; name: string; state: string }[] = [];
+let pushScanStarted = 0;
 const handlers: Record<string, Handler> = {
+  push_devices: ({ action, id }) => {
+    if (action === 'start') pushScanStarted = Date.now();
+    if (action === 'cancel') pushScanStarted = 0;
+    if (action === 'confirm' && pushScanStarted) {
+      mockPushDevices.push({ id: String(pushScanStarted), name: 'Mac mini', state: 'verified' });
+      pushScanStarted = 0;
+    }
+    if (action === 'remove') {
+      const index = mockPushDevices.findIndex((device) => device.id === id);
+      if (index >= 0) mockPushDevices.splice(index, 1);
+    }
+    const found = pushScanStarted > 0 && Date.now() - pushScanStarted > 4000;
+    return {
+      phase: pushScanStarted ? (found ? 'found' : 'searching') : 'idle',
+      devices: [...mockPushDevices], command: pushScanStarted ? 'satchel-push pair example' : null,
+      candidate: found ? 'Mac mini' : null,
+    };
+  },
   oauth_status: (payload) => oauthStatus(String(payload.accountId)),
   start_oauth_flow: (payload) => {
     const input = payload.input as { account_id: string; purpose?: string | null };

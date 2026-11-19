@@ -1902,6 +1902,26 @@ export default {
                 }
             }
         },
+        "push_devices": {
+            "kind": "object",
+            "fields": {
+                "action": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "id": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
+        },
         "query_free_busy": {
             "kind": "object",
             "fields": {

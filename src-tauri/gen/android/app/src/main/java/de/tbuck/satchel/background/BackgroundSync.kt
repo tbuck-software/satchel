@@ -34,6 +34,18 @@ class BootRescheduleReceiver : BroadcastReceiver() {
 
 @TauriPlugin
 class BackgroundSyncPlugin(private val activity: Activity) : Plugin(activity) {
+  private val pairing by lazy { PushPairing(activity.applicationContext) }
+
+  @Command
+  fun pushDevices(invoke: Invoke) {
+    activity.runOnUiThread {
+      runCatching {
+        val args = invoke.getArgs()
+        pairing.apply(args.getString("action"), args.optString("id"))
+      }.onSuccess { invoke.resolve(it) }.onFailure { invoke.reject("push_devices") }
+    }
+  }
+
   @Command
   fun start(invoke: Invoke) {
     try {

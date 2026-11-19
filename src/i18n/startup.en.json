@@ -1086,6 +1086,9 @@
     "providerFeatures": {
       "title": "Provider features"
     },
+    "pushDevices": {
+      "failed": "Could not connect. Check the network and the message on the computer, then try again."
+    },
     "rules": {
       "empty": "No rules yet.",
       "title": "Automatic rules"

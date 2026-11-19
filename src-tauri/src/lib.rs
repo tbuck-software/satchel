@@ -977,6 +977,7 @@ pub fn run() {
             commands::runtime::runtime_capabilities,
             commands::background_sync::set_background_sync,
             commands::background_sync::background_sync_status,
+            commands::background_sync::push_devices,
             commands::background_sync::open_background_sync_settings,
             commands::message_body::load_message_body,
             commands::notification_navigation::take_pending_notification_thread,

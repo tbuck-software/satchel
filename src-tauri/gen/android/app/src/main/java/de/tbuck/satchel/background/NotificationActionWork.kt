@@ -16,10 +16,12 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.multiprocess.RemoteCoroutineWorker
 import androidx.work.multiprocess.RemoteListenableWorker
+import androidx.work.multiprocess.RemoteWorkManager
 import androidx.work.multiprocess.RemoteWorkerService
 import androidx.work.workDataOf
 import de.tbuck.satchel.MainActivity
@@ -178,6 +180,47 @@ object BackgroundMailSyncWorkScheduler {
     .setRequiredNetworkType(NetworkType.CONNECTED)
     .build()
 
+  private const val PUSH_NAME = "satchel-push-inbox"
+  private const val RECOVERY_NAME = "satchel-push-recovery"
+  private const val PUSH_INPUT = "push-wake"
+
+  private fun request(context: Context, push: Boolean): androidx.work.OneTimeWorkRequest.Builder {
+    val component = ComponentName(context.packageName, RemoteWorkerService::class.java.name)
+    return OneTimeWorkRequestBuilder<BackgroundMailSyncWorker>()
+      .setInputData(workDataOf(
+        PUSH_INPUT to push,
+        RemoteListenableWorker.ARGUMENT_PACKAGE_NAME to component.packageName,
+        RemoteListenableWorker.ARGUMENT_CLASS_NAME to component.className,
+      ))
+      .setConstraints(constraints)
+  }
+
+  // FCM calls on a background thread. Wait for the enqueue transaction before admitting
+  // the next signal. A running fetch may already have passed the changed mailbox.
+  @Synchronized
+  fun wake(context: Context, signalId: String) {
+    if (!BackgroundSyncPlugin.isEnabled(context)) return
+    val manager = WorkManager.getInstance(context)
+    val active = manager.getWorkInfosForUniqueWork(PUSH_NAME).get().filterNot { it.state.isFinished }
+    if (active.any { signalId in it.tags || it.state == WorkInfo.State.BLOCKED ||
+        (it.state == WorkInfo.State.ENQUEUED && it.runAttemptCount == 0) }) return
+    val policy = if (active.any { it.state == WorkInfo.State.RUNNING }) ExistingWorkPolicy.APPEND_OR_REPLACE
+      else ExistingWorkPolicy.REPLACE
+    val work = request(context, true).addTag(signalId)
+      .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST).build()
+    manager.enqueueUniqueWork(PUSH_NAME, policy, work).result.get()
+  }
+
+  fun isPush(params: WorkerParameters) = params.inputData.getBoolean(PUSH_INPUT, false)
+
+  // A failing provider shares one backoff across all senders. New arrivals in healthy
+  // inboxes can still start an expedited fetch while this retry waits.
+  fun recover(context: Context) {
+    val work = request(context, false).setInitialDelay(30, TimeUnit.SECONDS)
+      .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS).build()
+    RemoteWorkManager.getInstance(context).enqueueUniqueWork(RECOVERY_NAME, ExistingWorkPolicy.KEEP, work).get()
+  }
+
   fun schedulePeriodic(context: Context) {
     val component = ComponentName(context.packageName, RemoteWorkerService::class.java.name)
     val request = PeriodicWorkRequestBuilder<BackgroundMailSyncWorker>(15, TimeUnit.MINUTES)
@@ -220,11 +263,21 @@ object BackgroundMailSyncNative {
   ): String?
 }
 
-class BackgroundMailSyncWorker(context: Context, params: WorkerParameters) :
+class BackgroundMailSyncWorker(context: Context, private val params: WorkerParameters) :
   RemoteCoroutineWorker(context, params) {
-  override suspend fun doRemoteWork(): Result = runBackgroundMailSync(
-    applicationContext, runAttemptCount,
-  )
+  override suspend fun doRemoteWork(): Result {
+    val outcome = runBackgroundMailSync(applicationContext, runAttemptCount)
+    if (outcome != Result.retry() || !BackgroundMailSyncWorkScheduler.isPush(params)) return outcome
+    return finishPushRetry { BackgroundMailSyncWorkScheduler.recover(applicationContext) }
+  }
+}
+
+internal fun finishPushRetry(schedule: () -> Unit): Result = try {
+  schedule()
+  Result.success()
+} catch (error: Exception) {
+  Log.w(TAG, "Could not schedule shared mail retry", error)
+  Result.retry()
 }
 
 internal fun runBackgroundMailSync(
@@ -235,6 +288,7 @@ internal fun runBackgroundMailSync(
     BackgroundMailSyncNative.acknowledgeNotifications(context, path, entries)
   },
 ): Result {
+  if (!BackgroundSyncPlugin.isEnabled(applicationContext)) return Result.success()
   val database = applicationContext.dataDir.resolve("satchel/satchel.db")
   return runCatching {
     val response = JSONObject(

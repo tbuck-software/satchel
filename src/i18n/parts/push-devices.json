@@ -1,0 +1,44 @@
+{
+  "en": {
+    "settings": {
+      "pushDevices": {
+        "title": "Push devices",
+        "description": "A computer that stays on can wake your phone when mail arrives. Your phone fetches the email itself.",
+        "add": "Add device",
+        "remove": "Remove",
+        "instruction": "Run this command on the computer while both devices are on the same network. You can use SSH. The command is valid for ten minutes.",
+        "copy": "Copy command",
+        "copied": "Copied",
+        "found": "Connect to {name}? Google Play services will deliver wake signals to Satchel.",
+        "connect": "Connect",
+        "connecting": "Connecting and sending a test signal…",
+        "verified": "Test signal received",
+        "paired": "Waiting for first signal",
+        "failed": "Could not connect. Check the network and the message on the computer, then try again.",
+        "copyFailed": "Select the command and copy it manually.",
+        "expired": "Pairing expired. Add the device again to get a new command."
+      }
+    }
+  },
+  "de": {
+    "settings": {
+      "pushDevices": {
+        "title": "Push-Geräte",
+        "description": "Ein eingeschalteter Rechner kann dein Handy bei neuer Post wecken. Die E-Mail ruft dein Handy selbst ab.",
+        "add": "Gerät hinzufügen",
+        "remove": "Entfernen",
+        "instruction": "Führe diesen Befehl auf dem Rechner aus, während beide Geräte im selben Netzwerk sind. Das geht auch per SSH. Der Befehl gilt zehn Minuten.",
+        "copy": "Befehl kopieren",
+        "copied": "Kopiert",
+        "found": "Mit {name} verbinden? Die Google Play-Dienste stellen Wecksignale an Satchel zu.",
+        "connect": "Verbinden",
+        "connecting": "Verbindung und Testsignal werden geprüft …",
+        "verified": "Wecksignal empfangen",
+        "paired": "Wartet auf das erste Wecksignal",
+        "failed": "Verbindung fehlgeschlagen. Prüfe das Netzwerk und die Meldung auf dem Rechner und versuche es erneut.",
+        "copyFailed": "Markiere den Befehl und kopiere ihn von Hand.",
+        "expired": "Die Kopplung ist abgelaufen. Über „Gerät hinzufügen“ bekommst du einen neuen Befehl."
+      }
+    }
+  }
+}

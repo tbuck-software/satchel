@@ -46,6 +46,13 @@ their respective services when enabled or used. Plugin permissions and the
 service's own privacy practices apply. Update checks and downloads contact
 GitHub, whose servers receive normal request metadata such as your IP address.
 
+Pairing a push device on Android registers Satchel with Firebase Cloud Messaging.
+Google receives the installation identifier, network metadata, delivery time and
+an authenticated wake signal. The phone fetches the messages from the mail
+provider. Each paired computer uses its own local Satchel profile or the IMAP
+accounts configured on that computer. Removing a device in Satchel revokes its
+wake signals. The computer owner can stop its watcher and remove its credentials.
+
 Translation is off until you add a DeepL API key and allow an account. When
 you translate a message from an allowed account, its body (text and
 formatting) is sent to DeepL with your key. Links and every address starting

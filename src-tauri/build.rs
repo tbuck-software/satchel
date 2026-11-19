@@ -305,6 +305,7 @@ const COMMANDS: &[&str] = &[
     "runtime_capabilities",
     "set_background_sync",
     "background_sync_status",
+    "push_devices",
     "open_background_sync_settings",
     "load_message_body",
     "take_pending_notification_thread",

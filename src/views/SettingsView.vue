@@ -35,6 +35,7 @@ const DiagnosticsPane = defineAsyncComponent(() => import('@/components/settings
 const InlineImageBackfill = defineAsyncComponent(() => import('@/components/settings/InlineImageBackfill.vue'));
 const KeybindingEditor = defineAsyncComponent(() => import('@/components/settings/KeybindingEditor.vue'));
 const LabsSettings = defineAsyncComponent(() => import('@/components/settings/LabsSettings.vue'));
+const PushDevices = defineAsyncComponent(() => import('@/components/settings/PushDevices.vue'));
 const MobileSyncSettings = defineAsyncComponent(() => import('@/components/settings/MobileSyncSettings.vue'));
 const NotificationSettings = defineAsyncComponent(() => import('@/components/settings/NotificationSettings.vue'));
 const PluginManager = defineAsyncComponent(() => import('@/components/settings/PluginManager.vue'));
@@ -216,6 +217,7 @@ onBeforeUnmount(() => unregisterFilter?.());
         <TemplatesEditor v-else-if="activeSection === 'templates'" />
         <template v-else-if="activeSection === 'notifications'">
           <NotificationSettings />
+          <section v-if="mobileSyncPlatform" class="settings-subsection"><PushDevices /></section>
           <section v-if="mobileSyncPlatform" class="settings-subsection"><MobileSyncSettings /></section>
         </template>
         <NotificationSettings v-else-if="activeSection === 'composing'" section="sending" />

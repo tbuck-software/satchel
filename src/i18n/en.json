@@ -3268,6 +3268,23 @@
       "refreshed": "{count} labels/categories updated.",
       "title": "Provider features"
     },
+    "pushDevices": {
+      "add": "Add device",
+      "connect": "Connect",
+      "connecting": "Connecting and sending a test signal…",
+      "copied": "Copied",
+      "copy": "Copy command",
+      "copyFailed": "Select the command and copy it manually.",
+      "description": "A computer that stays on can wake your phone when mail arrives. Your phone fetches the email itself.",
+      "expired": "Pairing expired. Add the device again to get a new command.",
+      "failed": "Could not connect. Check the network and the message on the computer, then try again.",
+      "found": "Connect to {name}? Google Play services will deliver wake signals to Satchel.",
+      "instruction": "Run this command on the computer while both devices are on the same network. You can use SSH. The command is valid for ten minutes.",
+      "paired": "Waiting for first signal",
+      "remove": "Remove",
+      "title": "Push devices",
+      "verified": "Test signal received"
+    },
     "ruleActions": {
       "account": "Account",
       "accountHint": "A rule that moves mail belongs to the account whose folder it moves to.",

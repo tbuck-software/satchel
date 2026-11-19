@@ -105,3 +105,65 @@ pub async fn open_background_sync_settings(
         .map_err(CommandError::unexpected)?;
     Ok(())
 }
+
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ipc-types",
+    ts(export, export_to = "app/commands/background_sync/")
+)]
+pub enum PushDeviceAction {
+    Status,
+    Start,
+    Confirm,
+    Cancel,
+    Remove,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+#[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ipc-types",
+    ts(export, export_to = "app/commands/background_sync/")
+)]
+pub struct PushDevice {
+    pub id: String,
+    pub name: String,
+    pub state: String,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+#[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ipc-types",
+    ts(export, export_to = "app/commands/background_sync/")
+)]
+pub struct PushDevices {
+    pub devices: Vec<PushDevice>,
+    pub phase: String,
+    pub command: Option<String>,
+    pub candidate: Option<String>,
+}
+
+#[tauri::command]
+pub async fn push_devices(
+    #[cfg_attr(not(target_os = "android"), allow(unused_variables))] app: tauri::AppHandle,
+    #[cfg_attr(not(target_os = "android"), allow(unused_variables))] action: PushDeviceAction,
+    #[cfg_attr(not(target_os = "android"), allow(unused_variables))] id: Option<String>,
+) -> CommandResult<PushDevices> {
+    #[cfg(target_os = "android")]
+    return app
+        .state::<AndroidBackgroundSync<tauri::Wry>>()
+        .0
+        .run_mobile_plugin_async(
+            "pushDevices",
+            serde_json::json!({ "action": action, "id": id }),
+        )
+        .await
+        .map_err(|_| CommandError::new("settings.pushDevices.failed"));
+    #[cfg(not(target_os = "android"))]
+    Err(crate::commands::error::CommandError::new(
+        "settings.pushDevices.failed",
+    ))
+}
