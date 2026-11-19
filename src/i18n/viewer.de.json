@@ -108,6 +108,7 @@
     },
     "imagePolicy": {
       "allowDomain": "Domain {'@'}{domain} erlauben",
+      "allowDomainAnyway": "Trotzdem erlauben",
       "allowDomainTitle": "Bilder von authentifizierten Absendern unter {domain} künftig immer laden",
       "allowSender": "Absender erlauben",
       "allowSenderTitle": "Bilder von {email} künftig immer laden",
@@ -115,7 +116,8 @@
       "choicesLabel": "Bilder immer laden",
       "shieldTitle": "Tracking-Pixel-Schutz: externe Bilder werden erst nach Freigabe geladen",
       "showOnce": "Anzeigen",
-      "showOnceTitle": "Externe Bilder nur in dieser Nachricht laden"
+      "showOnceTitle": "Externe Bilder nur in dieser Nachricht laden",
+      "unverifiedDomain": "Diese Mail ist nicht als echt bestätigt. Wer sich als Absender unter {'@'}{domain} ausgibt, bekommt die Bilder dann auch angezeigt."
     },
     "link": {
       "browserFailed": "Browser konnte nicht geöffnet werden",

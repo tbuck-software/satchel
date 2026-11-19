@@ -108,6 +108,7 @@
     },
     "imagePolicy": {
       "allowDomain": "Allow domain {'@'}{domain}",
+      "allowDomainAnyway": "Allow anyway",
       "allowDomainTitle": "Always load images from authenticated senders at {domain}",
       "allowSender": "Allow sender",
       "allowSenderTitle": "Always load images from {email}",
@@ -115,7 +116,8 @@
       "choicesLabel": "Always load images",
       "shieldTitle": "Tracking-pixel protection: external images load only once you allow them",
       "showOnce": "Show",
-      "showOnceTitle": "Load external images in this message only"
+      "showOnceTitle": "Load external images in this message only",
+      "unverifiedDomain": "This mail is not confirmed as genuine. Anyone posing as a sender at {'@'}{domain} would get images loaded too."
     },
     "link": {
       "browserFailed": "Could not open the browser",

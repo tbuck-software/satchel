@@ -18,6 +18,14 @@ export type { ImagePolicyMode } from '@/types/settings';
 const state = reactive({
   allowedSenders: imagePolicyPersistence.allowedSenders.read(),
   allowedDomains: imagePolicyPersistence.allowedDomains.read(),
+  /**
+   * Allowed domains that also count for mail without a DMARC pass. Many
+   * servers write no Authentication-Results Satchel can trust (it trusts only
+   * receivers whose header boundary it knows), so a domain allow would never
+   * apply there. Whoever forges such a sender gets the images too; the user
+   * opts in per domain, knowing that.
+   */
+  unverifiedDomains: imagePolicyPersistence.unverifiedDomains.read(),
   mode: imagePolicyPersistence.mode.read(),
 });
 
@@ -28,7 +36,8 @@ export function useImagePolicy() {
     const email = senderEmail.trim().toLowerCase();
     if (state.allowedSenders.has(email)) return true;
     const domain = senderDomain(email);
-    return trustedDmarcPass && domain !== '' && state.allowedDomains.has(domain);
+    if (domain === '' || !state.allowedDomains.has(domain)) return false;
+    return trustedDmarcPass || state.unverifiedDomains.has(domain);
   }
 
   function allow(senderEmail: string) {
@@ -41,16 +50,34 @@ export function useImagePolicy() {
     imagePolicyPersistence.allowedSenders.write(state.allowedSenders);
   }
 
-  function allowDomain(domain: string) {
+  /**
+   * `includeUnverified` also loads images for mail from the domain that did
+   * not pass DMARC. Without it, an earlier opt-in for the domain stays.
+   */
+  function allowDomain(domain: string, options: { includeUnverified?: boolean } = {}) {
     const normalized = normalizeDomain(domain);
     if (!normalized) return;
     state.allowedDomains.add(normalized);
     imagePolicyPersistence.allowedDomains.write(state.allowedDomains);
+    if (options.includeUnverified) setDomainUnverified(normalized, true);
+  }
+
+  /** Whether mail from an allowed domain loads images without a DMARC pass. */
+  function setDomainUnverified(domain: string, allowed: boolean) {
+    const normalized = normalizeDomain(domain);
+    if (!normalized) return;
+    if (allowed) state.unverifiedDomains.add(normalized);
+    else state.unverifiedDomains.delete(normalized);
+    imagePolicyPersistence.unverifiedDomains.write(state.unverifiedDomains);
   }
 
   function revokeDomain(domain: string) {
-    state.allowedDomains.delete(normalizeDomain(domain));
+    const normalized = normalizeDomain(domain);
+    state.allowedDomains.delete(normalized);
     imagePolicyPersistence.allowedDomains.write(state.allowedDomains);
+    if (state.unverifiedDomains.delete(normalized)) {
+      imagePolicyPersistence.unverifiedDomains.write(state.unverifiedDomains);
+    }
   }
 
   function setMode(mode: ImagePolicyMode) {
@@ -58,7 +85,7 @@ export function useImagePolicy() {
     imagePolicyPersistence.mode.write(mode);
   }
 
-  return { state, isAllowed, allow, revoke, allowDomain, revokeDomain, setMode };
+  return { state, isAllowed, allow, revoke, allowDomain, setDomainUnverified, revokeDomain, setMode };
 }
 
 const MIN_PLACEHOLDER_SIDE = 24;

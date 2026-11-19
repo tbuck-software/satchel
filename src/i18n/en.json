@@ -1662,6 +1662,7 @@
     },
     "imagePolicy": {
       "allowDomain": "Allow domain {'@'}{domain}",
+      "allowDomainAnyway": "Allow anyway",
       "allowDomainTitle": "Always load images from authenticated senders at {domain}",
       "allowSender": "Allow sender",
       "allowSenderTitle": "Always load images from {email}",
@@ -1669,7 +1670,8 @@
       "choicesLabel": "Always load images",
       "shieldTitle": "Tracking-pixel protection: external images load only once you allow them",
       "showOnce": "Show",
-      "showOnceTitle": "Load external images in this message only"
+      "showOnceTitle": "Load external images in this message only",
+      "unverifiedDomain": "This mail is not confirmed as genuine. Anyone posing as a sender at {'@'}{domain} would get images loaded too."
     },
     "invite": {
       "accept": "Accept",
@@ -2982,6 +2984,8 @@
     "images": {
       "allow": "Allow",
       "allowFrom": "Always load images from",
+      "domainIncludeUnverified": "Include unconfirmed",
+      "domainVerifiedOnly": "Confirmed only",
       "empty": "Nothing allowed — remote images stay blocked everywhere.",
       "entryPlaceholder": "alice{'@'}example.com or {'@'}example.com",
       "hint": "Remote images can tell a sender when you opened a mail.",
@@ -2998,7 +3002,8 @@
       "modeLabel": "Load remote images",
       "sender": "sender",
       "title": "Remote images",
-      "wholeDomain": "entire domain"
+      "wholeDomain": "entire domain · only mail confirmed as genuine",
+      "wholeDomainUnverified": "entire domain · also mail not confirmed as genuine"
     },
     "inlineImages": {
       "allPresent": "All embedded images are stored locally.",

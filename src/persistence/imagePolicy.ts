@@ -3,6 +3,8 @@ import { createPersistedSlot, persistence } from './index';
 
 const ALLOWED_SENDERS_STORAGE_KEY = 'satchel:images-allowed-senders';
 const ALLOWED_DOMAINS_STORAGE_KEY = 'satchel:images-allowed-domains';
+/** The allowed domains whose mail loads images without a DMARC pass too. */
+const UNVERIFIED_DOMAINS_STORAGE_KEY = 'satchel:images-allowed-domains-unverified';
 const MODE_STORAGE_KEY = 'satchel:images-policy-mode';
 const LEGACY_ALLOW_ALL_STORAGE_KEY = 'satchel:images-allow-all';
 
@@ -23,6 +25,7 @@ function stringSetSlot(key: string) {
 
 const allowedSendersSlot = stringSetSlot(ALLOWED_SENDERS_STORAGE_KEY);
 const allowedDomainsSlot = stringSetSlot(ALLOWED_DOMAINS_STORAGE_KEY);
+const unverifiedDomainsSlot = stringSetSlot(UNVERIFIED_DOMAINS_STORAGE_KEY);
 
 const modeSlot = createPersistedSlot<ImagePolicyMode | null>(MODE_STORAGE_KEY, {
   fallback: () => null,
@@ -61,6 +64,12 @@ export const imagePolicyPersistence = {
     read: () => persistence.read(allowedDomainsSlot),
     write: (value: Set<string>) => {
       persistence.write(allowedDomainsSlot, value);
+    },
+  },
+  unverifiedDomains: {
+    read: () => persistence.read(unverifiedDomainsSlot),
+    write: (value: Set<string>) => {
+      persistence.write(unverifiedDomainsSlot, value);
     },
   },
   mode: {
