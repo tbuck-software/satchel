@@ -2,6 +2,7 @@ pub mod account_quota;
 pub mod account_visibility;
 pub mod accounts;
 pub mod aliases;
+pub mod attachment_flag;
 pub mod autocrypt_peers;
 pub mod blocked_senders;
 pub mod body_window;

@@ -41,7 +41,7 @@ import { isKnownInviteBoilerplate } from '@/utils/inviteText';
 import { detectSenderSpoofing } from '@/utils/senderSpoofing';
 import { formatMessageTimestamp } from '@/utils/listTime';
 import { formatMessageHeaderTime } from '@/utils/messageHeaderTime';
-import { isSmimeSignatureAttachment, isSystemAttachment } from '@/utils/messageAttachments';
+import { isSmimeSignatureAttachment, listedAttachments } from '@/utils/messageAttachments';
 import { summarizeAuthentication } from '@/utils/messageAuthentication';
 import type { AnchorBox } from '@/utils/popoverPlacement';
 import { useMessageSecurityActions } from '@/composables/useMessageSecurityActions';
@@ -234,10 +234,7 @@ const visibleBodyText = computed(() => {
 
 const visibleAttachments = computed(() => {
   const seen = new Set<string>();
-  return props.message.attachments.filter((attachment) => {
-    if (isSystemAttachment(attachment)) {
-      return false;
-    }
+  return listedAttachments(props.message).filter((attachment) => {
     const key = [
       attachment.filename.trim().toLowerCase(),
       attachment.contentType.trim().toLowerCase(),

@@ -1590,6 +1590,9 @@ async fn import_parsed_message_inner(
         .await
         .map_err(|err| err.to_string())?;
     }
+    satchel_core::db::attachment_flag::refresh(&mut tx, &message_id)
+        .await
+        .map_err(|err| err.to_string())?;
     tx.commit().await.map_err(|err| err.to_string())?;
     Ok(true)
 }

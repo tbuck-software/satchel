@@ -212,6 +212,7 @@ pub fn registered_repairs() -> &'static [DataRepair] {
         super::known_senders::KNOWN_SENDERS_SENT,
         OUTLOOK_CALENDAR_RESYNC,
         super::sent_copies::SENT_LOCAL_COPIES,
+        super::attachment_flag::LISTED_ATTACHMENT_FLAGS,
     ]
 }
 

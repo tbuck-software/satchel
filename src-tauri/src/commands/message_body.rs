@@ -191,6 +191,10 @@ async fn persist_loaded_body(
     .execute(&mut *tx)
     .await
     .map_err(|err| err.to_string())?;
+    // The body decides which inline parts it shows itself.
+    satchel_core::db::attachment_flag::refresh(&mut tx, &reference.message_id)
+        .await
+        .map_err(|err| err.to_string())?;
 
     tx.commit().await.map_err(|err| err.to_string())?;
     Ok(())

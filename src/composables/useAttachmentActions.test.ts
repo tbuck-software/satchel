@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Attachment, Message } from '@/types/mail';
 
@@ -103,12 +104,15 @@ describe('useAttachmentActions', () => {
     const actions = useAttachmentActions();
     const files = [
       attachment({ id: 'file', filename: 'report.pdf' }),
-      attachment({ id: 'inline', filename: 'logo.png', isInline: true }),
+      attachment({ id: 'inline', filename: 'logo.png', isInline: true, contentId: '<logo@x>' }),
+      attachment({ id: 'screenshot', filename: 'bild1.png', isInline: true, contentId: '<bild1@x>' }),
       attachment({ id: 'calendar', filename: 'invite.ics', contentType: 'text/calendar' }),
       attachment({ id: 'signature', filename: 'smime.p7s', contentType: 'application/pkcs7-signature' }),
     ];
+    const withBody = { ...message(files), bodyHtml: '<img src="cid:logo@x">' };
 
-    expect(actions.listDownloadableAttachments([message(files)]).map((file) => file.id)).toEqual(['file']);
+    expect(actions.listDownloadableAttachments([withBody]).map((file) => file.id))
+      .toEqual(['file', 'screenshot']);
   });
 
   it('keeps duplicate names unique and continues after a failed attachment', async () => {

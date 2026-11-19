@@ -121,24 +121,15 @@ pub async fn settle_legacy_rows(
         insert_entity_rows(&mut *connection, message_id, attachments).await?;
     }
     // The flag counted the rows just replaced, perhaps only the signature
-    // part. Like sync, it counts every listed row, inline ones too.
+    // part. The rows left are the whole list, so none means no attachment.
     sqlx::query(
-        "UPDATE messages SET has_attachments =
-             EXISTS(SELECT 1 FROM attachments WHERE message_id = messages.id)
-         WHERE id = ?",
+        "UPDATE messages SET has_attachments = 0
+         WHERE id = ? AND NOT EXISTS(SELECT 1 FROM attachments WHERE message_id = messages.id)",
     )
     .bind(message_id)
     .execute(&mut *connection)
     .await?;
-    sqlx::query(
-        "UPDATE threads SET has_attachments =
-             (SELECT COALESCE(MAX(has_attachments), 0) FROM messages WHERE thread_id = threads.id)
-         WHERE id = (SELECT thread_id FROM messages WHERE id = ?)",
-    )
-    .bind(message_id)
-    .execute(&mut *connection)
-    .await?;
-    Ok(())
+    super::attachment_flag::refresh(connection, message_id).await
 }
 
 fn decrypted_attachment_ids() -> String {

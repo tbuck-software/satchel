@@ -9,6 +9,7 @@ import {
 import { safeAttachmentFilename } from '@/utils/attachmentFilename';
 import { saveAttachmentWithDialog } from '@/utils/saveAttachment';
 import { attachmentBytes } from '@/utils/attachmentBytes';
+import { listedAttachments } from '@/utils/messageAttachments';
 import { backendErrorKey, backendErrorStringParam } from '@/utils/backendErrors';
 import { useConfirm } from '@/composables/useConfirm';
 import { t } from '@/i18n/runtime';
@@ -120,19 +121,7 @@ export function useAttachmentActions() {
   }
 
   function listDownloadableAttachments(messages: readonly Message[]): Attachment[] {
-    return messages.flatMap((message) =>
-      message.attachments.filter((attachment) => {
-        const type = attachment.contentType.toLowerCase();
-        const name = attachment.filename.toLowerCase();
-        return (
-          !attachment.isInline
-          && !type.startsWith('text/calendar')
-          && type !== 'application/ics'
-          && !name.endsWith('.ics')
-          && !type.includes('pkcs7-signature')
-        );
-      }),
-    );
+    return messages.flatMap(listedAttachments);
   }
 
   /** Append " (2)", " (3)", … so several parts with the same name survive. */

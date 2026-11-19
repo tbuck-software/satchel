@@ -245,6 +245,7 @@ impl<'a> SentMessageRepository<'a> {
             .execute(&mut *tx)
             .await?;
         }
+        crate::db::attachment_flag::refresh(&mut tx, &message_id).await?;
 
         tx.commit().await?;
 

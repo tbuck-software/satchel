@@ -2040,19 +2040,9 @@ async fn persist_decrypted_attachments_in_dir(
     }
 
     let mut tx = reference.begin_write(pool).await?;
-    sqlx::query("UPDATE messages SET has_attachments = 1 WHERE id = ?")
-        .bind(message_id)
-        .execute(&mut *tx)
+    satchel_core::db::attachment_flag::refresh(&mut tx, message_id)
         .await
         .map_err(|error| error.to_string())?;
-    sqlx::query(
-        "UPDATE threads SET has_attachments = 1
-         WHERE id = (SELECT thread_id FROM messages WHERE id = ?)",
-    )
-    .bind(message_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(|error| error.to_string())?;
     tx.commit().await.map_err(|e| e.to_string())?;
     Ok(bindings)
 }

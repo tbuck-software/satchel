@@ -926,9 +926,9 @@ async fn persist_provider_message(
         .map_err(|error| error.to_string())?;
     }
 
-    // `has_attachments` only ever rises. A re-sync that returns the envelope
+    // `has_attachments` only rises here. A re-sync that returns the envelope
     // without its parts is missing information, not reporting a message that
-    // lost its attachments — mail is immutable on the server.
+    // lost its attachments; the stored parts decide below.
     sqlx::query(
         "INSERT INTO messages (id, account_id, folder_id, thread_id, message_id_header, in_reply_to, references_header, from_address, from_name, to_addresses, cc_addresses, bcc_addresses, reply_to, subject, date, body_text, body_html, original_body_html, original_source, snippet, is_read, is_starred, is_draft, is_sent, has_attachments, remote_uid, remote_id, raw_size, raw_headers, remote_draft_id, category, provider_labels, list_unsubscribe, list_unsubscribe_post, auth_spf, auth_dkim, auth_dmarc, smime_encrypted, smime_signed, pgp_signed, trust_metadata, created_at, updated_at, received_at, remote_workflow_marker, chat_version, chat_group_id, chat_group_name)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1154,6 +1154,10 @@ async fn persist_provider_message(
         .map_err(|err| err.to_string())?;
         attachment_ids.push(attachment_id);
     }
+
+    satchel_core::db::attachment_flag::refresh(tx, &message_id)
+        .await
+        .map_err(|err| err.to_string())?;
 
     // Replacement, stale-copy cleanup and every affected thread projection
     // belong to the same savepoint.
