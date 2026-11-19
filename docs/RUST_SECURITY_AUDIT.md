@@ -101,14 +101,14 @@ the OpenPGP interoperability tests.
 
 ## Remaining audit warnings
 
-The 2026-10-27 scans pass with the two temporary exceptions above. The root
-lockfile reports ten warnings and the fuzz lockfile four, which `cargo audit`
-does not treat as vulnerabilities. The zstd-family warnings are gone. The
-remaining warnings are:
+The 2026-11-19 scans pass with the two temporary exceptions above. The root
+lockfile reports twelve warnings and the fuzz lockfile six.
 
-- `fxhash` is unmaintained through Wasmtime's profiling dependency.
-- `proc-macro-error`, `zbus_names`, `zvariant`, and `zvariant_derive` have
-  maintenance advisories in the desktop dependency graph.
+- Both lockfiles contain maintenance advisories for `chrono`, `chrono-tz`,
+  `pin-utils`, `zbus_names`, `zvariant` and `zvariant_derive`. The root
+  lockfile includes two versions of each of the last three crates.
+- The root lockfile also contains the unmaintained `proc-macro-error` and
+  the yanked `async-executor` 1.14.0.
 - `glib` 0.18.5 has an unsoundness advisory in the Linux GTK stack used by
   Tauri: RUSTSEC-2024-0429, Dependabot GHSA-wrw7-89jp-8q8g, fixed in 0.20.
   `gtk` 0.18 (gtk3-rs, archived) requires `glib` ^0.18, and Tauri 2, wry,
@@ -117,22 +117,20 @@ remaining warnings are:
   `Variant::array_iter_str`; Satchel does not depend on `glib` directly, and
   none of the crates between it and Tauri call that method. The Dependabot
   alert is dismissed as tolerable risk; recheck when Tauri moves to GTK 4.
-- `tokio` has an I/O-safety unsoundness advisory for `AsyncFd` constructors,
-  RUSTSEC-2026-0386, in both lockfiles, at 1.49.0 in the root and 1.53.2 in fuzz.
 
 These are upstream dependency paths. Recheck them on each lockfile update and
 remove the warnings by updating their parents when compatible releases exist.
 
 ## Wasmtime and vendored dependencies
 
-Wasmtime and wasmtime-wasi 36.0.20 fix RUSTSEC-2026-0424, unchecked memory
-use when transferring borrowed resources between components. 36.0.19 fixed
-RUSTSEC-2026-0379 and RUSTSEC-2026-0380 in Cranelift, and 36.0.18 fixed
-RUSTSEC-2026-0363 and RUSTSEC-2026-0352. Plugin runtime tests run with built
-components required.
+The desktop plugin runtime uses Wasmtime and wasmtime-wasi 48.0.9. This
+release fixes RUSTSEC-2026-0566, RUSTSEC-2026-0567, RUSTSEC-2026-0569,
+RUSTSEC-2026-0571 and RUSTSEC-2026-0573. Version 36.0.21 still falls
+within the affected range for RUSTSEC-2026-0567 and RUSTSEC-2026-0573.
+Plugin runtime tests run with built components required.
 
 The plugin compilation cache remains enabled. Satchel vendors
-`wasmtime-internal-cache` 36.0.20 with only its zstd dependency requirement
+`wasmtime-internal-cache` 48.0.9 with only its zstd dependency requirement
 changed to 0.14.3. The root lockfile now uses zstd 0.14.3, zstd-safe 8.2.0 and
 zstd-sys 2.1.2, fixing RUSTSEC-2026-0391, RUSTSEC-2026-0398,
 RUSTSEC-2026-0403 and RUSTSEC-2026-0410 and removing the zstd-safe unsoundness
