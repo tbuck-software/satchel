@@ -21,9 +21,9 @@ async function settle() {
 }
 
 /** The app shell provides the phone's buttons; the message-file viewer does not. */
-async function mountNotice(senderEmail = 'newsletter@metro.de', provided = true) {
+async function mountNotice(senderEmail = 'newsletter@metro.de', provided = true, trustedDmarcPass = true) {
   const wrapper = mount(EmailRenderer, {
-    props: { html, senderEmail },
+    props: { html, senderEmail, trustedDmarcPass },
     global: {
       stubs,
       provide: provided ? { [IMAGE_GUARD_PHONE_ACTIONS as symbol]: ImageGuardPhoneActions } : {},
@@ -126,5 +126,65 @@ describe('EmailRenderer blocked-images notice', () => {
     const sheet = document.body.querySelector('.image-choices');
     expect(sheet?.textContent).toContain('Allow sender');
     expect(sheet?.textContent).not.toContain('Allow domain');
+  });
+
+  it('trusts the domain and drops the notice for an authenticated sender', async () => {
+    useUiStore().isMobile = false;
+    const wrapper = await mountNotice();
+
+    const allowDomain = wrapper.findAll('.image-guard__action')
+      .find((action) => action.text() === 'Allow domain @metro.de');
+    await allowDomain?.trigger('click');
+
+    expect(useImagePolicy().isAllowed('newsletter@metro.de', true)).toBe(true);
+    expect(wrapper.find('.image-guard').exists()).toBe(false);
+  });
+
+  it('asks before allowing the domain for mail that did not pass DMARC', async () => {
+    useUiStore().isMobile = false;
+    const wrapper = await mountNotice('newsletter@metro.de', true, false);
+    const domainAction = () => wrapper.findAll('.image-guard__action')
+      .find((action) => action.text() === 'Allow domain @metro.de');
+
+    await domainAction()?.trigger('click');
+    await settle();
+
+    const guard = wrapper.get('.image-guard');
+    expect(guard.text()).toContain('not confirmed as genuine');
+    expect(guard.text()).toContain('@metro.de');
+    expect(useImagePolicy().isAllowed('newsletter@metro.de')).toBe(false);
+    // The safe answer has the focus.
+    expect(document.activeElement?.textContent?.trim()).toBe('Cancel');
+
+    await guard.get('[data-domain-cancel]').trigger('click');
+    expect(wrapper.get('.image-guard').text()).toContain('2 external images blocked');
+    expect(useImagePolicy().isAllowed('newsletter@metro.de')).toBe(false);
+
+    await domainAction()?.trigger('click');
+    await settle();
+    const allowAnyway = wrapper.findAll('.image-guard__action')
+      .find((action) => action.text() === 'Allow anyway');
+    await allowAnyway?.trigger('click');
+
+    expect(useImagePolicy().isAllowed('newsletter@metro.de', false)).toBe(true);
+    expect(wrapper.find('.image-guard').exists()).toBe(false);
+  });
+
+  it('asks on the phone too, after the choice came from the sheet', async () => {
+    useUiStore().isMobile = true;
+    const wrapper = await mountNotice('newsletter@metro.de', true, false);
+
+    await wrapper.get('.image-guard__choices').trigger('click');
+    await settle();
+    [...document.body.querySelectorAll<HTMLButtonElement>('.image-choices .menu-item')]
+      .find((item) => item.textContent?.includes('Allow domain'))
+      ?.click();
+    await settle();
+
+    const guard = wrapper.get('.image-guard');
+    // The question needs the room to wrap; the one-row phone layout steps aside.
+    expect(guard.classes()).not.toContain('image-guard--phone');
+    expect(guard.text()).toContain('not confirmed as genuine');
+    expect(useImagePolicy().isAllowed('newsletter@metro.de')).toBe(false);
   });
 });

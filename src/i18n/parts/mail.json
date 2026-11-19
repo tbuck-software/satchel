@@ -92,13 +92,15 @@
       "imagePolicy": {
         "allowDomain": "Allow domain {'@'}{domain}",
         "allowDomainTitle": "Always load images from authenticated senders at {domain}",
+        "allowDomainAnyway": "Allow anyway",
         "allowSender": "Allow sender",
         "allowSenderTitle": "Always load images from {email}",
         "choicesLabel": "Always load images",
         "blocked": "{count} external image blocked | {count} external images blocked",
         "shieldTitle": "Tracking-pixel protection: external images load only once you allow them",
         "showOnce": "Show",
-        "showOnceTitle": "Load external images in this message only"
+        "showOnceTitle": "Load external images in this message only",
+        "unverifiedDomain": "This mail is not confirmed as genuine. Anyone posing as a sender at {'@'}{domain} would get images loaded too."
       },
       "invite": {
         "accept": "Accept",
@@ -468,13 +470,15 @@
       "imagePolicy": {
         "allowDomain": "Domain {'@'}{domain} erlauben",
         "allowDomainTitle": "Bilder von authentifizierten Absendern unter {domain} künftig immer laden",
+        "allowDomainAnyway": "Trotzdem erlauben",
         "allowSender": "Absender erlauben",
         "allowSenderTitle": "Bilder von {email} künftig immer laden",
         "choicesLabel": "Bilder immer laden",
         "blocked": "{count} externes Bild blockiert | {count} externe Bilder blockiert",
         "shieldTitle": "Tracking-Pixel-Schutz: externe Bilder werden erst nach Freigabe geladen",
         "showOnce": "Anzeigen",
-        "showOnceTitle": "Externe Bilder nur in dieser Nachricht laden"
+        "showOnceTitle": "Externe Bilder nur in dieser Nachricht laden",
+        "unverifiedDomain": "Diese Mail ist nicht als echt bestätigt. Wer sich als Absender unter {'@'}{domain} ausgibt, bekommt die Bilder dann auch angezeigt."
       },
       "invite": {
         "accept": "Zusagen",

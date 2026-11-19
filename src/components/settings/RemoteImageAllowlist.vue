@@ -87,9 +87,26 @@ function add() {
       <div v-for="domain in domains" :key="`d:${domain}`" class="setting-row">
         <div class="setting-info">
           <span class="setting-label">@{{ domain }}</span>
-          <span class="setting-hint">{{ $t('settings.images.wholeDomain') }}</span>
+          <span class="setting-hint">{{
+            policy.state.unverifiedDomains.has(domain)
+              ? $t('settings.images.wholeDomainUnverified')
+              : $t('settings.images.wholeDomain')
+          }}</span>
         </div>
-        <AppButton variant="ghost" size="sm" @click="policy.revokeDomain(domain)">{{ $t('common.remove') }}</AppButton>
+        <div class="domain-actions">
+          <AppButton
+            variant="ghost"
+            size="sm"
+            @click="policy.setDomainUnverified(domain, !policy.state.unverifiedDomains.has(domain))"
+          >
+            {{
+              policy.state.unverifiedDomains.has(domain)
+                ? $t('settings.images.domainVerifiedOnly')
+                : $t('settings.images.domainIncludeUnverified')
+            }}
+          </AppButton>
+          <AppButton variant="ghost" size="sm" @click="policy.revokeDomain(domain)">{{ $t('common.remove') }}</AppButton>
+        </div>
       </div>
       <div v-for="sender in senders" :key="`s:${sender}`" class="setting-row">
         <div class="setting-info">
@@ -109,6 +126,7 @@ function add() {
 .setting-row.add-row { grid-template-columns: minmax(0, 1fr) auto; }
 .add-row input { width: 100%; max-width: none; }
 .hint--warning { color: var(--accent-amber-soft); }
+.domain-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-xs); }
 </style>
 
 <style scoped src="./settingsForms.css"></style>

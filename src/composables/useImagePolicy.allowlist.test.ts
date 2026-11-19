@@ -31,6 +31,33 @@ describe('useImagePolicy allow-list', () => {
     expect(policy.isAllowed('news@other.example')).toBe(false);
   });
 
+  it('also counts unauthenticated mail for a domain allowed that way, and persists it', async () => {
+    let policy = await freshPolicy();
+    policy.allowDomain('Example.COM', { includeUnverified: true });
+    expect(policy.isAllowed('newsletter@example.com', false)).toBe(true);
+    expect(policy.isAllowed('newsletter@example.com', true)).toBe(true);
+
+    // A later plain allow keeps the opt-in.
+    policy.allowDomain('example.com');
+    policy = await freshPolicy();
+    expect(policy.isAllowed('newsletter@example.com', false)).toBe(true);
+
+    policy.setDomainUnverified('example.com', false);
+    expect(policy.isAllowed('newsletter@example.com', false)).toBe(false);
+    expect(policy.isAllowed('newsletter@example.com', true)).toBe(true);
+  });
+
+  it('drops the unauthenticated opt-in with the domain', async () => {
+    let policy = await freshPolicy();
+    policy.allowDomain('example.com', { includeUnverified: true });
+    policy.revokeDomain('example.com');
+    policy.allowDomain('example.com');
+
+    policy = await freshPolicy();
+    expect(policy.isAllowed('newsletter@example.com', false)).toBe(false);
+    expect(policy.state.unverifiedDomains.size).toBe(0);
+  });
+
   it('does not treat a subdomain as the allowed domain', async () => {
     const policy = await freshPolicy();
     policy.allowDomain('example.com');

@@ -34,6 +34,7 @@ import { useUiStore } from '@/stores/ui';
 import { formattingFreeText, isFormattingFreeHtml } from '@/utils/formattingFreeHtml';
 
 const MailContextMenu = defineAsyncComponent(() => import('./MailContextMenu.vue'));
+const ImageGuardDomainConfirm = defineAsyncComponent(() => import('./ImageGuardDomainConfirm.vue'));
 
 const settings = useSettingsStore();
 const ui = useUiStore();
@@ -120,6 +121,7 @@ watch(
   () => [props.html, props.senderEmail],
   () => {
     showBlockedImages.value = false;
+    domainConfirmPending.value = false;
     quotesExpanded.value = false;
     contextMenu.value = null;
   },
@@ -155,9 +157,25 @@ const senderDomainName = computed(() =>
 const canTrustDomain = computed(
   () => senderDomainName.value !== '' && !isPersonalMailboxDomain(senderDomainName.value),
 );
+/**
+ * Set while the notice asks whether to allow the domain for mail that did not
+ * pass DMARC (ImageGuardDomainConfirm.vue). A plain domain allow only counts
+ * for authenticated mail, so on such a message it would change nothing; the
+ * user can opt the domain in for unauthenticated mail too, after reading that
+ * a forger would get the images.
+ */
+const domainConfirmPending = ref(false);
 function trustDomain() {
   if (!canTrustDomain.value) return;
-  imagePolicy.allowDomain(senderDomainName.value);
+  if (props.trustedDmarcPass) {
+    imagePolicy.allowDomain(senderDomainName.value);
+    return;
+  }
+  domainConfirmPending.value = true;
+}
+function confirmUnverifiedDomain() {
+  domainConfirmPending.value = false;
+  imagePolicy.allowDomain(senderDomainName.value, { includeUnverified: true });
 }
 
 const blockedImagesLabel = computed(() =>
@@ -429,7 +447,7 @@ const hasPgpSegments = computed(() =>
     <div
       v-if="blockedImagesCount > 0 && !imagesEffectivelyAllowed"
       class="image-guard"
-      :class="{ 'image-guard--phone': imageGuardPhone }"
+      :class="{ 'image-guard--phone': imageGuardPhone && !domainConfirmPending }"
       role="status"
     >
       <svg
@@ -444,6 +462,14 @@ const hasPgpSegments = computed(() =>
       >
         <path d="M8 1.9 13 3.7v4c0 3.2-2.1 5.3-5 6.4-2.9-1.1-5-3.2-5-6.4v-4L8 1.9Z" />
       </svg>
+      <ImageGuardDomainConfirm
+        v-if="domainConfirmPending"
+        :domain="senderDomainName"
+        :phone="imageGuardPhone"
+        @confirm="confirmUnverifiedDomain"
+        @cancel="domainConfirmPending = false"
+      />
+      <template v-else>
       <span
         class="image-guard__text"
         :title="$t('mail.imagePolicy.shieldTitle')"
@@ -494,6 +520,7 @@ const hasPgpSegments = computed(() =>
         >
           {{ $t('mail.imagePolicy.allowDomain', { domain: senderDomainName }) }}
         </AppButton>
+      </template>
       </template>
       </template>
     </div>
@@ -943,6 +970,7 @@ const hasPgpSegments = computed(() =>
 .image-guard__sep {
   color: var(--text-tertiary);
 }
+
 
 /* Phone: one row that never wraps; the text gives way, the buttons do not. */
 .image-guard--phone {

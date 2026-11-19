@@ -20,7 +20,10 @@
         "allowFrom": "Always load images from",
         "sender": "sender",
         "title": "Remote images",
-        "wholeDomain": "entire domain"
+        "wholeDomain": "entire domain · only mail confirmed as genuine",
+        "wholeDomainUnverified": "entire domain · also mail not confirmed as genuine",
+        "domainVerifiedOnly": "Confirmed only",
+        "domainIncludeUnverified": "Include unconfirmed"
       },
       "mobileSync": {
         "androidDescription": "Satchel fetches new mail locally on this device. That needs the background service running and Android must not restrict the app.",
@@ -288,7 +291,10 @@
         "allowFrom": "Bilder immer laden von",
         "sender": "Absender",
         "title": "Externe Bilder",
-        "wholeDomain": "ganze Domain"
+        "wholeDomain": "ganze Domain · nur als echt bestätigte Mails",
+        "wholeDomainUnverified": "ganze Domain · auch nicht bestätigte Mails",
+        "domainVerifiedOnly": "Nur bestätigte",
+        "domainIncludeUnverified": "Auch unbestätigte"
       },
       "mobileSync": {
         "androidDescription": "Satchel ruft neue E-Mails lokal auf diesem Gerät ab. Dafür muss der Hintergrunddienst laufen und Android darf die App nicht einschränken.",
