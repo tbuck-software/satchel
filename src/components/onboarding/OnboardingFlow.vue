@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import CardButton from '@/components/ui/CardButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useSettingsStore } from '@/stores/settings';
 import { useAccountsStore } from '@/stores/accounts';
 import { useContactsStore } from '@/stores/contacts';
@@ -46,6 +46,12 @@ const { t } = useI18n();
 const frameRef = ref<HTMLElement | null>(null);
 const trap = useFocusTrap(frameRef);
 const hasTauri = backendSupportsNativeCommands();
+const AccountTransfer = defineAsyncComponent(() => import('@/components/settings/AccountTransfer.vue'));
+const receiving = ref(false);
+function finishTransfer() {
+  receiving.value = false;
+  completeConnectionStep();
+}
 const step = ref(1);
 const email = ref('');
 const password = ref('');
@@ -250,6 +256,7 @@ function next() {
 }
 
 function resetWizard(startStep: number) {
+  receiving.value = false;
   step.value = startStep;
   email.value = '';
   password.value = '';
@@ -717,8 +724,12 @@ function finish() {
           <div class="progress-track"><div class="progress-fill" :style="{ width: `${progressPercent}%` }" /></div>
 
           <Transition name="step" mode="out-in">
-            <div v-if="step === 1" key="identity" class="panel account-panel">
+            <div v-if="step === 1 && receiving" key="transfer" class="panel">
+              <AccountTransfer receive @close="receiving = false" @imported="finishTransfer" />
+            </div>
+            <div v-else-if="step === 1" key="identity" class="panel account-panel">
               <h2>{{ $t('onboarding.account.heading') }}</h2>
+              <AppButton class="setup-transfer-link" variant="link" @click="receiving = true">{{ $t('transfer.receiveOther') }}</AppButton>
 
               <form class="identity-form" @submit.prevent="startConnection">
                 <label class="floating-field">
@@ -912,6 +923,7 @@ function finish() {
 </template>
 
 <style scoped>
+.setup-transfer-link { white-space: normal; max-width: 100%; }
 .onboarding-shell {
   position: fixed;
   inset: 0;

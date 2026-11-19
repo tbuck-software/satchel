@@ -423,13 +423,54 @@ impl<'a> AccountRepository<'a> {
         &self,
         input: CreateEmailAccount,
     ) -> Result<AccountSummary, AccountError> {
+        wait_for_credentials().await?;
+        let mut connection = self.pool.acquire().await?;
+        Self::insert_email(&mut connection, input).await
+    }
+
+    /// Import once, even if two setup windows claim the same mailbox.
+    pub async fn import_email_accounts(
+        &self,
+        inputs: Vec<CreateEmailAccount>,
+    ) -> Result<Vec<AccountSummary>, AccountError> {
+        wait_for_credentials().await?;
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let mut created = Vec::new();
+        for input in inputs {
+            let exists: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM accounts WHERE kind = 'email' AND lower(trim(email)) = lower(trim(?)))",
+            )
+            .bind(&input.email)
+            .fetch_one(&mut *tx)
+            .await?;
+            if exists {
+                continue;
+            }
+            let mut row = Self::insert_email(&mut tx, input).await?;
+            if matches!(row.provider.as_str(), "gmail" | "outlook") {
+                row.last_oauth_error = Some("backend.errors.transferSignIn".to_owned());
+                row.last_oauth_error_at = sqlx::query_scalar("UPDATE accounts SET last_oauth_error = ?, last_oauth_error_at = updated_at WHERE id = ? RETURNING last_oauth_error_at")
+                    .bind(&row.last_oauth_error)
+                    .bind(&row.id)
+                    .fetch_one(&mut *tx)
+                    .await?;
+            }
+            created.push(row);
+        }
+        tx.commit().await?;
+        Ok(created)
+    }
+
+    async fn insert_email(
+        connection: &mut sqlx::SqliteConnection,
+        input: CreateEmailAccount,
+    ) -> Result<AccountSummary, AccountError> {
         let id = format!("acc-{}", uuid::Uuid::new_v4());
         let now = chrono::Utc::now().to_rfc3339();
         let config = input.config.unwrap_or_else(|| serde_json::json!({}));
-        wait_for_credentials().await?;
         let stored_config = encrypt_account_config(&id, &config.to_string())
             .map_err(|detail| AccountError::CredentialAccess { detail })?;
-        let color = next_account_color(self.pool).await?;
+        let color = next_account_color(&mut *connection).await?;
         let label = input
             .label
             .as_deref()
@@ -462,7 +503,7 @@ impl<'a> AccountRepository<'a> {
         .bind(color)
         .bind(&now)
         .bind(&now)
-        .fetch_one(self.pool)
+        .fetch_one(connection)
         .await
         .map_err(Into::into)
     }

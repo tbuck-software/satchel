@@ -124,6 +124,7 @@ pub fn run() {
         // Paste without formatting reads the clipboard natively: WKWebView's
         // `navigator.clipboard.readText()` asks with a "Paste" popup each time.
         .plugin(tauri_plugin_clipboard_manager::init())
+        .manage(commands::account_transfer::Transfers::default())
         .manage(commands::app_update::UpdateState::default())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -701,6 +702,7 @@ pub fn run() {
             commands::app_update::app_update_progress,
             commands::app_update::install_app_update,
             commands::app_update::acknowledge_app_update_flush,
+            commands::account_transfer::account_transfer,
             commands::accounts::list_accounts,
             commands::accounts::get_account_visibility,
             commands::accounts::list_account_quotas,

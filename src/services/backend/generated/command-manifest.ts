@@ -13,6 +13,53 @@ export default {
                 }
             }
         },
+        "account_transfer": {
+            "kind": "object",
+            "fields": {
+                "accounts": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "array",
+                            "item": {
+                                "kind": "value"
+                            }
+                        }
+                    }
+                },
+                "action": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "address": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "code": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "session": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "acknowledge_app_update_flush": {
             "kind": "object",
             "fields": {

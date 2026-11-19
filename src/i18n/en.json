@@ -246,6 +246,7 @@
       "accountPasswordUnavailable": "This account has no password that can be reused.",
       "accountPersistenceFailed": "Account data is currently unavailable. Please try again.",
       "accountSyncFailed": "Sync for {account} failed: {message}",
+      "accountTransfer": "The transfer failed. Check the network and start again on both devices with a new code.",
       "accountVisibilityInvalid": "Choose valid weekdays and a time window that ends later on the same day.",
       "aliasPersistenceFailed": "Aliases are currently unavailable. Please try again.",
       "asideFolderCreatedRefreshFailed": "The Aside folder for {account} was created, but the folder list could not be refreshed yet: {message}",
@@ -569,6 +570,7 @@
       "topicNoteContentEmpty": "Enter note content.",
       "topicPersistenceFailed": "The topic could not be saved. Please try again.",
       "topicStatusInvalid": "The topic status is invalid.",
+      "transferSignIn": "Sign in to this account on this device.",
       "translation": {
         "consentRequired": "Mail from this account may not be sent for translation yet.",
         "credentialsUnavailable": "The key store is locked, so the API key cannot be read or saved.",
@@ -4736,6 +4738,34 @@
       "statusFailed": "The status could not be changed.",
       "undo": "Undo"
     }
+  },
+  "transfer": {
+    "accept": "Add accounts",
+    "accounts": "Which accounts do you want to transfer?",
+    "address": "Address shown on the new device",
+    "chooseDevice": "Select a device",
+    "code": "Code from the new device",
+    "connecting": "Connecting the devices…",
+    "device": "New device",
+    "done": "No new accounts added. | One account added. | {count} accounts added.",
+    "expired": "This code has expired. Start again to get a new one.",
+    "expiry": "Keep Satchel open on both devices and connect them to the same network. The code is valid for five minutes.",
+    "finish": "Done",
+    "manual": "Connect by address",
+    "passwordHelp": "IMAP and POP3 include their saved passwords. For Google and Microsoft, sign in on the new device.",
+    "receive": "Set up from another device",
+    "receiveOther": "Use accounts from another device",
+    "receiverHelp": "On your other device, open Satchel → Settings → Accounts → Transfer accounts to another device. Enter this code there.",
+    "retry": "Start again",
+    "review": "Add these accounts to this device? Existing accounts will be skipped.",
+    "searching": "Looking for the new device…",
+    "send": "Transfer accounts to another device",
+    "sendTitle": "Transfer accounts",
+    "senderHelp": "On the new device, open Satchel and choose “Use accounts from another device” during setup. Connect both devices to the same network.",
+    "sent": "The accounts are ready on the new device. Choose “Add accounts” there to finish.",
+    "signIn": "Sign in for {email}",
+    "skipped": "One account was already on this device. | {count} accounts were already on this device.",
+    "submit": "Transfer"
   },
   "translation": {
     "consent": {

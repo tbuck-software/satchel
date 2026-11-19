@@ -36,6 +36,16 @@ class BootRescheduleReceiver : BroadcastReceiver() {
 class BackgroundSyncPlugin(private val activity: Activity) : Plugin(activity) {
   private val pairing by lazy { PushPairing(activity.applicationContext) }
 
+  private val setupDiscovery by lazy { AccountDiscovery(activity.applicationContext) }
+
+  @Command
+  fun accountDiscovery(invoke: Invoke) {
+    runCatching {
+      val args = invoke.getArgs()
+      setupDiscovery.apply(args.getString("id"), args.getString("op"), args.optInt("port"))
+    }.onSuccess { invoke.resolve(it) }.onFailure { invoke.reject("account_discovery") }
+  }
+
   private val relay by lazy { RelayPairing(activity.applicationContext) }
   private val relayWorker = java.util.concurrent.Executors.newSingleThreadExecutor()
 

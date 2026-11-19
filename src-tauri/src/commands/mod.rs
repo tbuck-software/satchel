@@ -1,3 +1,4 @@
+pub mod account_transfer;
 pub mod accounts;
 pub mod aliases;
 pub mod app_update;

@@ -3,9 +3,12 @@
 <plist version="1.0">
 <dict>
   <key>NSLocalNetworkUsageDescription</key>
-  <string>Satchel macht diesen Mac beim Koppeln für dein Handy im lokalen Netzwerk sichtbar.</string>
+  <string>Satchel findet deine Geräte im lokalen Netzwerk, damit du sie koppeln und E-Mail-Konten übertragen kannst.</string>
   <key>NSBonjourServices</key>
-  <array><string>_satchel-pair._tcp</string></array>
+  <array>
+    <string>_satchel-pair._tcp</string>
+    <string>_satchel-setup._tcp</string>
+  </array>
   <key>NSContactsUsageDescription</key>
   <string>Satchel nutzt deine Kontakte, um Profilbilder bekannter Absender anzuzeigen.</string>
   <key>LSFileQuarantineEnabled</key>

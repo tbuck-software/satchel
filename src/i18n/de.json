@@ -246,6 +246,7 @@
       "accountPasswordUnavailable": "Für dieses Konto ist kein wiederverwendbares Passwort gespeichert.",
       "accountPersistenceFailed": "Kontodaten sind momentan nicht verfügbar. Bitte versuche es erneut.",
       "accountSyncFailed": "Die Synchronisierung für {account} ist fehlgeschlagen: {message}",
+      "accountTransfer": "Die Übertragung ist fehlgeschlagen. Prüfe die Netzwerkverbindung und starte auf beiden Geräten mit einem neuen Code.",
       "accountVisibilityInvalid": "Wähle gültige Wochentage und ein Zeitfenster, das am selben Tag später endet.",
       "aliasPersistenceFailed": "Aliase sind momentan nicht verfügbar. Bitte versuche es erneut.",
       "asideFolderCreatedRefreshFailed": "Der Aside-Ordner für {account} wurde angelegt, aber die Ordnerliste konnte noch nicht aktualisiert werden: {message}",
@@ -569,6 +570,7 @@
       "topicNoteContentEmpty": "Gib einen Notizinhalt ein.",
       "topicPersistenceFailed": "Das Thema konnte nicht gespeichert werden. Bitte versuche es erneut.",
       "topicStatusInvalid": "Der Themenstatus ist ungültig.",
+      "transferSignIn": "Melde dich auf diesem Gerät bei diesem Konto an.",
       "translation": {
         "consentRequired": "Mails dieses Kontos dürfen noch nicht zur Übersetzung gesendet werden.",
         "credentialsUnavailable": "Der Schlüsselbund ist gesperrt, der API-Schlüssel kann nicht gelesen oder gespeichert werden.",
@@ -4736,6 +4738,34 @@
       "statusFailed": "Status konnte nicht geändert werden.",
       "undo": "Rückgängig"
     }
+  },
+  "transfer": {
+    "accept": "Übernehmen",
+    "accounts": "Welche Konten möchtest du übertragen?",
+    "address": "Adresse vom neuen Gerät",
+    "chooseDevice": "Gerät auswählen",
+    "code": "Code vom neuen Gerät",
+    "connecting": "Geräte werden verbunden …",
+    "device": "Neues Gerät",
+    "done": "Keine neuen Konten hinzugefügt. | Ein Konto hinzugefügt. | {count} Konten hinzugefügt.",
+    "expired": "Der Code ist abgelaufen. Starte erneut, um einen neuen Code zu bekommen.",
+    "expiry": "Lass Satchel auf beiden Geräten geöffnet. Beide müssen im selben lokalen Netzwerk sein. Der Code gilt fünf Minuten.",
+    "finish": "Fertig",
+    "manual": "Über Adresse verbinden",
+    "passwordHelp": "Bei IMAP und POP3 werden die gespeicherten Passwörter übertragen. Bei Google und Microsoft meldest du dich auf dem neuen Gerät an.",
+    "receive": "Konten übernehmen",
+    "receiveOther": "Konten von einem anderen Gerät übernehmen",
+    "receiverHelp": "Öffne auf deinem bisherigen Gerät Satchel → Einstellungen → Konten → Konten auf ein anderes Gerät übertragen. Gib dort diesen Code ein.",
+    "retry": "Erneut starten",
+    "review": "Diese Konten auf diesem Gerät einrichten? Bereits vorhandene Konten werden übersprungen.",
+    "searching": "Neues Gerät wird gesucht …",
+    "send": "Konten auf ein anderes Gerät übertragen",
+    "sendTitle": "Konten übertragen",
+    "senderHelp": "Wähle auf dem neuen Gerät bei der Einrichtung „Konten von einem anderen Gerät übernehmen“. Verbinde beide Geräte mit demselben Netzwerk.",
+    "sent": "Die Konten sind auf dem neuen Gerät angekommen. Tippe dort auf „Übernehmen“.",
+    "signIn": "Für {email} anmelden",
+    "skipped": "Ein Konto war bereits auf diesem Gerät eingerichtet. | {count} Konten waren bereits auf diesem Gerät eingerichtet.",
+    "submit": "Übertragen"
   },
   "translation": {
     "consent": {

@@ -26,6 +26,7 @@ const COMMANDS: &[&str] = &[
     "app_update_progress",
     "install_app_update",
     "acknowledge_app_update_flush",
+    "account_transfer",
     "list_accounts",
     "get_account_visibility",
     "list_account_quotas",
