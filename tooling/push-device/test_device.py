@@ -38,6 +38,42 @@ class PushDeviceTest(unittest.TestCase):
                 watcher.terminate()
                 watcher.join()
 
+    @patch.object(device, "save")
+    @patch("builtins.input", return_value="y")
+    @patch.object(device.time, "sleep")
+    @patch.object(device, "Zeroconf")
+    @patch.object(device.ifaddr, "get_adapters")
+    @patch.object(device, "relay_post")
+    def test_visible_approves_only_the_displayed_request(self, relay, adapters, dns, _sleep, prompt, save):
+        link = "ab" * 16
+        relay.side_effect = [
+            {"id": link, "sender": "private"},
+            {"phase": "requested", "code": "582014", "request": "request-for-this-code"},
+            {}, {"phase": "active"},
+        ]
+        adapters.return_value = [Mock(ips=[Mock(is_IPv4=True, ip="192.0.2.1")])]
+        config = {"source": {"accounts": [{"host": "mail.example.test", "user": "private-mailbox"}]}, "peers": []}
+        device.show_on_network(config, "https://example.invalid")
+        self.assertIn("582 014", prompt.call_args.args[0])
+        relay.assert_any_call("https://example.invalid", "links/" + link + "/approve", "private",
+                              {"request": "request-for-this-code"})
+        self.assertNotIn("private-mailbox", str(relay.call_args_list))
+        advertisement = dns.return_value.__enter__.return_value.register_service.call_args.args[0]
+        self.assertEqual(advertisement.properties[b"id"].decode(), link)
+        self.assertNotIn(b"private", advertisement.properties.values())
+        self.assertEqual(config["peers"], [{"device": link, "sender": "private", "relay": "https://example.invalid"}])
+        save.assert_called_once_with(config)
+
+    @patch.object(device, "relay_post", side_effect=[{}, {"phase": "expired"}])
+    @patch.object(device.google.auth, "default", side_effect=AssertionError("unexpected Google login"))
+    def test_shared_sender_only_transmits_a_wake_and_stops_after_removal(self, _credentials, relay):
+        send = device.sender({"peers": []})
+        peer = {"relay": "https://example.invalid", "device": "ab" * 16, "sender": "test"}
+        send(peer)
+        relay.assert_called_once_with(peer["relay"], "links/" + peer["device"] + "/wake", peer["sender"])
+        with self.assertRaises(device.PairingRemoved):
+            send(peer)
+
     @patch.object(device, "AuthorizedSession")
     @patch.object(device.google.auth, "default", return_value=(object(), None))
     def test_rotation_falls_back_to_the_same_pairs_private_topic(self, _credentials, session):

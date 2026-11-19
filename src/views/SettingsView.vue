@@ -35,6 +35,7 @@ const DiagnosticsPane = defineAsyncComponent(() => import('@/components/settings
 const InlineImageBackfill = defineAsyncComponent(() => import('@/components/settings/InlineImageBackfill.vue'));
 const KeybindingEditor = defineAsyncComponent(() => import('@/components/settings/KeybindingEditor.vue'));
 const LabsSettings = defineAsyncComponent(() => import('@/components/settings/LabsSettings.vue'));
+const RelayPush = defineAsyncComponent(() => import('@/components/settings/RelayPush.vue'));
 const PushDevices = defineAsyncComponent(() => import('@/components/settings/PushDevices.vue'));
 const MobileSyncSettings = defineAsyncComponent(() => import('@/components/settings/MobileSyncSettings.vue'));
 const NotificationSettings = defineAsyncComponent(() => import('@/components/settings/NotificationSettings.vue'));
@@ -58,7 +59,8 @@ const router = useRouter();
 const { t } = useI18n();
 const ui = useUiStore();
 const accounts = useAccountsStore();
-const { groups, labels, mobileSyncPlatform, trayAvailable } = useSettingsSections();
+const sharedPushAvailable = ref<boolean | null>(null);
+const { groups, labels, mobileSyncPlatform, relayPlatform, trayAvailable } = useSettingsSections();
 const { query: filterQuery, filtering, results: filterResults } = useSettingsFilter();
 const filterInput = ref<InstanceType<typeof SearchInput> | null>(null);
 /** The phone overview filters like the desktop sidebar: one ranked list while typing. */
@@ -217,7 +219,14 @@ onBeforeUnmount(() => unregisterFilter?.());
         <TemplatesEditor v-else-if="activeSection === 'templates'" />
         <template v-else-if="activeSection === 'notifications'">
           <NotificationSettings />
-          <section v-if="mobileSyncPlatform" class="settings-subsection"><PushDevices /></section>
+          <section v-if="relayPlatform" v-show="sharedPushAvailable !== false" class="settings-subsection">
+            <RelayPush :desktop="relayPlatform !== 'android'" @availability="sharedPushAvailable = $event" />
+          </section>
+          <section v-if="mobileSyncPlatform && sharedPushAvailable === false" class="settings-subsection"><PushDevices /></section>
+          <details v-else-if="mobileSyncPlatform && sharedPushAvailable" class="settings-subsection own-push">
+            <summary>{{ t('settings.relay.advanced') }}</summary>
+            <PushDevices />
+          </details>
           <section v-if="mobileSyncPlatform" class="settings-subsection"><MobileSyncSettings /></section>
         </template>
         <NotificationSettings v-else-if="activeSection === 'composing'" section="sending" />
@@ -445,6 +454,15 @@ onBeforeUnmount(() => unregisterFilter?.());
 .settings-view__content > :not(.settings-subsection) + .settings-subsection {
   margin-top: var(--space-2xl);
 }
+
+.own-push > summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--weight-semibold);
+  padding-block: var(--space-md);
+}
+.own-push[open] > summary { margin-bottom: var(--space-sm); }
 
 .settings-subsection__part {
   margin-top: var(--space-2xl);

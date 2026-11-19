@@ -118,7 +118,7 @@ the signed-build invocation above.
 ## Signing & Notarization (one-time setup)
 
 The macOS bundle enables Hardened Runtime and uses `src-tauri/Entitlements.plist`.
-Wasmtime 36 maps compiled plugin code with `mprotect`, so it needs
+Wasmtime 48 maps compiled plugin code with `mprotect`, so it needs
 `com.apple.security.cs.allow-unsigned-executable-memory`. `allow-jit` alone
 does not cover that allocation path. CI signs the existing WASM integration
 test with these entitlements and runs a real plugin under Hardened Runtime.

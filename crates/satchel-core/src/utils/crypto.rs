@@ -28,6 +28,13 @@ impl<'a> SecretContext<'a> {
             row: account_id,
         }
     }
+    pub fn push_link(id: &'a str) -> Self {
+        Self {
+            column: "desktop_push_links.credential",
+            row: id,
+        }
+    }
+
     // Key material is bound to its column only: re-import replaces key rows
     // under new ids, and S/MIME rows get theirs inside the repository.
     pub fn pgp_armored_key() -> Self {

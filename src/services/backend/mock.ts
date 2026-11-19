@@ -1645,7 +1645,46 @@ function mergeJobById(id: unknown): MockMergeJob {
 
 const mockPushDevices: { id: string; name: string; state: string }[] = [];
 let pushScanStarted = 0;
+let relayPhase = 'idle';
+let relayChanged = 0;
+const relayPeers = new Map<string, string>();
+const setupOffers = new Map<string, 'waiting' | 'searching' | 'sent'>();
 const handlers: Record<string, Handler> = {
+  account_transfer: ({ action, session }) => {
+    const id = String(session);
+    if (action === 'receive') setupOffers.set(id, 'waiting');
+    if (action === 'discover') setupOffers.set(id, 'searching');
+    if (action === 'send') setupOffers.set(id, 'sent');
+    if (action === 'cancel') setupOffers.delete(id);
+    const phase = setupOffers.get(id) ?? 'expired';
+    return { phase, code: phase === 'waiting' ? '105283' : null,
+      address: phase === 'waiting' ? '192.0.2.1:4321' : null,
+      nearby: phase === 'searching' ? [{ name: /Android/.test(navigator.userAgent) ? 'Mac mini' : 'Pixel', address: '192.0.2.1:4321' }] : [],
+      emails: [], sign_in: [], created: 0 };
+  },
+  background_sync_status: () => ({ enabled: true, running: true, batteryOptimizationExempt: true }),
+  open_background_sync_settings: () => undefined,
+  relay_push: ({ action, id }) => {
+    const phone = /Android/.test(navigator.userAgent);
+    const peer = phone ? 'Mac mini' : 'Pixel';
+    if (action === 'start') relayPhase = phone ? 'searching' : 'visible';
+    if (action === 'select') relayPhase = 'requested';
+    if (action === 'approve') relayPhase = 'verifying';
+    if (action === 'cancel') relayPhase = 'idle';
+    if (action === 'remove') relayPeers.delete(String(id));
+    if (action !== 'status') relayChanged = Date.now();
+    if (Date.now() - relayChanged > 3500 && action === 'status') {
+      if (relayPhase === 'visible') relayPhase = 'requested';
+      else if (relayPhase === 'verifying' || (phone && relayPhase === 'requested')) {
+        relayPeers.set('example', peer);
+        relayPhase = 'idle';
+      }
+    }
+    const device = { id: 'example', name: peer, state: 'visible' };
+    return { phase: relayPhase, devices: Array.from(relayPeers, ([id, name]) => ({ id, name, state: 'verified' })),
+      nearby: relayPhase === 'searching' ? [device] : [], code: relayPhase === 'requested' ? '325091' : null,
+      request: 'example', name: peer };
+  },
   push_devices: ({ action, id }) => {
     if (action === 'start') pushScanStarted = Date.now();
     if (action === 'cancel') pushScanStarted = 0;

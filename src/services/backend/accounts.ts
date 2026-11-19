@@ -1,3 +1,5 @@
+import type { TransferAction } from './generated/app/commands/account_transfer/TransferAction';
+import type { TransferStatus } from './generated/app/commands/account_transfer/TransferStatus';
 import type { ProjectedWireFields, RefinedWireFields } from './wireTypes';
 import type { OAuthStatus as WireOAuthStatus } from './generated/app/commands/oauth/OAuthStatus';
 import type { StartOAuthResponse as WireStartOAuthResponse } from './generated/app/commands/oauth/StartOAuthResponse';
@@ -298,4 +300,12 @@ export type BackendLocalOnlyWorkflowAccount = import('./generated/app/commands/a
  */
 export function backendListLocalOnlyWorkflowAccounts(): Promise<BackendLocalOnlyWorkflowAccount[]> {
   return invoke('list_local_only_workflow_accounts');
+}
+
+export async function backendAccountTransfer(
+  action: TransferAction,
+  session: string,
+  selection?: { address: string; code: string; accounts: string[] },
+): Promise<TransferStatus> {
+  return invoke('account_transfer', { action, session, ...selection });
 }

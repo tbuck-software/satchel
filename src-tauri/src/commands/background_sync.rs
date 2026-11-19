@@ -15,7 +15,7 @@ use crate::commands::error::CommandError;
 use crate::commands::error::CommandResult;
 
 #[cfg(target_os = "android")]
-struct AndroidBackgroundSync<R: Runtime>(PluginHandle<R>);
+pub(super) struct AndroidBackgroundSync<R: Runtime>(pub(super) PluginHandle<R>);
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]

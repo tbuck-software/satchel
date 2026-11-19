@@ -1,3 +1,4 @@
+pub mod account_transfer;
 pub mod accounts;
 pub mod aliases;
 pub mod app_update;
@@ -83,3 +84,5 @@ pub mod workflow;
 // Export mobile fallback DTOs during desktop contract checks too.
 #[cfg(any(mobile, all(test, feature = "ipc-types")))]
 pub mod tray_mobile_dto;
+
+pub mod relay_push;

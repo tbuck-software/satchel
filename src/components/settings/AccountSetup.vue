@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue';
+import { computed, defineAsyncComponent, ref, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useAccountsStore } from '@/stores/accounts';
 import { useUiStore } from '@/stores/ui';
@@ -13,6 +13,8 @@ import { providerLabel, syncErrorText, syncProgressLabel, syncStatusLabel } from
 import AccountDetail from './AccountDetail.vue';
 import AccountAvatar from '@/components/common/AccountAvatar.vue';
 import AppButton from '@/components/ui/AppButton.vue';
+import ModalShell from '@/components/ui/ModalShell.vue';
+import { useDismissableOnTop } from '@/composables/useDismissable';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import EmptyState from '@/components/ui/EmptyState.vue';
@@ -23,6 +25,10 @@ import SectionHeading from '@/components/ui/SectionHeading.vue';
  * account for everything that can be changed about it. The list used to hold
  * every option of every account at once, with no room for renaming one.
  */
+const AccountTransfer = defineAsyncComponent(() => import('./AccountTransfer.vue'));
+const sending = ref(false);
+function closeTransfer() { sending.value = false; }
+useDismissableOnTop(() => sending.value, closeTransfer);
 const { locale, t } = useI18n();
 const accounts = useAccountsStore();
 const ui = useUiStore();
@@ -67,6 +73,11 @@ function statusOf(account: Account): { tone: Tone; text: string } {
   <AccountDetail v-if="openAccount" :key="openAccount.id" :account-id="openAccount.id" />
 
   <div v-else class="accounts">
+    <Teleport to="body">
+      <ModalShell v-if="sending" compact width="460px" height="auto" :label="t('transfer.send')" @dismiss="closeTransfer">
+        <AccountTransfer class="accounts__transfer-panel" :receive="false" @close="closeTransfer" />
+      </ModalShell>
+    </Teleport>
     <header class="accounts__header">
       <div class="accounts__heading">
         <h3 class="settings-page-title">{{ $t('settings.sections.accounts.label') }}</h3>
@@ -116,11 +127,14 @@ function statusOf(account: Account): { tone: Tone; text: string } {
           </CardButton>
         </li>
       </ul>
+      <div><AppButton class="accounts__transfer" variant="secondary" @click="sending = true">{{ $t('transfer.send') }}</AppButton></div>
     </section>
   </div>
 </template>
 
 <style scoped>
+.accounts__transfer-panel { padding: var(--space-xl); }
+.accounts__transfer { white-space: normal; max-width: 100%; }
 .accounts {
   display: grid;
   gap: var(--space-xl);

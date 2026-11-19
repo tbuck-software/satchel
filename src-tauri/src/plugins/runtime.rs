@@ -1261,8 +1261,7 @@ Hallo Alex,\n- - nicht einrücken\nbis bald\n\
         std::fs::write(&path, b"replacement bytes").unwrap();
         let error = runtime
             .load_component(&artifact)
-            .err()
-            .expect("changed component");
+            .expect_err("changed component");
         assert!(error.contains("changed since verification"));
 
         std::fs::write(path, checked).unwrap();

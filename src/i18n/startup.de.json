@@ -125,6 +125,7 @@
       "accountPasswordUnavailable": "Für dieses Konto ist kein wiederverwendbares Passwort gespeichert.",
       "accountPersistenceFailed": "Kontodaten sind momentan nicht verfügbar. Bitte versuche es erneut.",
       "accountSyncFailed": "Die Synchronisierung für {account} ist fehlgeschlagen: {message}",
+      "accountTransfer": "Die Übertragung ist fehlgeschlagen. Prüfe die Netzwerkverbindung und starte auf beiden Geräten mit einem neuen Code.",
       "accountVisibilityInvalid": "Wähle gültige Wochentage und ein Zeitfenster, das am selben Tag später endet.",
       "aliasPersistenceFailed": "Aliase sind momentan nicht verfügbar. Bitte versuche es erneut.",
       "asideFolderCreatedRefreshFailed": "Der Aside-Ordner für {account} wurde angelegt, aber die Ordnerliste konnte noch nicht aktualisiert werden: {message}",
@@ -448,6 +449,7 @@
       "topicNoteContentEmpty": "Gib einen Notizinhalt ein.",
       "topicPersistenceFailed": "Das Thema konnte nicht gespeichert werden. Bitte versuche es erneut.",
       "topicStatusInvalid": "Der Themenstatus ist ungültig.",
+      "transferSignIn": "Melde dich auf diesem Gerät bei diesem Konto an.",
       "translation": {
         "consentRequired": "Mails dieses Kontos dürfen noch nicht zur Übersetzung gesendet werden.",
         "credentialsUnavailable": "Der Schlüsselbund ist gesperrt, der API-Schlüssel kann nicht gelesen oder gespeichert werden.",
@@ -1088,6 +1090,10 @@
     },
     "pushDevices": {
       "failed": "Verbindung fehlgeschlagen. Prüfe das Netzwerk und die Meldung auf dem Rechner und versuche es erneut."
+    },
+    "relay": {
+      "failed": "Verbindung fehlgeschlagen. Prüfe deine Netzwerkverbindung und versuche es erneut.",
+      "unavailable": "Der gemeinsame Push-Dienst ist in dieser Version noch nicht verfügbar."
     },
     "rules": {
       "empty": "Noch keine Regeln angelegt.",

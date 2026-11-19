@@ -125,6 +125,7 @@
       "accountPasswordUnavailable": "This account has no password that can be reused.",
       "accountPersistenceFailed": "Account data is currently unavailable. Please try again.",
       "accountSyncFailed": "Sync for {account} failed: {message}",
+      "accountTransfer": "The transfer failed. Check the network and start again on both devices with a new code.",
       "accountVisibilityInvalid": "Choose valid weekdays and a time window that ends later on the same day.",
       "aliasPersistenceFailed": "Aliases are currently unavailable. Please try again.",
       "asideFolderCreatedRefreshFailed": "The Aside folder for {account} was created, but the folder list could not be refreshed yet: {message}",
@@ -448,6 +449,7 @@
       "topicNoteContentEmpty": "Enter note content.",
       "topicPersistenceFailed": "The topic could not be saved. Please try again.",
       "topicStatusInvalid": "The topic status is invalid.",
+      "transferSignIn": "Sign in to this account on this device.",
       "translation": {
         "consentRequired": "Mail from this account may not be sent for translation yet.",
         "credentialsUnavailable": "The key store is locked, so the API key cannot be read or saved.",
@@ -1088,6 +1090,10 @@
     },
     "pushDevices": {
       "failed": "Could not connect. Check the network and the message on the computer, then try again."
+    },
+    "relay": {
+      "failed": "Could not connect. Check your network connection and try again.",
+      "unavailable": "The shared push service is unavailable in this build."
     },
     "rules": {
       "empty": "No rules yet.",

@@ -32,6 +32,7 @@ rand = "0.8"
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 ring = "0.17"
+spake2 = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 hmac = "0.13"
@@ -62,9 +63,11 @@ hickory-resolver = "0.26"
 # for a feature the mobile UI does not expose. TLS roots and the keyring moved
 # to `satchel-core` with the modules that use them.
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
-wasmtime = { version = "36.0.20", features = ["component-model"] }
-wasmtime-wasi = "36.0.20"
-tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
+mdns-sd = "0.17.1"
+whoami = "1.6"
+wasmtime = { version = "48.0.9", features = ["component-model"] }
+wasmtime-wasi = "48.0.9"
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-autostart = "2"
 # Releases use raw NSIS/AppImage payloads. Legacy ZIP support adds an unused,
 # vulnerable ZIP extractor; macOS tar support is unconditional in the plugin.

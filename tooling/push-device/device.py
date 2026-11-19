@@ -266,7 +266,7 @@ def watch_profile(path, signal):
         observer.join()
 
 
-def sender(config):
+def private_sender(config):
     creds, _ = google.auth.default(scopes=SCOPES)
     session = AuthorizedSession(creds)
     url = f"https://fcm.googleapis.com/v1/projects/{config['firebase']['project']}/messages:send"
@@ -289,6 +289,89 @@ def sender(config):
         if not response.ok:
             raise RuntimeError(f"FCM rejected the wake ({response.status_code}).")
     return send
+
+
+def relay_post(origin, path, secret=None, payload=None):
+    address = urlsplit(origin)
+    if address.scheme != "https" or not address.hostname or address.username or address.password or address.query or address.fragment:
+        raise ValueError("Use the HTTPS address of the push relay.")
+    headers = {"Authorization": "Bearer " + secret} if secret else {}
+    response = requests.post(origin.rstrip("/") + "/v1/" + path, json=payload or {}, headers=headers,
+                             allow_redirects=False, timeout=20)
+    if response.status_code == 410:
+        return {"phase": "expired"}
+    if not 200 <= response.status_code < 300:
+        raise RuntimeError(f"The relay could not complete the request ({response.status_code}).")
+    return response.json()
+
+
+class PairingRemoved(RuntimeError):
+    pass
+
+
+def sender(config):
+    direct = None
+
+    def send(peer):
+        nonlocal direct
+        if "relay" in peer:
+            response = relay_post(peer["relay"], "links/" + peer["device"] + "/wake", peer["sender"])
+            if response.get("phase") == "expired":
+                raise PairingRemoved("This pairing has been removed.")
+        else:
+            if direct is None:
+                direct = private_sender(config)
+            direct(peer)
+    return send
+
+
+def show_on_network(config, origin):
+    service = "_satchel-pair._tcp.local."
+    name = socket.gethostname().split(".")[0][:50]
+    addresses = [socket.inet_aton(ip.ip) for adapter in ifaddr.get_adapters() for ip in adapter.ips
+                 if ip.is_IPv4 and not ipaddress.ip_address(ip.ip).is_loopback]
+    if not addresses:
+        raise ValueError("Connect this computer to the phone's network.")
+    offer = relay_post(origin, "offers")
+    device, secret = offer["id"], offer["sender"]
+    if not re.fullmatch("[0-9a-f]{32}", device):
+        raise ValueError("Invalid pairing response.")
+    path = "links/" + device + "/"
+    saved = False
+    try:
+        with socket.create_server(("", 0)) as listener, Zeroconf(ip_version=IPVersion.V4Only) as dns:
+            info = ServiceInfo(service, device + "." + service, addresses=addresses, port=listener.getsockname()[1],
+                               properties={"id": device, "name": name}, server=f"satchel-{device}.local.")
+            dns.register_service(info)
+            print(f"{name} is visible for five minutes. In Satchel on Android choose Settings → Notifications → Find computer.", flush=True)
+            deadline = time.monotonic() + 300
+            approved = False
+            while time.monotonic() < deadline:
+                status = relay_post(origin, path + "status", secret)
+                if status["phase"] == "requested" and not approved:
+                    code = status["code"]
+                    if not re.fullmatch("[0-9]{6}", code):
+                        raise ValueError("Invalid pairing code.")
+                    if input(f"Does the phone show {code[:3]} {code[3:]}? [y/N] ").strip().lower() != "y":
+                        raise ValueError("Pairing cancelled.")
+                    relay_post(origin, path + "approve", secret, {"request": status["request"]})
+                    approved = True
+                elif status["phase"] == "active":
+                    config["peers"].append({"device": device, "sender": secret, "relay": origin})
+                    save(config)
+                    saved = True
+                    print("The phone received the test signal. Pairing complete.")
+                    return
+                elif status["phase"] == "expired":
+                    break
+                time.sleep(2)
+            raise ValueError("Pairing timed out. Make this computer visible again.")
+    finally:
+        if not saved:
+            try:
+                relay_post(origin, path + "remove", secret)
+            except (RuntimeError, requests.RequestException):
+                pass  # Unapproved offers expire on the relay.
 
 
 def frame(stream, obj):
@@ -373,7 +456,7 @@ def pair(config, secret, discover=None):
                                 config["firebase"] = {k: public[k] for k in ("project", "sender", "app", "apiKey")}
                             nonce = str(req.get("nonce", ""))[:64]
                             known = [b64(hmac.digest(decode(p["key"]), ("reconnect:" + nonce).encode(), "sha256"))
-                                     for p in config["peers"]]
+                                     for p in config["peers"] if "key" in p]
                             frame(stream, {"firebase": config["firebase"], "known": known})
                         elif req["op"] == "pair":
                             peer = {k: req[k] for k in ("device", "key", "token")}
@@ -382,7 +465,7 @@ def pair(config, secret, discover=None):
                                 continue
                             send(peer)
                             config["peers"] = [p for p in config["peers"] if
-                                               p["device"] != peer["device"] and p["token"] != peer["token"]]
+                                               p["device"] != peer["device"] and p.get("token") != peer["token"]]
                             config["peers"].append(peer)
                             save(config)
                             frame(stream, {"ok": True})
@@ -429,6 +512,8 @@ def run(config):
                         send = sender(config)
                     send(peer)
                     break
+                except PairingRemoved:
+                    return
                 except (requests.RequestException, RuntimeError, google.auth.exceptions.GoogleAuthError) as err:
                     if backoff == 2:
                         print(f"Wake delivery failed ({type(err).__name__}); retrying.", file=sys.stderr)
@@ -487,7 +572,7 @@ def install_service():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["pair", "run", "test"])
+    parser.add_argument("action", choices=["pair", "visible", "run", "test"])
     parser.add_argument("secret", nargs="?")
     parser.add_argument("--project")
     parser.add_argument("--discover")
@@ -495,7 +580,7 @@ def main():
     args = parser.parse_args()
     os.umask(0o077)
     config = json.loads(CONFIG.read_text()) if CONFIG.exists() else None
-    if args.action == "pair":
+    if args.action in ("pair", "visible"):
         import fcntl
         ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
         # A second installer must not overwrite the first installer's new pairing.
@@ -505,25 +590,36 @@ def main():
         except BlockingIOError:
             parser.error("Another pairing is in progress. Stop the previous command with Ctrl+C and try again.")
         config = json.loads(CONFIG.read_text()) if CONFIG.exists() else None
-        if config is None:
-            public = {"project": args.project} if args.project else setup_firebase()
-            config = {"firebase": public, "source": mail_source(), "peers": []}
-            save(config)
-        if config.get("credential_path"):
-            os.environ.setdefault("GOOGLE_APPLICATION_CREDENTIALS", config["credential_path"])
-        try:
-            google.auth.default(scopes=SCOPES)
-        except google.auth.exceptions.DefaultCredentialsError:
-            if shutil.which("gcloud"):
-                subprocess.run(["gcloud", "auth", "application-default", "login"], check=True)
-            else:
-                path = Path(input("Path to this device's Google sender credential: ").strip()).expanduser()
-                config["credential_path"] = str(path.resolve(strict=True))
-                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = config["credential_path"]
-            save(config)
-        if args.project and config["firebase"]["project"] != args.project:
-            raise ValueError("This device and the phone are configured for different Firebase projects.")
-        pair(config, args.secret or "", args.discover)
+        if args.action == "visible":
+            origin_file = Path(__file__).resolve().parent.parent / "push-relay" / "origin.txt"
+            origin = os.environ.get("SATCHEL_PUSH_RELAY_URL") or (
+                origin_file.read_text().strip() if origin_file.is_file() else "")
+            if not origin:
+                parser.error("The shared relay has not been configured for this installation.")
+            if config is None:
+                config = {"source": mail_source(), "peers": []}
+            show_on_network(config, origin)
+        else:
+            if config is None:
+                config = {"source": mail_source(), "peers": []}
+            if "firebase" not in config:
+                config["firebase"] = {"project": args.project} if args.project else setup_firebase()
+                save(config)
+            if config.get("credential_path"):
+                os.environ.setdefault("GOOGLE_APPLICATION_CREDENTIALS", config["credential_path"])
+            try:
+                google.auth.default(scopes=SCOPES)
+            except google.auth.exceptions.DefaultCredentialsError:
+                if shutil.which("gcloud"):
+                    subprocess.run(["gcloud", "auth", "application-default", "login"], check=True)
+                else:
+                    path = Path(input("Path to this device's Google sender credential: ").strip()).expanduser()
+                    config["credential_path"] = str(path.resolve(strict=True))
+                    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = config["credential_path"]
+                save(config)
+            if args.project and config["firebase"]["project"] != args.project:
+                raise ValueError("This device and the phone are configured for different Firebase projects.")
+            pair(config, args.secret or "", args.discover)
         if not args.pair_only:
             install_service()
     elif config is None:

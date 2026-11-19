@@ -124,6 +124,7 @@ pub fn run() {
         // Paste without formatting reads the clipboard natively: WKWebView's
         // `navigator.clipboard.readText()` asks with a "Paste" popup each time.
         .plugin(tauri_plugin_clipboard_manager::init())
+        .manage(commands::account_transfer::Transfers::default())
         .manage(commands::app_update::UpdateState::default())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -206,6 +207,9 @@ pub fn run() {
             let read_pool = pool.read;
             let checkpoint_pool = pool.checkpoint;
             let pool = pool.write;
+            #[cfg(desktop)]
+            app.manage(commands::relay_push::Desktop::new(pool.clone()));
+
             if let Ok(grants) =
                 tauri::async_runtime::block_on(commands::plugins::load_plugin_grants(&pool))
             {
@@ -698,6 +702,7 @@ pub fn run() {
             commands::app_update::app_update_progress,
             commands::app_update::install_app_update,
             commands::app_update::acknowledge_app_update_flush,
+            commands::account_transfer::account_transfer,
             commands::accounts::list_accounts,
             commands::accounts::get_account_visibility,
             commands::accounts::list_account_quotas,
@@ -978,6 +983,7 @@ pub fn run() {
             commands::background_sync::set_background_sync,
             commands::background_sync::background_sync_status,
             commands::background_sync::push_devices,
+            commands::relay_push::relay_push,
             commands::background_sync::open_background_sync_settings,
             commands::message_body::load_message_body,
             commands::notification_navigation::take_pending_notification_thread,

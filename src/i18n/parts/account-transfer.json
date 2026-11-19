@@ -1,0 +1,74 @@
+{
+  "en": {
+    "transfer": {
+      "receive": "Set up from another device",
+      "receiveOther": "Use accounts from another device",
+      "sendTitle": "Transfer accounts",
+      "send": "Transfer accounts to another device",
+      "receiverHelp": "On your other device, open Satchel → Settings → Accounts → Transfer accounts to another device. Enter this code there.",
+      "expiry": "Keep Satchel open on both devices and connect them to the same network. The code is valid for five minutes.",
+      "manual": "Connect by address",
+      "address": "Address shown on the new device",
+      "senderHelp": "On the new device, open Satchel and choose “Use accounts from another device” during setup. Connect both devices to the same network.",
+      "device": "New device",
+      "chooseDevice": "Select a device",
+      "searching": "Looking for the new device…",
+      "code": "Code from the new device",
+      "accounts": "Which accounts do you want to transfer?",
+      "passwordHelp": "IMAP and POP3 include their saved passwords. For Google and Microsoft, sign in on the new device.",
+      "connecting": "Connecting the devices…",
+      "review": "Add these accounts to this device? Existing accounts will be skipped.",
+      "sent": "The accounts are ready on the new device. Choose “Add accounts” there to finish.",
+      "done": "No new accounts added. | One account added. | {count} accounts added.",
+      "skipped": "One account was already on this device. | {count} accounts were already on this device.",
+      "signIn": "Sign in for {email}",
+      "expired": "This code has expired. Start again to get a new one.",
+      "accept": "Add accounts",
+      "submit": "Transfer",
+      "retry": "Start again",
+      "finish": "Done"
+    },
+    "backend": {
+      "errors": {
+        "accountTransfer": "The transfer failed. Check the network and start again on both devices with a new code.",
+        "transferSignIn": "Sign in to this account on this device."
+      }
+    }
+  },
+  "de": {
+    "transfer": {
+      "receive": "Konten übernehmen",
+      "receiveOther": "Konten von einem anderen Gerät übernehmen",
+      "sendTitle": "Konten übertragen",
+      "send": "Konten auf ein anderes Gerät übertragen",
+      "receiverHelp": "Öffne auf deinem bisherigen Gerät Satchel → Einstellungen → Konten → Konten auf ein anderes Gerät übertragen. Gib dort diesen Code ein.",
+      "expiry": "Lass Satchel auf beiden Geräten geöffnet. Beide müssen im selben lokalen Netzwerk sein. Der Code gilt fünf Minuten.",
+      "manual": "Über Adresse verbinden",
+      "address": "Adresse vom neuen Gerät",
+      "senderHelp": "Wähle auf dem neuen Gerät bei der Einrichtung „Konten von einem anderen Gerät übernehmen“. Verbinde beide Geräte mit demselben Netzwerk.",
+      "device": "Neues Gerät",
+      "chooseDevice": "Gerät auswählen",
+      "searching": "Neues Gerät wird gesucht …",
+      "code": "Code vom neuen Gerät",
+      "accounts": "Welche Konten möchtest du übertragen?",
+      "passwordHelp": "Bei IMAP und POP3 werden die gespeicherten Passwörter übertragen. Bei Google und Microsoft meldest du dich auf dem neuen Gerät an.",
+      "connecting": "Geräte werden verbunden …",
+      "review": "Diese Konten auf diesem Gerät einrichten? Bereits vorhandene Konten werden übersprungen.",
+      "sent": "Die Konten sind auf dem neuen Gerät angekommen. Tippe dort auf „Übernehmen“.",
+      "done": "Keine neuen Konten hinzugefügt. | Ein Konto hinzugefügt. | {count} Konten hinzugefügt.",
+      "skipped": "Ein Konto war bereits auf diesem Gerät eingerichtet. | {count} Konten waren bereits auf diesem Gerät eingerichtet.",
+      "signIn": "Für {email} anmelden",
+      "expired": "Der Code ist abgelaufen. Starte erneut, um einen neuen Code zu bekommen.",
+      "accept": "Übernehmen",
+      "submit": "Übertragen",
+      "retry": "Erneut starten",
+      "finish": "Fertig"
+    },
+    "backend": {
+      "errors": {
+        "accountTransfer": "Die Übertragung ist fehlgeschlagen. Prüfe die Netzwerkverbindung und starte auf beiden Geräten mit einem neuen Code.",
+        "transferSignIn": "Melde dich auf diesem Gerät bei diesem Konto an."
+      }
+    }
+  }
+}
