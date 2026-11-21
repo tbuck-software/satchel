@@ -14,7 +14,7 @@
 //! The easiest way of creating a message, which uses a plain text body.
 //!
 //! ```rust
-//! use lettre::message::{header::ContentType, Message};
+//! use lettre::message::{Message, header::ContentType};
 //!
 //! # use std::error::Error;
 //! # fn main() -> Result<(), Box<dyn Error>> {
@@ -58,7 +58,7 @@
 //!
 //! ```rust
 //! # use std::error::Error;
-//! use lettre::message::{header, Message, MultiPart, SinglePart};
+//! use lettre::message::{Message, MultiPart, SinglePart, header};
 //!
 //! # fn main() -> Result<(), Box<dyn Error>> {
 //! let m = Message::builder()
@@ -110,7 +110,7 @@
 //! # use std::error::Error;
 //! use std::fs;
 //!
-//! use lettre::message::{header, Attachment, Body, Message, MultiPart, SinglePart};
+//! use lettre::message::{Attachment, Body, Message, MultiPart, SinglePart, header};
 //!
 //! # fn main() -> Result<(), Box<dyn Error>> {
 //! let image = fs::read("docs/lettre.png")?;
@@ -216,9 +216,9 @@ mod mailbox;
 mod mimebody;
 
 use crate::{
+    Error as EmailError,
     address::Envelope,
     message::header::{ContentTransferEncoding, Header, HeaderValue, Headers, MailboxesHeader},
-    Error as EmailError,
 };
 
 const DEFAULT_MESSAGE_ID_DOMAIN: &str = "localhost";
@@ -413,8 +413,8 @@ impl MessageBuilder {
         // Check for missing required headers
         // https://tools.ietf.org/html/rfc5322#section-3.6
 
-        // Insert Date if missing
-        let mut res = if self.headers.get::<header::Date>().is_none() {
+        // Insert Date if missing (raw presence: Date::parse only accepts +0000/GMT, #1118)
+        let mut res = if self.headers.get_raw(&header::Date::name()).is_none() {
             self.date_now()
         } else {
             self
@@ -543,11 +543,11 @@ impl Message {
     /// Example:
     /// ```rust
     /// use lettre::{
+    ///     Message,
     ///     message::{
     ///         dkim::{DkimConfig, DkimSigningAlgorithm, DkimSigningKey},
     ///         header::ContentType,
     ///     },
-    ///     Message,
     /// };
     ///
     /// let mut message = Message::builder()
@@ -635,31 +635,37 @@ mod test {
 
     use pretty_assertions::assert_eq;
 
-    use super::{header, mailbox::Mailbox, make_message_id, Message, MultiPart, SinglePart};
+    use super::{Message, MultiPart, SinglePart, header, mailbox::Mailbox, make_message_id};
 
     #[test]
     fn email_missing_originator() {
-        assert!(Message::builder()
-            .body(String::from("Happy new year!"))
-            .is_err());
+        assert!(
+            Message::builder()
+                .body(String::from("Happy new year!"))
+                .is_err()
+        );
     }
 
     #[test]
     fn email_minimal_message() {
-        assert!(Message::builder()
-            .from("NoBody <nobody@domain.tld>".parse().unwrap())
-            .to("NoBody <nobody@domain.tld>".parse().unwrap())
-            .body(String::from("Happy new year!"))
-            .is_ok());
+        assert!(
+            Message::builder()
+                .from("NoBody <nobody@domain.tld>".parse().unwrap())
+                .to("NoBody <nobody@domain.tld>".parse().unwrap())
+                .body(String::from("Happy new year!"))
+                .is_ok()
+        );
     }
 
     #[test]
     fn email_missing_sender() {
-        assert!(Message::builder()
-            .from("NoBody <nobody@domain.tld>".parse().unwrap())
-            .from("AnyBody <anybody@domain.tld>".parse().unwrap())
-            .body(String::from("Happy new year!"))
-            .is_err());
+        assert!(
+            Message::builder()
+                .from("NoBody <nobody@domain.tld>".parse().unwrap())
+                .from("AnyBody <anybody@domain.tld>".parse().unwrap())
+                .body(String::from("Happy new year!"))
+                .is_err()
+        );
     }
 
     #[test]
@@ -737,6 +743,40 @@ mod test {
                 "Happy new year!"
             )
         );
+    }
+
+    #[test]
+    fn email_raw_date_with_offset_is_kept() {
+        // https://github.com/lettre/lettre/issues/1118
+        let email = Message::builder()
+            .raw_header(header::HeaderValue::new(
+                header::HeaderName::new_from_ascii_str("Date"),
+                "Wed, 01 Jan 2025 00:00:00 +0800".to_owned(),
+            ))
+            .from("NoBody <nobody@domain.tld>".parse().unwrap())
+            .to("NoBody <nobody@domain.tld>".parse().unwrap())
+            .body(String::from("Happy new year!"))
+            .unwrap();
+
+        let raw = String::from_utf8(email.formatted()).unwrap();
+        assert!(raw.contains("Date: Wed, 01 Jan 2025 00:00:00 +0800\r\n"));
+        assert_eq!(raw.matches("Date: ").count(), 1);
+    }
+
+    #[test]
+    fn email_missing_date_is_inserted() {
+        let email = Message::builder()
+            .from("NoBody <nobody@domain.tld>".parse().unwrap())
+            .to("NoBody <nobody@domain.tld>".parse().unwrap())
+            .body(String::from("Happy new year!"))
+            .unwrap();
+
+        let raw = String::from_utf8(email.formatted()).unwrap();
+        let date_line = raw
+            .lines()
+            .find(|line| line.starts_with("Date: "))
+            .expect("Date header must be auto-inserted when missing");
+        assert!(date_line.ends_with(" +0000"));
     }
 
     #[test]

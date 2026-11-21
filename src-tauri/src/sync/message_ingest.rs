@@ -69,8 +69,15 @@ pub(crate) async fn upsert_provider_message(
     events: Option<&Arc<EventBus>>,
 ) -> Result<(), String> {
     let cutoff: Option<String> = sqlx::query_scalar(
-        "SELECT COALESCE(NULLIF(last_sync_at, ''), NULLIF(created_at, '')) FROM accounts WHERE id = ?"
-    ).bind(account_id).fetch_optional(pool).await.map_err(|error| error.to_string())?.flatten();
+        "SELECT COALESCE(NULLIF(COALESCE(incoming_effects_cutoff, last_sync_at), ''),
+                         NULLIF(created_at, ''))
+         FROM accounts WHERE id = ?",
+    )
+    .bind(account_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| error.to_string())?
+    .flatten();
     upsert_provider_messages(
         app,
         pool,
@@ -683,16 +690,46 @@ async fn persist_provider_message(
         .and_then(|row| row.thread_id.as_deref())
         .filter(|value| !value.trim().is_empty())
         .map(str::to_string);
-    let thread_id = resolve_provider_thread_tx(
-        tx,
-        provider_kind,
-        account_id,
-        account_email,
-        folder_remote_id,
-        message,
-        prior_thread_id.as_deref(),
-    )
-    .await?;
+    // During UIDVALIDITY recovery the old message was removed, but its
+    // Message-ID can reattach to the old thread even after a restart.
+    let recovered_thread = if provider_kind.eq_ignore_ascii_case("imap") {
+        if let Some(header) = message
+            .message_id_header
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+        {
+            sqlx::query_scalar::<_, String>(
+                "SELECT thread_id FROM imap_generation_recovery
+                 WHERE folder_id = ? AND message_id_header = ?
+                 ORDER BY thread_id LIMIT 1",
+            )
+            .bind(folder_id)
+            .bind(header)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(|error| error.to_string())?
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let thread_id = match &recovered_thread {
+        Some(thread_id) => thread_id.clone(),
+        None => {
+            resolve_provider_thread_tx(
+                tx,
+                provider_kind,
+                account_id,
+                account_email,
+                folder_remote_id,
+                message,
+                prior_thread_id.as_deref(),
+            )
+            .await?
+        }
+    };
     let message_id_header = if message
         .message_id_header
         .as_deref()
@@ -713,7 +750,7 @@ async fn persist_provider_message(
 
     // Pre-check whether this message already exists locally — drives whether we
     // fire a "new mail" notification after the upsert succeeds.
-    let was_pre_existing = sqlx::query_scalar::<_, i64>(
+    let was_pre_existing = recovered_thread.is_some() || sqlx::query_scalar::<_, i64>(
         "SELECT 1 FROM messages WHERE id = ? OR (account_id = ? AND message_id_header = ? AND ? != '' AND ? NOT LIKE '%@%.satchel.local>') LIMIT 1"
     ).bind(&message_id).bind(account_id).bind(&message_id_header).bind(&message_id_header).bind(&message_id_header)
         .fetch_optional(&mut **tx).await.map_err(|error| error.to_string())?.is_some();
@@ -1067,6 +1104,17 @@ async fn persist_provider_message(
     .execute(&mut **tx)
     .await
     .map_err(|err| err.to_string())?;
+
+    if recovered_thread.is_some() {
+        sqlx::query(
+            "UPDATE notification_outbox SET state = 'dismissed', last_error = 'filter_imap_recovery'
+             WHERE message_id = ? AND state = 'pending'",
+        )
+        .bind(&message_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| error.to_string())?;
+    }
 
     // Stamp the generation from the fetched envelope, never from current folder state.
     sqlx::query("UPDATE messages SET remote_uidvalidity = ? WHERE id = ?")
@@ -2464,8 +2512,15 @@ mod tests {
         messages: &[MessageEnvelope],
     ) -> Vec<Result<(), String>> {
         let cutoff: Option<String> = sqlx::query_scalar(
-        "SELECT COALESCE(NULLIF(last_sync_at, ''), NULLIF(created_at, '')) FROM accounts WHERE id = ?"
-    ).bind("account").fetch_optional(pool).await.unwrap().flatten();
+            "SELECT COALESCE(NULLIF(COALESCE(incoming_effects_cutoff, last_sync_at), ''),
+                         NULLIF(created_at, ''))
+         FROM accounts WHERE id = ?",
+        )
+        .bind("account")
+        .fetch_optional(pool)
+        .await
+        .unwrap()
+        .flatten();
         super::upsert_provider_messages(
             None,
             pool,
@@ -2483,6 +2538,101 @@ mod tests {
         )
         .await
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn restored_catchup_stays_quiet_and_new_mail_runs_rules_and_notifies_after_restart() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("snapshot.db");
+        let profile = directory.path().join("profile");
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                sqlx::sqlite::SqliteConnectOptions::new()
+                    .filename(&source)
+                    .create_if_missing(true),
+            )
+            .await
+            .unwrap();
+        seed_ingest_pool(&pool).await;
+        let now = chrono::Utc::now();
+        let snapshot_cutoff = (now - chrono::TimeDelta::minutes(5)).to_rfc3339();
+        sqlx::query("UPDATE accounts SET last_sync_at = ?, incoming_effects_cutoff = ?")
+            .bind(&snapshot_cutoff)
+            .bind(&snapshot_cutoff)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(r#"INSERT INTO rules
+            (id, name, trigger_type, trigger_config, actions, is_active, priority, created_at, updated_at)
+            VALUES ('rule', 'Forward and tag', 'on_receive', '{"from_contains":"external"}',
+                    '["forward:books@example.test","add_tag:books"]', 1, 1, '', '')"#)
+            .execute(&pool).await.unwrap();
+        pool.close().await;
+
+        satchel_core::backup::stage_restore(&profile, &source, &[], None)
+            .await
+            .unwrap();
+        assert!(satchel_core::backup::apply_pending_restore(&profile, None)
+            .await
+            .unwrap());
+        // The first process exited after activating the restore and before syncing.
+        assert!(!satchel_core::backup::apply_pending_restore(&profile, None)
+            .await
+            .unwrap());
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                sqlx::sqlite::SqliteConnectOptions::new().filename(profile.join("satchel.db")),
+            )
+            .await
+            .unwrap();
+        let mut catchup = envelope("catchup");
+        catchup.from_address = "external@example.test".into();
+        catchup.subject = "Catchup".into();
+        catchup.is_read = false;
+        let new_date = (chrono::Utc::now() + chrono::TimeDelta::seconds(5)).to_rfc3339();
+        catchup.date_rfc3339 = new_date.clone();
+        catchup.received_at_rfc3339 = Some((now - chrono::TimeDelta::minutes(1)).to_rfc3339());
+        let mut fresh = catchup.clone();
+        fresh.remote_id = "fresh".into();
+        fresh.subject = "Fresh".into();
+        fresh.date_rfc3339 = snapshot_cutoff;
+        fresh.received_at_rfc3339 = Some(new_date);
+        assert!(ingest_many(&pool, &[catchup, fresh])
+            .await
+            .iter()
+            .all(Result::is_ok));
+
+        let effects: Vec<(String, String, i64, i64)> = sqlx::query_as(
+            "SELECT m.remote_id, n.state,
+                    (SELECT COUNT(*) FROM thread_tags WHERE thread_id = m.thread_id),
+                    (SELECT COUNT(*) FROM sync_queue WHERE action_type = 'rule_forward'
+                     AND json_extract(payload, '$.message_id') = m.id)
+             FROM messages m JOIN notification_outbox n ON n.message_id = m.id
+             ORDER BY m.remote_id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            effects,
+            [
+                ("catchup".into(), "dismissed".into(), 0, 0),
+                ("fresh".into(), "pending".into(), 1, 1),
+            ]
+        );
+        let bus = crate::events::bus::EventBus::new(16);
+        let mut received = bus.subscribe();
+        let published =
+            crate::commands::notifications::publish_pending_mail_notifications(&pool, &bus, None)
+                .await
+                .unwrap();
+        assert_eq!(published, 1);
+        assert!(matches!(
+            received.try_recv().unwrap(),
+            crate::events::bus::AppEvent::NewMail { subject, .. } if subject == "Fresh"
+        ));
     }
 
     #[cfg(desktop)]
@@ -5660,16 +5810,17 @@ mod tests {
                                 assert_eq!(draft.body, SNAPSHOT_BODY, "{case}");
                             }
                             _ => {
-                                drafts::discard(&pool, &queue, "d1")
+                                let queued = drafts::discard(&pool, &queue, "d1")
                                     .await
                                     .unwrap_or_else(|error| panic!("{case}: {error:?}"));
+                                assert_eq!(queued, provider == "imap", "{case}");
                                 let remaining: i64 = sqlx::query_scalar(
                                     "SELECT COUNT(*) FROM messages WHERE id = 'd1'",
                                 )
                                 .fetch_one(&pool)
                                 .await
                                 .unwrap();
-                                assert_eq!(remaining, 0, "{case}");
+                                assert_eq!(remaining, i64::from(provider == "imap"), "{case}");
                             }
                         }
                         assert_eq!(queued_sends(&pool).await, 0, "{case}");

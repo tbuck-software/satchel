@@ -76,9 +76,10 @@ export const useDraftsStore = defineStore('drafts', () => {
 
   async function remove(id: string) {
     if (!backendCommandsAvailable()) return;
-    await loader.mutate(async () => {
-      await backendDeleteDraft(id);
-      items.value = items.value.filter((item) => item.id !== id);
+    return loader.mutate(async () => {
+      const queued = await backendDeleteDraft(id);
+      if (!queued) items.value = items.value.filter((item) => item.id !== id);
+      return queued;
     });
   }
 

@@ -7,9 +7,7 @@ use std::{
 
 #[cfg(feature = "tracing")]
 use super::escape_crlf;
-use super::{
-    ClientCodec, NetworkStream, TlsParameters, MAX_RESPONSE_BYTES, MAX_RESPONSE_LINE_BYTES,
-};
+use super::{ClientCodec, MAX_RESPONSE_BYTES, NetworkStream, TlsParameters};
 use crate::{
     address::Envelope,
     transport::smtp::{
@@ -18,7 +16,7 @@ use crate::{
         error,
         error::Error,
         extension::{ClientId, Extension, MailBodyParameter, MailParameter, ServerInfo},
-        response::{parse_response, Response},
+        response::{Response, ResponseParser, Severity},
     },
 };
 
@@ -43,12 +41,19 @@ pub struct SmtpConnection {
     panic: bool,
     /// Information about the server
     server_info: ServerInfo,
+    /// Whether recipients rejected by the server are tolerated
+    allow_partial_recipients: bool,
 }
 
 impl SmtpConnection {
     /// Get information about the server
     pub fn server_info(&self) -> &ServerInfo {
         &self.server_info
+    }
+
+    /// Sets whether recipients rejected by the server are tolerated
+    pub(crate) fn set_allow_partial_recipients(&mut self, allow: bool) {
+        self.allow_partial_recipients = allow;
     }
 
     // FIXME add simple connect and rename this one
@@ -69,6 +74,7 @@ impl SmtpConnection {
             stream,
             panic: false,
             server_info: ServerInfo::default(),
+            allow_partial_recipients: false,
         };
         conn.set_timeout(timeout).map_err(error::network)?;
         // TODO log
@@ -118,16 +124,65 @@ impl SmtpConnection {
         );
 
         // Recipient
+        let mut accepted = 0usize;
+        let mut last_rejection = None;
         for to_address in envelope.to() {
-            try_smtp!(self.command(Rcpt::new(to_address.clone(), vec![])), self);
+            match self.command(Rcpt::new(to_address.clone(), vec![])) {
+                Ok(_) => accepted += 1,
+                Err(err)
+                    if self.allow_partial_recipients
+                        && (err.is_transient() || err.is_permanent()) =>
+                {
+                    #[cfg(feature = "tracing")]
+                    tracing::warn!("recipient {} rejected by server: {}", to_address, err);
+                    last_rejection = Some(err);
+                }
+                Err(err) => {
+                    self.abort();
+                    return Err(err);
+                }
+            }
+        }
+        if accepted == 0 {
+            self.abort();
+            return Err(last_rejection
+                .unwrap_or_else(|| error::client("no recipient was accepted by the server")));
         }
 
         // Data
-        try_smtp!(self.command(Data), self);
+        let response = try_smtp!(self.command(Data), self);
+        try_smtp!(
+            self.expect_reply(&response, Severity::PositiveIntermediate),
+            self
+        );
 
         // Message content
         let result = try_smtp!(self.message(email), self);
+        try_smtp!(
+            self.expect_reply(&result, Severity::PositiveCompletion),
+            self
+        );
         Ok(result)
+    }
+
+    /// Checks the class of the positive reply to DATA, or to the message
+    /// content.
+    ///
+    /// A positive reply of another class can only be the reply to a
+    /// different command: the connection is out of sync with the server.
+    /// Going on would have the server read the message content as commands,
+    /// or a message it didn't accept reported as sent.
+    fn expect_reply(&mut self, response: &Response, severity: Severity) -> Result<(), Error> {
+        if response.code().severity == severity {
+            Ok(())
+        } else {
+            // Not to be recycled, and closed without sending QUIT
+            self.panic = true;
+            Err(error::response(format!(
+                "unexpected reply code {}",
+                response.code()
+            )))
+        }
     }
 
     pub fn has_broken(&self) -> bool {
@@ -148,6 +203,17 @@ impl SmtpConnection {
             #[cfg(any(feature = "native-tls", feature = "rustls", feature = "boring-tls"))]
             {
                 try_smtp!(self.command(Starttls), self);
+                // Nothing may follow the STARTTLS reply before the TLS handshake.
+                // Bytes already buffered at this point arrived in plaintext and
+                // would otherwise be read after the upgrade as if they came over
+                // the authenticated TLS channel (STARTTLS response injection).
+                // Give up on the connection without sending anything else in the
+                // clear.
+                if !self.stream.buffer().is_empty() {
+                    self.panic = true;
+                    let _ = self.stream.get_mut().shutdown(std::net::Shutdown::Both);
+                    return Err(error::response("unexpected data after the STARTTLS reply"));
+                }
                 self.stream.get_mut().upgrade_tls(tls_parameters)?;
                 #[cfg(feature = "tracing")]
                 tracing::debug!("connection encrypted");
@@ -202,7 +268,17 @@ impl SmtpConnection {
 
     /// Checks if the server is connected using the NOOP SMTP command
     pub fn test_connected(&mut self) -> bool {
-        self.command(Noop).is_ok()
+        match self.command(Noop) {
+            Ok(response) if response.has_code(250) => true,
+            _ => {
+                // Maybe not the reply to NOOP, but one that was already
+                // waiting to be read, such as the goodbye of a server that
+                // gave up on an idle connection. Or no reply at all. The
+                // connection may be out of sync: no QUIT when it's dropped.
+                self.panic = true;
+                false
+            }
+        }
     }
 
     /// Sends an AUTH command with the given mechanism, and handles the challenge if needed
@@ -241,11 +317,23 @@ impl SmtpConnection {
 
     /// Sends the message content
     pub fn message(&mut self, message: &[u8]) -> Result<Response, Error> {
+        self.message_iter(std::iter::once(message))
+    }
+
+    /// Sends the message content by consuming an iterator that in its whole represents a message.
+    pub fn message_iter<I, B>(&mut self, message: I) -> Result<Response, Error>
+    where
+        I: Iterator<Item = B>,
+        B: AsRef<[u8]>,
+    {
         let mut codec = ClientCodec::new();
-        let mut out_buf = Vec::with_capacity(message.len());
-        codec.encode(message, &mut out_buf);
-        self.write(out_buf.as_slice())?;
-        self.write(b"\r\n.\r\n")?;
+        for message_part in message {
+            let message_part = message_part.as_ref();
+            let mut out_buf = Vec::with_capacity(message_part.len());
+            codec.encode(message_part, &mut out_buf);
+            self.write(out_buf.as_slice())?;
+        }
+        self.write(codec.terminator())?;
 
         self.read_response()
     }
@@ -272,46 +360,58 @@ impl SmtpConnection {
     /// Gets the SMTP response
     pub fn read_response(&mut self) -> Result<Response, Error> {
         let mut buffer = String::with_capacity(100);
-        let mut pre = 0;
+        let mut parser = ResponseParser::default();
 
-        while (&mut self.stream)
-            .take((MAX_RESPONSE_LINE_BYTES + 1) as u64)
-            .read_line(&mut buffer)
-            .map_err(error::network)?
-            > 0
-        {
-            if buffer.len() - pre > MAX_RESPONSE_LINE_BYTES {
-                return Err(error::response("SMTP response line too long"));
-            }
-            if buffer.len() > MAX_RESPONSE_BYTES {
-                return Err(error::response("SMTP response too large"));
-            }
-            pre = buffer.len();
-
-            #[cfg(feature = "tracing")]
-            tracing::debug!("<< {}", escape_crlf(&buffer));
-            match parse_response(&buffer) {
-                Ok((_remaining, response)) => {
-                    return if response.is_positive() {
-                        Ok(response)
-                    } else {
-                        Err(error::code(
-                            response.code(),
-                            Some(response.message().collect()),
-                        ))
-                    };
-                }
-                Err(nom::Err::Failure(e)) => {
-                    return Err(error::response(e.to_string()));
-                }
-                Err(nom::Err::Incomplete(_)) => { /* read more */ }
-                Err(nom::Err::Error(e)) => {
-                    return Err(error::response(e.to_string()));
-                }
+        while self.read_response_line(&mut buffer)? {
+            if let Some(response) = parser.parse(&buffer)? {
+                return if response.is_positive() {
+                    Ok(response)
+                } else {
+                    Err(error::code_from_response(&response))
+                };
             }
         }
 
         Err(error::response("incomplete response"))
+    }
+
+    /// Reads a line of a response and adds it to `buffer`.
+    ///
+    /// `buffer` never grows past `MAX_RESPONSE_BYTES`, also when the line
+    /// has no end: a peer that never sends a line ending can't make it take
+    /// memory without bound.
+    ///
+    /// Returns `false` at the end of the stream.
+    fn read_response_line(&mut self, buffer: &mut String) -> Result<bool, Error> {
+        let limit = MAX_RESPONSE_BYTES - buffer.len();
+        if limit == 0 {
+            return Err(error::response("SMTP response too large"));
+        }
+
+        let mut line = Vec::new();
+        let read = (&mut self.stream)
+            .take(limit as u64)
+            .read_until(b'\n', &mut line)
+            .map_err(error::network)?;
+        if read == 0 {
+            // EOF
+            return Ok(false);
+        }
+        if !line.ends_with(b"\n") {
+            return Err(error::response(if line.len() >= limit {
+                "SMTP response too large"
+            } else {
+                // The connection ended in the middle of a line
+                "incomplete response"
+            }));
+        }
+        let line = std::str::from_utf8(&line).map_err(error::response)?;
+
+        #[cfg(feature = "tracing")]
+        tracing::debug!("<< {}", escape_crlf(line));
+
+        buffer.push_str(line);
+        Ok(true)
     }
 
     /// The X509 certificate of the server (DER encoded)

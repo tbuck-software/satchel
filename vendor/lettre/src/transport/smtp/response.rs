@@ -3,20 +3,19 @@
 
 use std::{
     fmt::{Display, Formatter, Result},
-    result,
+    mem, result,
     str::FromStr,
 };
 
 use nom::{
+    IResult, Parser,
     branch::alt,
     bytes::streaming::{tag, take_until},
-    combinator::{complete, map},
-    multi::many0,
+    combinator::{map, peek},
     sequence::preceded,
-    IResult, Parser,
 };
 
-use crate::transport::smtp::{error, Error};
+use crate::transport::smtp::{Error, error};
 
 /// The first digit indicates severity
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
@@ -197,6 +196,51 @@ impl Response {
     pub fn message(&self) -> impl Iterator<Item = &str> {
         self.message.iter().map(String::as_str)
     }
+
+    /// The message lines joined with spaces, keeping only the first
+    /// occurrence of a repeated enhanced status code.
+    pub(super) fn message_joined(&self) -> String {
+        let Some((first, rest)) = self.message.split_first() else {
+            return String::new();
+        };
+
+        let repeated = self.enhanced_status_code();
+        let mut joined = String::from(first);
+        for line in rest {
+            joined.push(' ');
+            joined.push_str(match repeated {
+                Some(code) => line
+                    .strip_prefix(code)
+                    .filter(|rest| rest.starts_with(' '))
+                    .map_or(line.as_str(), str::trim_start),
+                None => line.as_str(),
+            });
+        }
+        joined
+    }
+
+    /// The enhanced status code the reply starts with, if it has one.
+    ///
+    /// RFC 2034 section 4: the code must agree with the reply code.
+    fn enhanced_status_code(&self) -> Option<&str> {
+        let expected_class = match self.code.severity {
+            Severity::PositiveCompletion => "2",
+            Severity::TransientNegativeCompletion => "4",
+            Severity::PermanentNegativeCompletion => "5",
+            // RFC 2034 defines classes 2, 4 and 5 only.
+            Severity::PositiveIntermediate => return None,
+        };
+
+        let word = self.first_word()?;
+        let (class, rest) = word.split_once('.')?;
+        let (subject, detail) = rest.split_once('.')?;
+
+        (class == expected_class
+            && [subject, detail].into_iter().all(|part| {
+                (1..=3).contains(&part.len()) && part.bytes().all(|b| b.is_ascii_digit())
+            }))
+        .then_some(word)
+    }
 }
 
 // Parsers (originally from tokio-smtp)
@@ -253,41 +297,152 @@ fn parse_detail(i: &str) -> IResult<&str, Detail> {
     .parse(i)
 }
 
-pub(crate) fn parse_response(i: &str) -> IResult<&str, Response> {
-    let (i, lines) = many0((
-        parse_code,
-        preceded(tag("-"), take_until("\r\n")),
-        tag("\r\n"),
+/// Parses a line of a reply: its code, its text, and whether it's the last
+/// line of the reply
+fn parse_line(i: &str) -> IResult<&str, (Code, &str, bool)> {
+    let (i, code) = parse_code(i)?;
+    let (i, (text, last)) = alt((
+        map(preceded(tag("-"), take_until("\r\n")), |text| (text, false)),
+        map(preceded(tag(" "), take_until("\r\n")), |text| (text, true)),
+        // RFC 5321 section 4.2: `Reply-code [ SP textstring ] CRLF`, so the
+        // final line may end right after the code.
+        map(peek(tag("\r\n")), |_| ("", true)),
     ))
     .parse(i)?;
-    let (i, (last_code, last_line)) =
-        (parse_code, preceded(tag(" "), take_until("\r\n"))).parse(i)?;
-    let (i, _) = complete(tag("\r\n")).parse(i)?;
+    let (i, _) = tag("\r\n").parse(i)?;
 
-    // Check that all codes are equal.
-    if !lines.iter().all(|&(code, _, _)| code == last_code) {
-        return Err(nom::Err::Failure(nom::error::Error::new(
-            "",
-            nom::error::ErrorKind::Not,
-        )));
+    Ok((i, (code, text, last)))
+}
+
+pub(crate) fn parse_response(mut i: &str) -> IResult<&str, Response> {
+    let mut parser = ResponseParser::default();
+    loop {
+        let (rest, line) = parse_line(i)?;
+        i = rest;
+        if let Some(response) = parser.push(line)? {
+            return Ok((i, response));
+        }
+    }
+}
+
+/// Parses a reply while it is being read, going through each of its lines
+/// once.
+///
+/// Parsing all of what was read again after every line takes quadratic time
+/// on a reply made of many short lines.
+#[derive(Debug, Default)]
+pub(crate) struct ResponseParser {
+    /// Where the line that is being read starts in what was read of the reply
+    line_start: usize,
+    code: Option<Code>,
+    message: Vec<String>,
+}
+
+impl ResponseParser {
+    /// Parses the line that `read` was just extended with. `read` holds what
+    /// was read of the reply so far, up to a `\n`.
+    ///
+    /// Returns the reply after its last line.
+    pub(crate) fn parse(&mut self, read: &str) -> result::Result<Option<Response>, Error> {
+        // Only CRLF ends a line: after a bare `\n` the same line goes on
+        if !read.ends_with("\r\n") {
+            return Ok(None);
+        }
+
+        let line = &read[self.line_start..];
+        self.line_start = read.len();
+        parse_line(line)
+            .and_then(|(_, line)| self.push(line))
+            .map_err(|e| match e {
+                nom::Err::Error(e) | nom::Err::Failure(e) => error::response(e.to_string()),
+                nom::Err::Incomplete(_) => error::response("incomplete response"),
+            })
     }
 
-    // Extract text from lines, and append last line.
-    let mut lines: Vec<String> = lines.into_iter().map(|(_, text, _)| text.into()).collect();
-    lines.push(last_line.into());
+    /// Adds a line to the reply. Returns the reply if that was its last line.
+    fn push<'a>(
+        &mut self,
+        (code, text, last): (Code, &str, bool),
+    ) -> result::Result<Option<Response>, nom::Err<nom::error::Error<&'a str>>> {
+        // Check that all codes are equal.
+        if *self.code.get_or_insert(code) != code {
+            return Err(nom::Err::Failure(nom::error::Error::new(
+                "",
+                nom::error::ErrorKind::Not,
+            )));
+        }
 
-    Ok((
-        i,
-        Response {
-            code: last_code,
-            message: lines,
-        },
-    ))
+        self.message.push(text.into());
+        Ok(last.then(|| Response {
+            code,
+            message: mem::take(&mut self.message),
+        }))
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn test_multiline_error_keeps_lines_separated() {
+        // Gmail's reverse-DNS rejection: every line repeats the status code.
+        let raw = "550-5.7.25 [203.0.113.1] The IP address sending this message does not have a\r\n\
+                   550-5.7.25 PTR record setup, or the corresponding forward DNS entry does not\r\n\
+                   550 5.7.25 match the sending IP.\r\n";
+
+        let response: Response = raw.parse().unwrap();
+        let rendered = error::code_from_response(&response).to_string();
+
+        assert!(
+            rendered.ends_with(
+                "5.7.25 [203.0.113.1] The IP address sending this message does not have a \
+                 PTR record setup, or the corresponding forward DNS entry does not \
+                 match the sending IP."
+            ),
+            "unexpected rendering: {rendered}"
+        );
+        assert_eq!(
+            rendered.matches("5.7.25").count(),
+            1,
+            "status code repeated: {rendered}"
+        );
+    }
+
+    #[test]
+    fn test_multiline_message_without_enhanced_code() {
+        let raw = "250-first line\r\n\
+                   250 second line\r\n";
+
+        let response: Response = raw.parse().unwrap();
+        assert_eq!(response.message_joined(), "first line second line");
+    }
+
+    #[test]
+    fn test_status_code_prefixing_a_longer_one_is_kept() {
+        // Stripping "5.7.2" off the second line would leave a stray "5".
+        let raw = "550-5.7.2 first line\r\n\
+                   550 5.7.25 second line\r\n";
+
+        let response: Response = raw.parse().unwrap();
+        assert_eq!(
+            response.message_joined(),
+            "5.7.2 first line 5.7.25 second line"
+        );
+    }
+
+    #[test]
+    fn test_enhanced_code_disagreeing_with_reply_code_is_kept() {
+        // Non-conformant: the classes disagree, so nothing is stripped.
+        let raw = "550-4.7.1 first line\r\n\
+                   550 4.7.1 second line\r\n";
+
+        let response: Response = raw.parse().unwrap();
+        assert_eq!(
+            response.message_joined(),
+            "4.7.1 first line 4.7.1 second line"
+        );
+    }
 
     #[test]
     fn test_severity_fmt() {
@@ -366,46 +521,54 @@ mod test {
 
     #[test]
     fn test_response_is_positive() {
-        assert!(Response::new(
-            Code {
-                severity: Severity::PositiveCompletion,
-                category: Category::MailSystem,
-                detail: Detail::Zero,
-            },
-            vec!["me".to_owned(), "8BITMIME".to_owned(), "SIZE 42".to_owned(),],
-        )
-        .is_positive());
-        assert!(!Response::new(
-            Code {
-                severity: Severity::TransientNegativeCompletion,
-                category: Category::MailSystem,
-                detail: Detail::Zero,
-            },
-            vec!["me".to_owned(), "8BITMIME".to_owned(), "SIZE 42".to_owned(),],
-        )
-        .is_positive());
+        assert!(
+            Response::new(
+                Code {
+                    severity: Severity::PositiveCompletion,
+                    category: Category::MailSystem,
+                    detail: Detail::Zero,
+                },
+                vec!["me".to_owned(), "8BITMIME".to_owned(), "SIZE 42".to_owned(),],
+            )
+            .is_positive()
+        );
+        assert!(
+            !Response::new(
+                Code {
+                    severity: Severity::TransientNegativeCompletion,
+                    category: Category::MailSystem,
+                    detail: Detail::Zero,
+                },
+                vec!["me".to_owned(), "8BITMIME".to_owned(), "SIZE 42".to_owned(),],
+            )
+            .is_positive()
+        );
     }
 
     #[test]
     fn test_response_has_code() {
-        assert!(Response::new(
-            Code {
-                severity: Severity::TransientNegativeCompletion,
-                category: Category::MailSystem,
-                detail: Detail::One,
-            },
-            vec!["me".to_owned(), "8BITMIME".to_owned(), "SIZE 42".to_owned(),],
-        )
-        .has_code(451));
-        assert!(!Response::new(
-            Code {
-                severity: Severity::TransientNegativeCompletion,
-                category: Category::MailSystem,
-                detail: Detail::One,
-            },
-            vec!["me".to_owned(), "8BITMIME".to_owned(), "SIZE 42".to_owned(),],
-        )
-        .has_code(251));
+        assert!(
+            Response::new(
+                Code {
+                    severity: Severity::TransientNegativeCompletion,
+                    category: Category::MailSystem,
+                    detail: Detail::One,
+                },
+                vec!["me".to_owned(), "8BITMIME".to_owned(), "SIZE 42".to_owned(),],
+            )
+            .has_code(451)
+        );
+        assert!(
+            !Response::new(
+                Code {
+                    severity: Severity::TransientNegativeCompletion,
+                    category: Category::MailSystem,
+                    detail: Detail::One,
+                },
+                vec!["me".to_owned(), "8BITMIME".to_owned(), "SIZE 42".to_owned(),],
+            )
+            .has_code(251)
+        );
     }
 
     #[test]
@@ -486,6 +649,69 @@ mod test {
             .first_word(),
             None
         );
+    }
+
+    #[test]
+    fn test_response_without_text() {
+        // RFC 5321 section 4.2: the text after the reply code is optional.
+        let (remaining, response) = parse_response("250\r\n").unwrap();
+        assert_eq!(remaining, "");
+        assert_eq!(
+            response,
+            Response::new(
+                Code::new(
+                    Severity::PositiveCompletion,
+                    Category::MailSystem,
+                    Detail::Zero,
+                ),
+                vec!["".to_owned()],
+            )
+        );
+        assert_eq!(response.message_joined(), "");
+    }
+
+    #[test]
+    fn test_negative_response_without_text() {
+        let response: Response = "550\r\n".parse().unwrap();
+        assert_eq!(
+            response.code(),
+            Code::new(
+                Severity::PermanentNegativeCompletion,
+                Category::MailSystem,
+                Detail::Zero,
+            )
+        );
+        assert!(!response.is_positive());
+    }
+
+    #[test]
+    fn test_multiline_response_ending_without_text() {
+        let response: Response = "250-first line\r\n250\r\n".parse().unwrap();
+        assert_eq!(
+            response.message().collect::<Vec<_>>(),
+            vec!["first line", ""]
+        );
+    }
+
+    #[test]
+    fn test_response_without_text_incomplete() {
+        for raw_response in ["250", "250\r"] {
+            let res = parse_response(raw_response);
+            match res {
+                Err(nom::Err::Incomplete(_)) => {}
+                _ => panic!("Expected incomplete response for {raw_response:?}, got {res:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_response_code_followed_by_junk() {
+        for raw_response in ["250x\r\n", "250\n"] {
+            assert!(
+                raw_response.parse::<Response>().is_err(),
+                "{raw_response:?} should not parse"
+            );
+        }
     }
 
     #[test]
@@ -576,5 +802,61 @@ mod test {
             .first_line(),
             Some("")
         );
+    }
+
+    // Feeds `lines` to a `ResponseParser` the way a connection does, a read
+    // up to a `\n` at a time
+    fn parse_lines(lines: &[&str]) -> result::Result<Option<Response>, Error> {
+        let mut parser = ResponseParser::default();
+        let mut read = String::new();
+        for line in lines {
+            read.push_str(line);
+            if let Some(response) = parser.parse(&read)? {
+                return Ok(Some(response));
+            }
+        }
+        Ok(None)
+    }
+
+    #[test]
+    fn test_response_parser() {
+        let response = parse_lines(&["250-first\r\n", "250-\r\n", "250 last\r\n"])
+            .unwrap()
+            .unwrap();
+        assert_eq!(response.code().to_string(), "250");
+        assert_eq!(
+            response.message().collect::<Vec<_>>(),
+            vec!["first", "", "last"]
+        );
+
+        // The last line is still to come
+        assert!(parse_lines(&["250-first\r\n"]).unwrap().is_none());
+        // Nothing is read past the last line
+        assert!(parse_lines(&["250\r\n", "junk\r\n"]).unwrap().is_some());
+    }
+
+    #[test]
+    fn test_response_parser_bare_line_feed() {
+        // Only CRLF ends a line: what follows a bare `\n` belongs to the same
+        // line, whatever it looks like
+        let response = parse_lines(&["250-a\n", "250 b\n", "c\r\n", "250 d\n", "e\r\n"])
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            response.message().collect::<Vec<_>>(),
+            vec!["a\n250 b\nc", "d\ne"]
+        );
+    }
+
+    #[test]
+    fn test_response_parser_invalid() {
+        // Not a reply, a code that changes, a line that goes on after its code
+        for lines in [
+            &["hello\r\n"][..],
+            &["250-a\r\n", "251 b\r\n"],
+            &["250-a\r\n", "250b\r\n"],
+        ] {
+            assert!(parse_lines(lines).is_err(), "{lines:?}");
+        }
     }
 }

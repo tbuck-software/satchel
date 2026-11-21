@@ -4,7 +4,7 @@ use tauri::State;
 
 use crate::{
     commands::error::{CommandError, CommandResult},
-    sync::queue::QueuedAction,
+    sync::queue::{QueuedAction, ACTION_RULE_FORWARD},
     AppState,
 };
 
@@ -31,6 +31,8 @@ pub struct OutboxItemDto {
     pub created_at: String,
     pub updated_at: String,
     pub last_error: Option<String>,
+    /// The original failure before the copied action was held.
+    pub pre_restore_error: Option<String>,
     pub next_retry_at: Option<String>,
     pub scheduled_for: Option<String>,
     pub subject: Option<String>,
@@ -94,6 +96,13 @@ impl From<QueuedAction> for OutboxItemDto {
         let mutation_kind = (action.action_type == "remote_mutation")
             .then(|| payload_text(Some(&action.payload), "kind"))
             .flatten();
+        let recipients = if action.action_type == ACTION_RULE_FORWARD {
+            payload_text(Some(&action.payload), "to")
+                .into_iter()
+                .collect()
+        } else {
+            payload_strings(input, "to")
+        };
         Self {
             id: action.id,
             account_id: action.account_id,
@@ -103,10 +112,11 @@ impl From<QueuedAction> for OutboxItemDto {
             created_at: action.created_at,
             updated_at: action.updated_at,
             last_error: action.last_error,
+            pre_restore_error: action.pre_restore_error,
             next_retry_at: action.next_retry_at,
             scheduled_for: action.scheduled_for,
             subject: payload_text(input, "subject"),
-            recipients: payload_strings(input, "to"),
+            recipients,
             cc: payload_strings(input, "cc"),
             bcc: payload_strings(input, "bcc"),
             body: payload_text(input, "body"),
@@ -155,6 +165,14 @@ async fn failed_action_subject(
     use satchel_core::sync::remote_mutations::{
         remote_move_thread_id_from_json, RemoteMutationPayload,
     };
+    if action.action_type == ACTION_RULE_FORWARD {
+        return sqlx::query_scalar("SELECT subject FROM messages WHERE id = ? AND account_id = ?")
+            .bind(payload_text(Some(&action.payload), "message_id"))
+            .bind(&action.account_id)
+            .fetch_optional(pool)
+            .await
+            .map(Option::flatten);
+    }
     if action.action_type != "remote_mutation" {
         return Ok(None);
     }

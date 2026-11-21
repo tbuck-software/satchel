@@ -140,7 +140,11 @@ describe('drafts store', () => {
     await expect(drafts.remove('draft-1')).rejects.toThrow();
     expect(drafts.items).toHaveLength(1);
 
-    deleteMock.mockResolvedValueOnce(undefined);
+    deleteMock.mockResolvedValueOnce(true);
+    await expect(drafts.remove('draft-1')).resolves.toBe(true);
+    expect(drafts.items).toHaveLength(1);
+
+    deleteMock.mockResolvedValueOnce(false);
     await drafts.remove('draft-1');
     expect(drafts.items).toHaveLength(0);
   });
@@ -251,7 +255,7 @@ describe('drafts store', () => {
     saveMock.mockResolvedValueOnce(edited);
     await drafts.save(draftInput({ id: 'draft-1', body: edited.body }));
     vi.mocked(backendLoadDraft).mockResolvedValueOnce(edited);
-    deleteMock.mockResolvedValueOnce(undefined);
+    deleteMock.mockResolvedValueOnce(false);
     await expect(useDraftActions().discard('draft-1')).resolves.toBe(true);
     expect(drafts.items.map((draft) => draft.id)).toEqual(['blocked']);
     const action = toast.info.mock.calls.at(-1)?.[1].action;

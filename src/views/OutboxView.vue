@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n';
 import { useUiStore } from '@/stores/ui';
 import { useComposerStore } from '@/stores/composer';
 import { useOutboxStore } from '@/stores/outbox';
+import { useConfirm } from '@/composables/useConfirm';
 import { useToast } from '@/composables/useToast';
 import ListDetailLayout from '@/components/layout/ListDetailLayout.vue';
 import {
@@ -46,6 +47,7 @@ const ui = useUiStore();
 const outbox = useOutboxStore();
 const composer = useComposerStore();
 const toast = useToast();
+const { ask } = useConfirm();
 
 /** Ids with a running retry/cancel — keeps double clicks from firing twice. */
 const busy = ref(new Set<string>());
@@ -56,7 +58,7 @@ const selectedItem = computed(() =>
   outbox.items.find((item) => item.id === selectedId.value),
 );
 const discardHintKey = computed(() => selectedItem.value
-  ? syncActionDiscardHintKey(selectedItem.value.action_type, selectedItem.value.mutation_kind)
+  ? syncActionDiscardHintKey(selectedItem.value.action_type, selectedItem.value.mutation_kind, selectedItem.value.last_error)
   : null);
 
 onMounted(() => {
@@ -204,11 +206,25 @@ function canRetry(item: BackendOutboxItem): boolean {
 }
 
 /**
- * The rescue path for a mail that cannot be resent: hand its text back to the
- * composer. Attachments stay behind — the queue carries their names, not their
- * bytes — so say so instead of losing them quietly.
+ * Reopen held sends using their full draft snapshot. For uncertain deliveries,
+ * the composer only gets the text we can copy from the visible Outbox row.
  */
-function openAsDraft(item: BackendOutboxItem) {
+async function openAsDraft(item: BackendOutboxItem) {
+  if (item.last_error === 'backend.errors.outgoingSendHeldAfterRestore') {
+    if (busy.value.has(item.id)) return;
+    busy.value = new Set(busy.value).add(item.id);
+    try {
+      const draft = await outbox.restoreDraft(item.id);
+      await composer.openDraft(draft.id);
+    } catch (err) {
+      toast.error(backendErrorLabel(err));
+    } finally {
+      const next = new Set(busy.value);
+      next.delete(item.id);
+      busy.value = next;
+    }
+    return;
+  }
   composer.open({
     mode: 'new',
     to: [...item.recipients],
@@ -222,10 +238,21 @@ function openAsDraft(item: BackendOutboxItem) {
   if (dropped > 0) toast.info(t('outbox.reopen.attachmentsDropped', dropped));
 }
 
+function canDiscard(item: BackendOutboxItem): boolean {
+  return outboxActionCanBeCancelled(item.action_type, item.status, item.mutation_kind, item.last_error)
+    || outboxActionCanBeDismissed(item.action_type, item.status);
+}
+
 async function cancel(item: BackendOutboxItem) {
   if (busy.value.has(item.id)) return;
   busy.value = new Set(busy.value).add(item.id);
   try {
+    if (item.mutation_kind === 'append_sent' && !await ask({
+      title: t('outbox.heldSentCopyDiscardTitle'),
+      body: t('outbox.heldSentCopyDiscardBody'),
+      confirmLabel: t('common.discard'),
+      tone: 'danger',
+    })) return;
     await outbox.cancel(item.id);
     toast.info(t(isDeliveryWarning(item) ? 'outbox.dismissed' : 'outbox.cancelled'));
   } catch (err) {
@@ -383,7 +410,7 @@ async function cancel(item: BackendOutboxItem) {
                       </AppIcon>
                     </IconButton>
                     <IconButton
-                      v-if="outboxActionCanBeCancelled(item.action_type, item.status, item.mutation_kind)"
+                      v-if="canDiscard(item)"
                       size="sm"
                       tone="danger"
                       :title="$t('common.discard')"
@@ -420,7 +447,7 @@ async function cancel(item: BackendOutboxItem) {
                     {{ outboxRetryLabel(item.action_type, item.status) }}
                   </AppButton>
                   <AppButton
-                    v-if="outboxActionCanBeCancelled(item.action_type, item.status, item.mutation_kind) || outboxActionCanBeDismissed(item.action_type, item.status)"
+                    v-if="canDiscard(item)"
                     size="sm"
                     variant="ghost"
                     :disabled="busy.has(item.id)"
@@ -473,12 +500,13 @@ async function cancel(item: BackendOutboxItem) {
               size="sm"
               variant="soft"
               data-test="outbox-open-as-draft"
+              :disabled="busy.has(selectedItem.id)"
               @click="openAsDraft(selectedItem)"
             >
               {{ $t('outbox.openAsDraft') }}
             </AppButton>
             <AppButton
-              v-if="outboxActionCanBeCancelled(selectedItem.action_type, selectedItem.status, selectedItem.mutation_kind) || outboxActionCanBeDismissed(selectedItem.action_type, selectedItem.status)"
+              v-if="canDiscard(selectedItem)"
               size="sm"
               variant="ghost"
               :disabled="busy.has(selectedItem.id)"
@@ -522,6 +550,14 @@ async function cancel(item: BackendOutboxItem) {
           <details v-if="outboxErrorLabel(selectedItem.last_error) !== selectedItem.last_error">
             <summary>{{ $t('outbox.error.technical') }}</summary>
             <pre>{{ selectedItem.last_error }}</pre>
+          </details>
+        </div>
+        <div v-if="selectedItem.pre_restore_error" class="detail__error">
+          <h3>{{ $t('outbox.error.preRestore') }}</h3>
+          <p>{{ outboxErrorLabel(selectedItem.pre_restore_error) }}</p>
+          <details v-if="outboxErrorLabel(selectedItem.pre_restore_error) !== selectedItem.pre_restore_error">
+            <summary>{{ $t('outbox.error.technical') }}</summary>
+            <pre>{{ selectedItem.pre_restore_error }}</pre>
           </details>
         </div>
       </article>

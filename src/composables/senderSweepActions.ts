@@ -136,7 +136,9 @@ function trashSweep(ctx: SenderSweepContext, targets: BackendSweepTarget[]): Pro
     const tokens = receipts.flatMap((receipt) => receipt.undo_token ? [receipt.undo_token] : []);
     const deleted = receipts.reduce((sum, receipt) => sum + receipt.permanently_deleted.length, 0);
     if (deleted > 0) ctx.toast.info(tc('thread.result.permanentlyDeleted', deleted));
-    if (undoIds.length === 0) return deleted;
+    const queued = receipts.reduce((sum, receipt) => sum + (receipt.queued_deletions?.length ?? 0), 0);
+    if (queued > 0) ctx.toast.info(tc('thread.result.deletionQueued', queued));
+    if (undoIds.length === 0) return deleted + queued;
     const message = undoIds.length === ids.length
       ? tc('sweep.result.trashed', undoIds.length)
       : t('sweep.result.trashedOf', { count: undoIds.length, total: ids.length });

@@ -16,6 +16,22 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  push-tools:
+    name: Push device and relay tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+      - name: Push device tests
+        run: make test-push-device
+      - name: Push relay tests
+        run: node --test tooling/push-relay/worker.node.mjs
+
   migrations:
     name: Migration versions
     runs-on: ubuntu-24.04

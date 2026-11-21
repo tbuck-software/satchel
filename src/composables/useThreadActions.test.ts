@@ -619,7 +619,7 @@ describe('useThreadActions', () => {
     const toast = toasts.at(-1);
     expect(toast?.tone).toBe('warning');
     expect(toast?.message).toBe(
-      'Moved 1 of 3; the rest could not be moved. The server move is still being finalized. Try again shortly.',
+      'Moved 1 of 3; the rest could not be moved. Server move pending or failed. Check the Outbox.',
     );
     expect(toast?.action?.label).toBe('Undo');
     await toast!.action!.handler();

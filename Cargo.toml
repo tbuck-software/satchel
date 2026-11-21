@@ -30,6 +30,7 @@ debug = "line-tables-only"
 debug = 0
 
 [patch.crates-io]
+imap-proto = { path = "vendor/imap-proto" }
 lettre = { path = "vendor/lettre" }
 wasmtime-internal-cache = { path = "vendor/wasmtime-internal-cache" }
 sqlx-sqlite = { path = "vendor/sqlx-sqlite" }

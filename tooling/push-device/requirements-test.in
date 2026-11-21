@@ -1,0 +1,7 @@
+# Third-party imports used by the push-device tests.
+google-auth[requests]>=2.40,<3
+cryptography>=45,<51
+ifaddr==0.2.0
+imapclient==4.3.0
+watchdog>=6,<7
+zeroconf>=0.146,<1

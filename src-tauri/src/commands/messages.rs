@@ -527,7 +527,12 @@ async fn message_bodies(
     });
 
     let runtime = state.plugin_runtime.clone();
-    let plugin_ids = runtime.enabled_message_transform_plugins()?;
+    let plugin_ids = runtime
+        .enabled_message_transform_plugins()
+        .unwrap_or_else(|error| {
+            tracing::warn!(%error, "could not load message transforms");
+            Vec::new()
+        });
     let has_pgp_private_key = has_any_private_pgp_key(pool).await;
     let has_smime_private_cert = has_any_private_smime_cert(pool).await;
     let references = ContentReference::load_many(pool, message_ids).await?;
@@ -826,14 +831,12 @@ async fn map_message_row(
     };
     let original_body_text = dto.body_text.clone();
 
-    if (trust.root_encryption || trust.root_inline_signature)
-        && message_requires_plugin_transform(&dto.body_text)
-    {
+    if allows_message_transform(&trust, &dto.body_text) {
         // WASM execution is blocking (wasmtime instantiate + run, up to the
         // plugin timeout). Keep it off the tokio worker threads so a batch of
         // PGP messages cannot stall unrelated async work. On a join failure
         // (panic in the blocking task) fall back to the untransformed message.
-        let fallback_dto = dto.clone();
+        let mut fallback_dto = dto.clone();
         let blocking_runtime = runtime.clone();
         let blocking_plugin_ids = plugin_ids.to_vec();
         let switched_off;
@@ -850,6 +853,7 @@ async fn map_message_row(
         .await
         .unwrap_or_else(|join_error| {
             tracing::warn!(error = %join_error, "plugin transform task failed");
+            apply_message_plugins(runtime, &[], has_pgp_private_key, &mut fallback_dto);
             (fallback_dto, Vec::new())
         });
         for plugin_id in switched_off {
@@ -1327,6 +1331,11 @@ async fn show_encapsulated_body(
             }
         }
     }
+}
+
+fn allows_message_transform(trust: &crate::providers::traits::MessageTrust, body: &str) -> bool {
+    (trust.root_encryption || trust.root_inline_signature)
+        && message_requires_plugin_transform(body)
 }
 
 /// Whether `map_message_row` tries the unlocked keys on this stored body.
@@ -3312,6 +3321,38 @@ mod tests {
                 .unwrap()
                 .contains("read_threads"));
         }
+    }
+
+    #[test]
+    fn encrypted_mail_keeps_its_native_state_when_the_manifest_is_broken() {
+        let runtime = super::PluginRuntime::default();
+        let root = tempfile::tempdir().unwrap();
+        let plugin_dir = root.path().join("pgp");
+        std::fs::create_dir(&plugin_dir).unwrap();
+        std::fs::write(plugin_dir.join("Cargo.toml"), "[package").unwrap();
+        runtime
+            .set_plugin_dirs(vec![root.path().to_path_buf()])
+            .unwrap();
+
+        let plugin_ids = runtime.enabled_message_transform_plugins().unwrap();
+        assert!(plugin_ids.is_empty());
+        let armor = "-----BEGIN PGP MESSAGE-----\nciphertext\n-----END PGP MESSAGE-----";
+        let trust = crate::providers::traits::MessageTrust {
+            root_encryption: true,
+            ..Default::default()
+        };
+        assert!(super::decrypts_inline_pgp(&trust, armor));
+        assert!(super::allows_message_transform(&trust, armor));
+        assert!(!super::allows_message_transform(&Default::default(), armor));
+        for (has_key, expected) in [(true, "key_available_locked"), (false, "encrypted_no_key")] {
+            let mut dto =
+                super::map_stored_message_row(stored_body_record(Some(armor.into()), None));
+            super::apply_message_plugins(&runtime, &plugin_ids, has_key, &mut dto);
+            assert_eq!(dto.pgp_state.as_deref(), Some(expected));
+            assert_eq!(dto.body_text, armor);
+            assert!(dto.pgp_error_detail.is_none());
+        }
+        assert!(runtime.metrics().unwrap().is_empty());
     }
 
     #[test]

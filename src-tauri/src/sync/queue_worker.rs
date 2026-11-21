@@ -131,7 +131,11 @@ impl ActionExecutor for TauriExecutor {
             return Ok(None);
         };
         #[cfg(target_os = "android")]
-        let cross_process = if action.action_type == ACTION_SYNC_DRAFT {
+        let cross_process = if action.action_type == ACTION_SYNC_DRAFT
+            || matches!(
+                action.payload["kind"].as_str(),
+                Some("delete" | "delete_draft")
+            ) {
             let Some(lease) =
                 CrossProcessSyncLease::acquire(&self.pool, &action.account_id).await?
             else {
@@ -179,6 +183,18 @@ impl ActionExecutor for TauriExecutor {
                 self.state.events.publish(AppEvent::SyncCompleted);
                 if action.action_type == ACTION_SEND_MESSAGE {
                     let _ = self.app.emit("outbox:sent", serde_json::json!({"queued_id": action.id, "action_type": action.action_type}));
+                } else if action.action_type == ACTION_REMOTE_MUTATION {
+                    if let Some(id) = action
+                        .id
+                        .strip_prefix(satchel_core::mail_actions::IMAP_TRASH_DELETE_ID_PREFIX)
+                    {
+                        self.state
+                            .events
+                            .publish(AppEvent::ThreadsUpdated(vec![id.into()]));
+                    }
+                    if action.payload["discard_revision"].is_i64() {
+                        let _ = self.app.emit("drafts:changed", ());
+                    }
                 }
             }
             Ok(Outcome::Retry {
@@ -189,20 +205,34 @@ impl ActionExecutor for TauriExecutor {
                 let _ = self.app.emit("outbox:retry", serde_json::json!({"queued_id": action.id, "retry_count": retry_count, "next_retry_at": next_at.to_rfc3339(), "error": error}));
             }
             Ok(Outcome::Failed { error }) => {
-                let send = action.action_type == ACTION_SEND_MESSAGE;
-                let strings = crate::commands::ui_strings::current();
-                self.state.events.publish(AppEvent::Notification {
-                    title: if send {
-                        crate::events::bus::NotificationTitle::SendFailed
-                    } else {
-                        crate::events::bus::NotificationTitle::SyncFailed
-                    },
-                    body: if send {
-                        strings.notification_send_failed
-                    } else {
-                        strings.notification_sync_failed
-                    },
-                });
+                if matches!(
+                    error.as_str(),
+                    satchel_core::sync::errors::IMAP_UID_EXPUNGE_UNSUPPORTED
+                        | satchel_core::sync::errors::IMAP_MOVE_COPY_REFUSED
+                        | satchel_core::sync::errors::IMAP_MOVE_COPY_NEEDS_REVIEW
+                ) {
+                    if let Some(id) = action.payload["workflow_thread_id"].as_str() {
+                        self.state
+                            .events
+                            .publish(AppEvent::ThreadsUpdated(vec![id.into()]));
+                    }
+                }
+                if should_notify_failure(&action.action_type, &error) {
+                    let send = action.action_type == ACTION_SEND_MESSAGE;
+                    let strings = crate::commands::ui_strings::current();
+                    self.state.events.publish(AppEvent::Notification {
+                        title: if send {
+                            crate::events::bus::NotificationTitle::SendFailed
+                        } else {
+                            crate::events::bus::NotificationTitle::SyncFailed
+                        },
+                        body: if send {
+                            strings.notification_send_failed
+                        } else {
+                            strings.notification_sync_failed
+                        },
+                    });
+                }
                 let _ = self.app.emit("outbox:failed", serde_json::json!({"queued_id": action.id, "action_type": action.action_type, "error": error}));
             }
             Ok(Outcome::Delivered { error }) => {
@@ -246,6 +276,11 @@ async fn queued_action_needs_sync_permit(
             serde_json::from_value::<RemoteMutationPayload>(action.payload.clone()),
             Ok(RemoteMutationPayload::WorkflowMove { .. })
                 | Ok(RemoteMutationPayload::BlockedMove { .. })
+                | Ok(RemoteMutationPayload::Delete { .. })
+                | Ok(RemoteMutationPayload::DeleteDraft {
+                    discard_revision: Some(_),
+                    ..
+                })
         )
     {
         return Ok(false);
@@ -258,4 +293,53 @@ async fn queued_action_needs_sync_permit(
     .await
     .map_err(|err| err.to_string())?;
     Ok(provider.is_some_and(|provider| provider.eq_ignore_ascii_case("imap")))
+}
+
+/// Autosave can queue another revision every few seconds. Keep persistent
+/// IMAP draft failures visible in the outbox without repeating the OS alert.
+fn should_notify_failure(action_type: &str, error: &str) -> bool {
+    if action_type != ACTION_SYNC_DRAFT {
+        return true;
+    }
+    let detail = serde_json::from_str::<serde_json::Value>(error).ok();
+    let key = detail
+        .as_ref()
+        .and_then(|v| v["key"].as_str())
+        .unwrap_or(error);
+    !matches!(
+        key,
+        "backend.errors.imapDraftSyncUnsupported"
+            | "backend.errors.imapDraftSyncNeedsReview"
+            | "backend.errors.imapDraftSyncUnverified"
+            | "backend.errors.imapDraftUidWithoutValidity"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn autosave_only_quiets_persistent_draft_sync_errors() {
+        for key in [
+            "backend.errors.imapDraftSyncUnsupported",
+            "backend.errors.imapDraftSyncNeedsReview",
+            "backend.errors.imapDraftSyncUnverified",
+            "backend.errors.imapDraftUidWithoutValidity",
+        ] {
+            let detail =
+                serde_json::json!({"key": key, "params": {"folder": "Drafts"}}).to_string();
+            assert!(!should_notify_failure(ACTION_SYNC_DRAFT, key));
+            assert!(!should_notify_failure(ACTION_SYNC_DRAFT, &detail));
+            assert!(should_notify_failure(ACTION_REMOTE_MUTATION, &detail));
+        }
+        assert!(should_notify_failure(
+            ACTION_SYNC_DRAFT,
+            "backend.errors.queueAuthentication"
+        ));
+        assert!(should_notify_failure(
+            ACTION_SEND_MESSAGE,
+            "backend.errors.queueRejected"
+        ));
+    }
 }

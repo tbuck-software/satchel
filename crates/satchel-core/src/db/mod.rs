@@ -96,7 +96,7 @@ pub async fn init(pool: &sqlx::SqlitePool) -> Result<(), sqlx::Error> {
 
 pub(crate) async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     migrator().run(pool).await?;
-    Ok(())
+    crate::backup::finish_imported_cutoff(pool).await
 }
 
 /// `None` for an in-memory database, which no other process can see.
@@ -179,12 +179,12 @@ pub async fn message_index_matches_row_count(pool: &SqlitePool) -> Result<bool, 
 }
 
 /// Apply only a completely published restore before opening the profile pool.
-pub fn apply_pending_restore(profile_dir: &std::path::Path) -> Result<bool, String> {
+pub async fn apply_pending_restore(profile_dir: &std::path::Path) -> Result<bool, String> {
     if !crate::backup::restore_pending(profile_dir) {
         return Ok(false);
     }
     let key = crate::utils::crypto::load_or_create_master_key(profile_dir).ok();
-    match crate::backup::apply_pending_restore(profile_dir, key.as_ref()) {
+    match crate::backup::apply_pending_restore(profile_dir, key.as_ref()).await {
         Err(error)
             if !crate::backup::recovery_in_progress(profile_dir)
                 && profile_dir.join("satchel.db").is_file() =>
@@ -211,7 +211,7 @@ pub async fn connect(db_path: impl Into<PathBuf>) -> Result<SqlitePool, String> 
 
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent).map_err(|err| err.to_string())?;
-        restored = apply_pending_restore(parent)?;
+        restored = apply_pending_restore(parent).await?;
         let open = profile_lock::hold_open(parent).await?;
         // The app's pool lives as long as the process; so does its lock.
         HELD_OPEN_LOCKS

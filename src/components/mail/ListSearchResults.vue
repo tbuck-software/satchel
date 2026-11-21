@@ -37,11 +37,19 @@ const threads = useThreadsStore();
 const ui = useUiStore();
 
 const search = useListSearch({ mailbox: () => props.mailbox });
+const resultIds = computed(() => search.resultThreads.value.map((thread) => thread.id));
+const keyboardFocusedId = ref('');
+const keyboardFocusKey = computed(() => keyboardFocusedId.value ? `thread:${keyboardFocusedId.value}` : '');
+const keyboardNavigationActive = ref(false);
 
 watch(
   search.resultThreads,
   (rows) => {
-    store.resultThreadIds = rows.map((thread) => thread.id);
+    store.resultThreadIds = resultIds.value;
+    if (keyboardFocusedId.value && !resultIds.value.includes(keyboardFocusedId.value)) {
+      keyboardFocusedId.value = '';
+      keyboardNavigationActive.value = false;
+    }
     // Checking rows, ranges and select-all run over the results while they
     // cover the list; the selection bar and its actions stay the Inbox's.
     threads.setSelectionList(rows);
@@ -63,13 +71,10 @@ const countLabel = computed(() => {
     : t('inbox.listSearch.resultCount', count);
 });
 
-const keyboardFocusKey = ref('');
-const keyboardNavigationActive = ref(false);
-
 function show(threadId: string) {
   store.openThreadId = threadId;
+  threads.adoptListedThreads([threadId]);
   void threads.ensureThreadLoaded(threadId, { retainAcrossListLoads: true });
-  // Keyboard actions (`e`, `#`, …) act on the store's active thread.
   threads.selectThread(threadId);
 }
 
@@ -85,7 +90,8 @@ function modifiers({ shiftKey, metaKey, ctrlKey }: RowPointer) {
 }
 
 function onActivate(payload: RowPointer & { keyboard?: boolean }) {
-  keyboardFocusKey.value = `thread:${payload.threadId}`;
+  if (!resultIds.value.includes(payload.threadId)) return;
+  keyboardFocusedId.value = payload.threadId;
   keyboardNavigationActive.value = payload.keyboard ?? false;
   // As in the list: a plain click opens and clears the selection, a
   // modified one extends it.
@@ -98,28 +104,29 @@ function onActivate(payload: RowPointer & { keyboard?: boolean }) {
 
 /** The avatar checks a row, as in the list, instead of opening it. */
 function onCheck(payload: RowPointer) {
+  if (!resultIds.value.includes(payload.threadId)) return;
   threads.selectFromInteraction(payload.threadId, modifiers(payload), false);
 }
 
 function move(delta: 1 | -1): boolean {
-  const ids = store.resultThreadIds;
+  const ids = resultIds.value;
   if (ids.length === 0) return false;
-  const currentKey = keyboardNavigationActive.value ? keyboardFocusKey.value : `thread:${props.openThreadId ?? ''}`;
-  const index = ids.findIndex((id) => `thread:${id}` === currentKey);
+  const index = ids.indexOf(currentTargetId());
   // Coming down from the search field lands on the hit already open, not
   // the one after it.
   const fromField = document.activeElement?.closest('.list-search-bar') != null;
   const step = fromField && !keyboardNavigationActive.value ? 0 : delta;
   const nextId = ids[index < 0 ? 0 : Math.min(ids.length - 1, Math.max(0, index + step))];
   if (!nextId) return false;
-  keyboardFocusKey.value = `thread:${nextId}`;
+  keyboardFocusedId.value = nextId;
   keyboardNavigationActive.value = true;
-  if (!ui.isSinglePane) show(nextId);
+  if (ui.isSinglePane) threads.adoptListedThreads([nextId]);
+  else show(nextId);
   return true;
 }
 
 function open(): boolean {
-  const id = keyboardFocusKey.value.replace(/^thread:/, '') || props.openThreadId || store.resultThreadIds[0];
+  const id = currentTargetId() || resultIds.value[0];
   if (!id) return false;
   onActivate({ threadId: id, keyboard: true, shiftKey: false, metaKey: false, ctrlKey: false });
   return true;
@@ -132,10 +139,15 @@ function back(): boolean {
 }
 
 /** The hit the keys act on: the one stepped to, else the one in the reader. */
+function currentTargetId(): string {
+  const focusedId = keyboardFocusedId.value;
+  const openId = props.openThreadId ?? '';
+  if (keyboardNavigationActive.value && resultIds.value.includes(focusedId)) return focusedId;
+  return resultIds.value.includes(openId) ? openId : '';
+}
+
 function targets(): string[] {
-  const id = keyboardNavigationActive.value
-    ? keyboardFocusKey.value.replace(/^thread:/, '')
-    : props.openThreadId ?? '';
+  const id = currentTargetId();
   return id ? [id] : [];
 }
 

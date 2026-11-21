@@ -1,7 +1,8 @@
 pub use super::smtp::{send_via_smtp, send_via_smtp_returning_wire_copy, SmtpRuntimeConfig};
 use async_imap::imap_proto::{
     types::{
-        AttributeValue, MailboxDatum, MessageSection, NameAttribute, ResponseCode, SectionPath,
+        AttributeValue, Capability, MailboxDatum, MessageSection, NameAttribute, ResponseCode,
+        SectionPath,
     },
     Response, Status,
 };
@@ -12,6 +13,7 @@ use postroom::SourceId;
 use postroom_imap::imap_message_identity;
 use postroom_rfc5322::{parse_rfc822 as parse_core_rfc822, EmailMetadata, MimeContext};
 use serde::{Deserialize, Serialize};
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::net::TcpStream;
@@ -28,7 +30,10 @@ use crate::providers::{
         SyncCheckpoint,
     },
 };
-use crate::sync::errors::{SyncError, SyncResult, IMAP_MOVE_COPY_NEEDS_REVIEW};
+use crate::sync::errors::{
+    SyncError, SyncResult, IMAP_MOVE_COPY_NEEDS_REVIEW, IMAP_MOVE_COPY_REFUSED,
+    IMAP_UID_EXPUNGE_UNSUPPORTED,
+};
 use crate::utils::mime::{
     clean_mailbox_display_name, decode_bytes_with_charset, decode_mime_encoded_words,
     decode_quoted_printable_bytes, decode_rfc2231_segments, decode_rfc2231_value,
@@ -574,7 +579,7 @@ struct ImapDraftRef {
     id: String,
 }
 
-fn encode_imap_draft_ref(folder: &str, id: &str) -> String {
+pub(crate) fn encode_imap_draft_ref(folder: &str, id: &str) -> String {
     serde_json::to_string(&ImapDraftRef {
         folder: folder.to_string(),
         id: id.to_string(),
@@ -721,11 +726,6 @@ struct ImapCursorState {
     /// be resynced from scratch. 0 = unknown (cursor written before this field).
     #[serde(default)]
     uidvalidity: u32,
-    /// Generation `folders.uidvalidity` holds, put here by the caller through
-    /// [`imap_checkpoint`]. Inbound only — it is cleared before the cursor is
-    /// written back, so a run never inherits its own guess.
-    #[serde(default)]
-    db_uidvalidity: u32,
 }
 
 type ParsedCursorState = cursor::ParsedCursor<ImapCursorState>;
@@ -738,31 +738,29 @@ pub enum GenerationDecision {
     /// A recorded generation differs from the server's: every stored UID is
     /// void (RFC 3501) and the folder is refetched from scratch.
     Reset,
-    /// Nothing ever recorded a generation. The anchor may belong to another
-    /// one, so it is not used as a lower bound — the window plus the backfill
-    /// carry the folder until this run writes the generation down.
+    /// The anchor has no verified generation. Refetch through the window
+    /// and backfill without deleting data already in the current generation.
     WindowOnly,
 }
 
 /// Decide what a folder's stored UID anchor is worth.
 ///
-/// Two places remember the generation: the cursor (since format version 4) and
-/// `folders.uidvalidity`. Either one is enough to compare against the server.
-/// Only when neither knows is the anchor unusable — that is the upgrade window
-/// in which a generation change used to pass unnoticed and freeze the folder.
+/// The folder generation belongs to the stored rows. It can be newer than
+/// the cursor when ingest committed some rows but could not advance the cursor.
 pub fn imap_generation_decision(
     cursor_uidvalidity: u32,
     db_uidvalidity: Option<u32>,
     server_uidvalidity: u32,
 ) -> GenerationDecision {
-    let known = match cursor_uidvalidity {
-        0 => db_uidvalidity.filter(|value| *value != 0),
-        value => Some(value),
-    };
-    match known {
+    match db_uidvalidity.filter(|value| *value != 0) {
         Some(known) if known != server_uidvalidity => GenerationDecision::Reset,
+        Some(_) if cursor_uidvalidity != 0 && cursor_uidvalidity != server_uidvalidity => {
+            GenerationDecision::WindowOnly
+        }
         Some(_) => GenerationDecision::Continue,
-        None => GenerationDecision::WindowOnly,
+        None if cursor_uidvalidity == 0 => GenerationDecision::WindowOnly,
+        None if cursor_uidvalidity != server_uidvalidity => GenerationDecision::Reset,
+        None => GenerationDecision::Continue,
     }
 }
 
@@ -776,31 +774,35 @@ fn backfill_resume_seq(since_uid: u32, backfill_next_seq: u32, tail_start: u32) 
     (since_uid == 0 && backfill_next_seq == 0 && tail_start > 1).then(|| tail_start - 1)
 }
 
-/// Build the checkpoint for one IMAP folder from its stored cursor.
-///
-/// `db_uidvalidity` is what `folders.uidvalidity` holds. Cursors written before
-/// the cursor carried a generation have none of their own, and the database is
-/// then the only witness of which generation their UIDs belong to.
+/// Inbound context, kept outside the provider cursor so even a missing or
+/// legacy cursor can carry the database generation without changing its meaning.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct ImapCheckpoint {
+    cursor: Option<String>,
+    // Older persisted cursors can contain db_uidvalidity: 0. Only a known
+    // folder generation can identify this transient wrapper.
+    db_uidvalidity: NonZeroU32,
+}
+
 pub fn imap_checkpoint(cursor: Option<String>, db_uidvalidity: Option<u32>) -> SyncCheckpoint {
-    let Some(db_uidvalidity) = db_uidvalidity.filter(|value| *value != 0) else {
-        return SyncCheckpoint { cursor };
-    };
-    let Some(raw) = cursor
-        .as_deref()
-        .map(str::trim)
-        .filter(|raw| !raw.is_empty())
-    else {
-        return SyncCheckpoint { cursor };
-    };
-    // Only a current JSON cursor round-trips losslessly. A legacy one is
-    // rewritten by the run anyway and keeps its own upgrade path.
-    let Ok(mut state) = serde_json::from_str::<ImapCursorState>(raw) else {
-        return SyncCheckpoint { cursor };
-    };
-    state.db_uidvalidity = db_uidvalidity;
-    SyncCheckpoint {
-        cursor: serde_json::to_string(&state).ok().or(cursor),
+    match db_uidvalidity.and_then(NonZeroU32::new) {
+        Some(db_uidvalidity) => SyncCheckpoint {
+            cursor: Some(
+                serde_json::to_string(&ImapCheckpoint {
+                    cursor,
+                    db_uidvalidity,
+                })
+                .expect("IMAP checkpoint has only JSON scalars"),
+            ),
+        },
+        None => SyncCheckpoint { cursor },
     }
+}
+
+/// History backfill can continue after the new-mail cutoff has caught up.
+pub fn imap_incremental_complete(cursor: &str) -> bool {
+    serde_json::from_str::<ImapCursorState>(cursor)
+        .is_ok_and(|state| state.incremental_pending == 0)
 }
 
 #[derive(Debug)]
@@ -867,59 +869,80 @@ impl ImapProvider {
         Ok(folder.to_string())
     }
 
-    /// Fetch the bodies of the batch entries that are still inside the window.
-    ///
-    /// The backfill walks backwards, so the first rounds are mostly inside it
-    /// and the later ones entirely outside — at which point this asks for
-    /// nothing and costs a comparison per message. A message whose Date header
-    /// cannot be read keeps its body: guessing it is old would throw away
-    /// something we cannot get back cheaply.
-    async fn fetch_recent_backfill_bodies<T>(
+    /// Fetch one history page. Headers and sizes are cheap enough to list
+    /// together. The byte budget then decides how far to walk back this run.
+    async fn fetch_backfill_page<T>(
         session: &mut async_imap::Session<T>,
-        batch: &[SyncFetch],
-        cutoff: chrono::DateTime<chrono::Utc>,
-    ) -> Result<std::collections::HashMap<u32, Vec<u8>>, String>
+        start: u32,
+        end: u32,
+        body_cutoff: Option<chrono::DateTime<chrono::Utc>>,
+        limits: FetchLimits,
+    ) -> Result<(Vec<SyncFetch>, u32), String>
     where
         T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
     {
-        let wanted: Vec<String> = batch
-            .iter()
-            .filter_map(|entry| {
-                let uid = entry.uid?;
-                let header = entry
-                    .header()
-                    .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
-                    .unwrap_or_default();
-                let inside = chrono::DateTime::parse_from_rfc3339(&parse_message_date(
-                    &header,
-                    entry.internal_date,
-                    chrono::Utc::now(),
-                ))
-                .map(|date| date.with_timezone(&chrono::Utc) >= cutoff)
-                .unwrap_or(true);
-                inside.then(|| uid.to_string())
-            })
-            .collect();
-
-        let mut bodies = std::collections::HashMap::new();
-        if wanted.is_empty() {
-            return Ok(bodies);
-        }
-
-        let entries = collect_sync_fetch(
+        let mut headers = collect_sync_fetch(
             session,
             Self::op_timeout(),
-            &format!("UID FETCH {} (UID BODY.PEEK[TEXT])", wanted.join(",")),
-            "BACKFILL body",
+            &format!("FETCH {start}:{end} (UID RFC822.SIZE FLAGS INTERNALDATE BODY.PEEK[HEADER])"),
+            "BACKFILL headers",
         )
         .await?;
-
-        for entry in entries {
-            if let (Some(uid), Some(text)) = (entry.uid, entry.text()) {
-                bodies.insert(uid, text.to_vec());
-            }
+        headers.retain(|entry| (start..=end).contains(&entry.message) && entry.header.is_some());
+        headers.sort_unstable_by_key(|entry| std::cmp::Reverse(entry.message));
+        let arrival = chrono::Utc::now();
+        let wants_body = |entry: &SyncFetch| {
+            body_cutoff.is_none_or(|cutoff| {
+                let header = entry
+                    .header()
+                    .map(String::from_utf8_lossy)
+                    .unwrap_or_default();
+                chrono::DateTime::parse_from_rfc3339(&parse_message_date(
+                    &header,
+                    entry.internal_date,
+                    arrival,
+                ))
+                .map_or(true, |date| date >= cutoff)
+            })
+        };
+        let wanted: Vec<_> = headers
+            .iter()
+            .filter_map(|entry| {
+                let uid = entry.uid.filter(|uid| *uid != 0)?;
+                wants_body(entry).then_some(ListedMessage {
+                    uid,
+                    seq: entry.message,
+                    // Without a size, give this body a chunk of its own.
+                    size: entry.size.map_or(limits.run_bytes, u64::from).max(1),
+                })
+            })
+            .collect();
+        let plan = plan_fetch(&wanted, limits);
+        let mut by_uid = std::collections::HashMap::new();
+        for chunk in &plan.chunks {
+            let uids = chunk.iter().map(|entry| entry.uid).collect::<Vec<_>>();
+            let bodies = collect_sync_fetch(
+                session,
+                chunk_timeout(Self::op_timeout(), chunk),
+                &format!("UID FETCH {} (UID BODY.PEEK[TEXT])", Self::uid_set(&uids)),
+                "BACKFILL body",
+            )
+            .await?;
+            by_uid.extend(
+                bodies
+                    .into_iter()
+                    .filter_map(|body| Some((body.uid?, body.text?))),
+            );
         }
-        Ok(bodies)
+        let next = wanted
+            .get(wanted.len() - plan.deferred)
+            .map_or(start - 1, |entry| entry.seq);
+        headers.retain(|entry| entry.message > next);
+        for entry in &mut headers {
+            entry.text = entry.uid.and_then(|uid| by_uid.remove(&uid));
+        }
+        headers.reverse();
+        Ok((headers, next))
     }
 
     /// The oldest date whose body is still stored, if history is bounded.
@@ -1310,8 +1333,18 @@ impl ImapProvider {
         Ok(session)
     }
 
-    fn parse_cursor_state(since: &SyncCheckpoint) -> ParsedCursorState {
-        cursor::parse_state(since.cursor.as_deref(), |raw| {
+    fn encode_cursor(state: ImapCursorState) -> String {
+        serde_json::to_string(&state).expect("IMAP cursor has only JSON scalars")
+    }
+
+    fn parse_checkpoint(since: &SyncCheckpoint) -> (ParsedCursorState, Option<u32>) {
+        let raw = since.cursor.as_deref();
+        let inbound = raw.and_then(|value| serde_json::from_str::<ImapCheckpoint>(value).ok());
+        let cursor = match &inbound {
+            Some(inbound) => inbound.cursor.as_deref(),
+            None => raw,
+        };
+        let parsed = cursor::parse_state(cursor, |raw| {
             let mut state = ImapCursorState::default();
             if let Some(value) = raw
                 .strip_prefix("uid:")
@@ -1325,7 +1358,8 @@ impl ImapProvider {
                 state.high_seq = value;
             }
             state
-        })
+        });
+        (parsed, inbound.map(|value| value.db_uidvalidity.get()))
     }
 
     fn message_refs_by_folder(
@@ -1398,85 +1432,227 @@ impl ImapProvider {
         .map_err(|error| format!("imap UID STORE failed: {error}"))
     }
 
-    /// Remove exactly these UIDs from the selected mailbox.
-    ///
-    /// A server without UIDPLUS rejects `UID EXPUNGE`, and the plain `EXPUNGE`
-    /// that remains removes *every* `\Deleted` message of the mailbox — Alpine
-    /// and mutt mark mail that way and never expunge it. The fallback therefore
-    /// runs only once `UID SEARCH DELETED` has shown that nothing but our own
-    /// UIDs would go.
-    async fn expunge_uids<T>(
-        session: &mut async_imap::Session<T>,
-        uids: &[u32],
-    ) -> Result<(), String>
+    /// Only these UIDs can be removed, including when another session has
+    /// marked unrelated messages in the same mailbox as deleted.
+    async fn delete_uids<T>(session: &mut async_imap::Session<T>, uids: &[u32]) -> SyncResult<()>
     where
         T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
     {
-        if uids.is_empty() {
+        let uid_set = Self::uid_set(uids);
+        for command in [
+            format!("UID STORE {uid_set} +FLAGS.SILENT (\\Deleted)"),
+            format!("UID EXPUNGE {uid_set}"),
+        ] {
+            match timeout(
+                Self::op_timeout(),
+                session.run_command_and_check_ok(&command),
+            )
+            .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) if is_server_rejection(&error) => {
+                    tracing::warn!(%command, %error, "IMAP selective deletion refused");
+                    return Err(SyncError::Permanent(
+                        "backend.errors.imapDeleteRefused".into(),
+                    ));
+                }
+                Ok(Err(error)) => return Err(format!("imap {command} failed: {error}").into()),
+                Err(_) => return Err(format!("imap {command} timed out").into()),
+            }
+        }
+        Ok(())
+    }
+
+    async fn uid_expunge_supported<T>(session: &mut async_imap::Session<T>) -> Result<bool, String>
+    where
+        T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+    {
+        let mut supported = None;
+        timeout(
+            Self::op_timeout(),
+            read_checked_command(session, "CAPABILITY", |response| {
+                if let Response::Capabilities(capabilities) = response {
+                    supported = Some(capabilities.iter().any(|capability| {
+                        matches!(capability, Capability::Atom(name)
+                            if name.eq_ignore_ascii_case("UIDPLUS") || name.eq_ignore_ascii_case("IMAP4rev2"))
+                    }));
+                }
+            }),
+        )
+        .await
+        .map_err(|_| "imap CAPABILITY timed out".to_string())?
+        .map_err(|err| format!("imap CAPABILITY failed: {err}"))?;
+        supported.ok_or_else(|| "imap CAPABILITY returned no capabilities".to_string())
+    }
+
+    fn require_uid_expunge(supported: bool) -> SyncResult<()> {
+        if supported {
             return Ok(());
         }
+        Err(SyncError::Permanent(IMAP_UID_EXPUNGE_UNSUPPORTED.into()))
+    }
 
+    async fn append_replacement_draft<T>(
+        session: &mut async_imap::Session<T>,
+        folder: &str,
+        raw: &[u8],
+        message_id: &str,
+        previous_identifier: Option<&str>,
+    ) -> SyncResult<String>
+    where
+        T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+    {
+        if !Self::uid_expunge_supported(session).await? {
+            return Err(SyncError::Permanent(
+                "backend.errors.imapDraftSyncUnsupported".into(),
+            ));
+        }
+        // A numeric legacy reference has no UIDVALIDITY and cannot identify
+        // the old draft. Leave the editable revision on this device.
+        if previous_identifier.is_some_and(is_numeric_imap_uid) {
+            return Err(permanent_imap_error(
+                "backend.errors.imapDraftUidWithoutValidity",
+                folder,
+            ));
+        }
+        let previous = previous_identifier.filter(|id| *id != message_id);
+        let mut old_uids = std::collections::BTreeSet::new();
+        for identifier in std::iter::once(message_id).chain(previous) {
+            old_uids.extend(Self::find_draft_uids(session, identifier).await?);
+        }
+        let needs_review =
+            || SyncError::Permanent("backend.errors.imapDraftSyncNeedsReview".into());
+        // A previous APPEND may have succeeded while cleanup failed. Stop
+        // before another APPEND, even when a new edit superseded its queue row.
+        if old_uids.len() > 1 {
+            return Err(needs_review());
+        }
+
+        let append_timeout = crate::utils::http::upload_timeout(Self::op_timeout(), raw.len());
         match timeout(
-            Self::op_timeout(),
-            session.run_command_and_check_ok(format!("UID EXPUNGE {}", Self::uid_set(uids))),
+            append_timeout,
+            session.append(folder, Some("(\\Draft)"), None, raw),
         )
         .await
         {
-            Ok(Ok(_)) => return Ok(()),
-            Ok(Err(err)) if !is_server_rejection(&err) => {
-                return Err(format!("imap UID EXPUNGE failed: {err}"));
+            Ok(Ok(())) => {}
+            Ok(Err(error))
+                if is_server_rejection(&error)
+                    || matches!(error, async_imap::error::Error::Validate(_)) =>
+            {
+                return Err(format!("imap APPEND {folder} failed: {error}").into());
             }
-            Ok(Err(_)) => {}
-            Err(_) => return Err("imap UID EXPUNGE timed out".to_string()),
+            result => {
+                tracing::warn!(?result, %folder, "IMAP draft APPEND outcome unknown");
+                return Err(needs_review());
+            }
         }
 
-        Self::ensure_plain_expunge_is_safe(session, uids).await?;
-        timeout(
-            Self::op_timeout(),
-            session.run_command_and_check_ok("EXPUNGE"),
-        )
-        .await
-        .map_err(|_| "imap EXPUNGE timed out".to_string())?
-        .map_err(|error| format!("imap EXPUNGE failed: {error}"))
+        if let Some(uid) = old_uids.first() {
+            if let Err(error) = Self::delete_uids(session, &[*uid]).await {
+                tracing::warn!(%error, "IMAP draft appended but its previous revision could not be removed");
+                return Err(needs_review());
+            }
+        }
+
+        Ok(encode_imap_draft_ref(folder, message_id))
     }
 
-    /// Refuse a plain `EXPUNGE` while the mailbox holds a `\Deleted` message
-    /// that is not ours. The flag we set stays, and the queued retry tries
-    /// again once the other client has cleaned up.
-    async fn ensure_plain_expunge_is_safe<T>(
+    async fn move_messages_on_session<T>(
         session: &mut async_imap::Session<T>,
-        uids: &[u32],
-    ) -> Result<(), String>
+        grouped: std::collections::HashMap<String, UidMutationGroup>,
+        target: &str,
+    ) -> SyncResult<()>
     where
         T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
     {
-        let deleted =
-            checked_uid_search(session, "DELETED", Self::op_timeout(), "UID SEARCH DELETED")
-                .await?;
-        if plain_expunge_is_safe(&deleted, uids) {
-            return Ok(());
+        let mut uid_expunge = None;
+        for (folder, group) in grouped {
+            let uid_set = Self::uid_set(&group.uids);
+            let mailbox = timeout(Self::op_timeout(), session.select(folder.as_str()))
+                .await
+                .map_err(|_| format!("imap SELECT {folder} timed out"))?
+                .map_err(|err| format!("imap SELECT {folder} failed: {err}"))?;
+            group.validate_generation(&folder, mailbox.uid_validity)?;
+
+            let move_result = timeout(Self::op_timeout(), session.uid_mv(&uid_set, target))
+                .await
+                .map_err(|_| "imap UID MOVE timed out".to_string())?;
+
+            if let Err(error) = move_result {
+                // Only a declined MOVE is a case for COPY. A broken exchange
+                // may have moved part of the set already, and copying on top
+                // of that duplicates mail in the target.
+                if !is_server_rejection(&error) {
+                    return Err(format!("imap UID MOVE failed: {error}").into());
+                }
+                Self::copy_and_remove_source(session, &group.uids, target, &mut uid_expunge)
+                    .await?;
+            }
         }
-        Err("imap EXPUNGE unsafe: mailbox holds foreign \\Deleted messages".to_string())
+
+        Ok(())
     }
 
-    /// Settle before the `UID COPY` whether the source copies can be removed
-    /// afterwards.
-    ///
-    /// A move either leaves the target untouched or completes. Copying first
-    /// and discovering only then that the source cannot be expunged leaves a
-    /// copy behind that the queued retry would duplicate.
-    async fn ensure_expunge_is_possible(
-        session: &mut async_imap::Session<TlsStream<TcpStream>>,
-        uids: &[u32],
-    ) -> Result<(), String> {
-        let capabilities = timeout(Self::op_timeout(), session.capabilities())
-            .await
-            .map_err(|_| "imap CAPABILITY timed out".to_string())?
-            .map_err(|err| format!("imap CAPABILITY failed: {err}"))?;
-        if capabilities.has_str("UIDPLUS") {
+    async fn delete_messages_on_session<T>(
+        session: &mut async_imap::Session<T>,
+        grouped: std::collections::HashMap<String, UidMutationGroup>,
+    ) -> SyncResult<()>
+    where
+        T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+    {
+        Self::require_uid_expunge(Self::uid_expunge_supported(session).await?)?;
+        for (folder, group) in grouped {
+            let mailbox = timeout(Self::op_timeout(), session.select(folder.as_str()))
+                .await
+                .map_err(|_| format!("imap SELECT {folder} timed out"))?
+                .map_err(|err| format!("imap SELECT {folder} failed: {err}"))?;
+            group.validate_generation(&folder, mailbox.uid_validity)?;
+            Self::delete_uids(session, &group.uids).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn find_draft_uids<T>(
+        session: &mut async_imap::Session<T>,
+        identifier: &str,
+    ) -> SyncResult<std::collections::HashSet<u32>>
+    where
+        T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+    {
+        if identifier.is_empty() || identifier.contains(['\r', '\n', '\0']) {
+            return Err(SyncError::Permanent(
+                "backend.errors.imapMutationInvalidRef".into(),
+            ));
+        }
+        let escaped = identifier.replace('\\', "\\\\").replace('"', "\\\"");
+        Ok(checked_uid_search(
+            session,
+            &format!(r#"HEADER Message-ID "{escaped}""#),
+            Self::op_timeout(),
+            "draft search",
+        )
+        .await?)
+    }
+
+    async fn delete_selected_draft<T>(
+        session: &mut async_imap::Session<T>,
+        identifier: &str,
+    ) -> SyncResult<()>
+    where
+        T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+    {
+        let mut uids = Self::find_draft_uids(session, identifier)
+            .await?
+            .into_iter()
+            .collect::<Vec<_>>();
+        if uids.is_empty() {
             return Ok(());
         }
-        Self::ensure_plain_expunge_is_safe(session, uids).await
+        Self::require_uid_expunge(Self::uid_expunge_supported(session).await?)?;
+        uids.sort_unstable();
+        Self::delete_uids(session, &uids).await
     }
 
     /// Once COPY might have happened, replaying the entire operation would
@@ -1486,10 +1662,18 @@ impl ImapProvider {
         session: &mut async_imap::Session<T>,
         uids: &[u32],
         target: &str,
+        uid_expunge: &mut Option<bool>,
     ) -> SyncResult<()>
     where
         T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
     {
+        // Settle capability before COPY. If cleanup is unsupported, the
+        // queue must stop here without leaving a copy behind on each retry.
+        let supported = match *uid_expunge {
+            Some(supported) => supported,
+            None => *uid_expunge.insert(Self::uid_expunge_supported(session).await?),
+        };
+        Self::require_uid_expunge(supported)?;
         let needs_review = |error: String| {
             tracing::warn!(%error, "IMAP COPY move stopped after possible destination copy");
             SyncError::Permanent(IMAP_MOVE_COPY_NEEDS_REVIEW.into())
@@ -1501,17 +1685,15 @@ impl ImapProvider {
                 if is_server_rejection(&error)
                     || matches!(error, async_imap::error::Error::Validate(_)) =>
             {
-                return Err(format!("imap UID COPY failed: {error}").into());
+                tracing::warn!(%error, "IMAP COPY was refused");
+                return Err(SyncError::Permanent(IMAP_MOVE_COPY_REFUSED.into()));
             }
             Ok(Err(error)) => return Err(needs_review(format!("imap UID COPY failed: {error}"))),
             Err(_) => return Err(needs_review("imap UID COPY timed out".into())),
         }
-        Self::apply_uid_store(session, &uid_set, "+FLAGS.SILENT (\\Deleted)")
+        Self::delete_uids(session, uids)
             .await
-            .map_err(needs_review)?;
-        Self::expunge_uids(session, uids)
-            .await
-            .map_err(needs_review)
+            .map_err(|error| needs_review(error.to_string()))
     }
 }
 
@@ -1526,11 +1708,6 @@ fn is_server_rejection(error: &async_imap::error::Error) -> bool {
         error,
         async_imap::error::Error::No(_) | async_imap::error::Error::Bad(_)
     )
-}
-
-/// Whether a plain `EXPUNGE` would remove nothing but the given UIDs.
-fn plain_expunge_is_safe(deleted: &std::collections::HashSet<u32>, uids: &[u32]) -> bool {
-    deleted.iter().all(|uid| uids.contains(uid))
 }
 
 /// What the incremental fetch asks for, per message.
@@ -1618,12 +1795,10 @@ fn listed_messages(
     (listed, uidless)
 }
 
-/// Cut the listed messages into chunks, oldest first, until the run is full.
-///
-/// Order matters: the cursor may only move past a UID once everything below it
-/// has arrived, so the chunks run in ascending UID order and the run stops at
-/// a chunk boundary. The first chunk is always taken, however large.
-fn plan_incremental_fetch(listed: &[ListedMessage], limits: FetchLimits) -> FetchPlan {
+/// Cut the listed messages into chunks in cursor order until the run is full.
+/// Incremental sync walks forward by UID and backfill walks backward by
+/// sequence. The first message is always taken, however large.
+fn plan_fetch(listed: &[ListedMessage], limits: FetchLimits) -> FetchPlan {
     let mut plan = FetchPlan::default();
     let mut current = Vec::new();
     let mut current_bytes = 0u64;
@@ -1771,12 +1946,10 @@ struct EnvelopeContext {
 ///
 /// MIME parsing a backfill batch of a thousand messages, or one message with
 /// a 25 MB attachment, is CPU work measured in seconds; on a runtime worker it
-/// stalls every IPC call scheduled behind it. `bodies` replaces each entry's
-/// own `BODY[TEXT]` when the bodies came from a separate fetch. Returns the
-/// envelopes and the number of entries discarded for lacking a UID.
+/// stalls every IPC call scheduled behind it. Returns the envelopes and
+/// the number of entries discarded for lacking a UID.
 async fn envelopes_off_runtime(
     entries: Vec<SyncFetch>,
-    bodies: Option<std::collections::HashMap<u32, Vec<u8>>>,
     context: EnvelopeContext,
 ) -> Result<(Vec<MessageEnvelope>, usize), String> {
     if entries.is_empty() {
@@ -1794,11 +1967,7 @@ async fn envelopes_off_runtime(
                 uidless += 1;
                 continue;
             };
-            let body = match &bodies {
-                Some(bodies) => bodies.get(&uid).map(Vec::as_slice),
-                None => entry.text(),
-            };
-            envelopes.push(envelope_from_fetch(entry, body, uid, &context));
+            envelopes.push(envelope_from_fetch(entry, uid, &context));
         }
         (envelopes, uidless)
     })
@@ -1855,31 +2024,21 @@ impl ImapProvider {
         let _ = timeout(Self::op_timeout(), session.logout()).await;
         Ok((folders, quota))
     }
-}
 
-#[async_trait::async_trait]
-impl MailProvider for ImapProvider {
-    async fn sync_folders(&self) -> crate::sync::errors::SyncResult<Vec<RemoteFolder>> {
-        Ok(self.list_folders(false).await?.0)
-    }
-
-    async fn sync_folders_with_quota(
+    async fn sync_mailbox<T>(
         &self,
-    ) -> SyncResult<(Vec<RemoteFolder>, super::quota::QuotaProbe)> {
-        self.list_folders(true).await
-    }
-
-    async fn sync_messages(
-        &self,
+        session: &mut async_imap::Session<T>,
         folder: &str,
         since: SyncCheckpoint,
-    ) -> crate::sync::errors::SyncResult<SyncBatch> {
+    ) -> SyncResult<SyncBatch>
+    where
+        T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+    {
         let cfg = self
             .config
             .as_ref()
             .ok_or_else(|| "IMAP provider config missing".to_string())?;
         let core_source_id = SourceId::new(format!("imap/{}/{}", cfg.host, cfg.username));
-        let mut session = self.login_session().await?;
 
         let mailbox = timeout(Self::op_timeout(), session.select(folder))
             .await
@@ -1887,7 +2046,7 @@ impl MailProvider for ImapProvider {
             .map_err(|err| format!("imap SELECT {folder} failed: {err}"))?;
 
         let exists = mailbox.exists;
-        let parsed_cursor = Self::parse_cursor_state(&since);
+        let (parsed_cursor, db_uidvalidity) = Self::parse_checkpoint(&since);
         let mut cursor_state = parsed_cursor.state;
         // RFC 3501 requires UIDVALIDITY in the SELECT response. Reading a
         // missing one as 0 turned a generation change into a silent no-op:
@@ -1899,37 +2058,30 @@ impl MailProvider for ImapProvider {
             .ok_or_else(|| {
                 format!("imap protocol violation: SELECT {folder} reported no UIDVALIDITY")
             })?;
-        let db_uidvalidity =
-            (cursor_state.db_uidvalidity != 0).then_some(cursor_state.db_uidvalidity);
-        // Inbound only. The caller supplies it fresh from the database on
-        // every run; carrying it back out would freeze one run's guess.
-        cursor_state.db_uidvalidity = 0;
         let mut has_cursor = parsed_cursor.had_checkpoint;
         let decision =
             imap_generation_decision(cursor_state.uidvalidity, db_uidvalidity, server_uidvalidity);
-        let reset_folder = has_cursor && decision == GenerationDecision::Reset;
-        if reset_folder {
-            // A UID is only meaningful inside its UIDVALIDITY generation. The
-            // manager clears the folder before this fresh snapshot is applied.
+        let reset_folder = decision == GenerationDecision::Reset;
+        if reset_folder
+            || (decision == GenerationDecision::WindowOnly && cursor_state.uidvalidity != 0)
+        {
             cursor_state = ImapCursorState::default();
             has_cursor = false;
         }
         if exists == 0 {
-            // Nothing left to list, so nothing the last run deferred either.
-            cursor_state.incremental_pending = 0;
-            let cursor = if reset_folder {
-                cursor_state.format_version = Self::CURSOR_FORMAT_VERSION;
-                cursor_state.uidvalidity = server_uidvalidity;
-                serde_json::to_string(&cursor_state).ok()
-            } else if has_cursor && !parsed_cursor.was_legacy {
-                // Same cursor, minus the database hint that only travels
-                // inwards, plus the generation an empty folder would otherwise
-                // never get to record.
-                cursor_state.uidvalidity = server_uidvalidity;
-                serde_json::to_string(&cursor_state).ok().or(since.cursor)
+            // A mailbox can become empty during recovery. Finish both passes
+            // and record the observed generation even without a UID anchor.
+            let previous_uid = if decision == GenerationDecision::Continue {
+                cursor_state.high_uid
             } else {
-                since.cursor
+                0
             };
+            let cursor = Some(Self::encode_cursor(ImapCursorState {
+                high_uid: previous_uid.max(mailbox.uid_next.unwrap_or(1).saturating_sub(1)),
+                uidvalidity: server_uidvalidity,
+                format_version: Self::CURSOR_FORMAT_VERSION,
+                ..Default::default()
+            }));
             let _ = timeout(Self::op_timeout(), session.logout()).await;
             return Ok(SyncBatch {
                 messages: vec![],
@@ -1983,11 +2135,15 @@ impl MailProvider for ImapProvider {
         // chunks that arrived: a run that fills its budget or loses a chunk
         // leaves the rest to the next run, instead of failing the folder and
         // starting the same download over on every retry.
-        let use_uid_fetch = has_cursor && since_uid > 0;
+        let verified_empty_cursor = has_cursor
+            && cursor_state.uidvalidity == server_uidvalidity
+            && cursor_state.high_seq == 0
+            && cursor_state.backfill_next_seq == 0;
+        let use_uid_fetch = has_cursor && (since_uid > 0 || verified_empty_cursor);
         let listing = if use_uid_fetch {
             let uid_set = format!("{}:*", since_uid.saturating_add(1));
             collect_sync_fetch(
-                &mut session,
+                session,
                 Self::op_timeout(),
                 &format!("UID FETCH {uid_set} {MESSAGE_LISTING_ITEMS}"),
                 "UID FETCH",
@@ -2005,7 +2161,7 @@ impl MailProvider for ImapProvider {
                 format!("{tail_start}:*")
             };
             collect_sync_fetch(
-                &mut session,
+                session,
                 Self::op_timeout(),
                 &format!("FETCH {seq_set} {MESSAGE_LISTING_ITEMS}"),
                 "FETCH",
@@ -2019,13 +2175,13 @@ impl MailProvider for ImapProvider {
             since_uid,
             since_seq,
         );
-        let plan = plan_incremental_fetch(&listed, FETCH_LIMITS);
-        let fetched = fetch_planned_chunks(&mut session, &plan, Self::op_timeout()).await?;
+        let plan = plan_fetch(&listed, FETCH_LIMITS);
+        let fetched = fetch_planned_chunks(session, &plan, Self::op_timeout()).await?;
         let (high_uid, high_seq, incremental_pending) =
             advance_after_chunks(since_uid, since_seq, &plan, fetched.completed);
         // A broken-off chunk leaves the connection mid-response. The backfill
         // and the LOGOUT would only wait out their own deadlines on it.
-        let session_usable = fetched.interrupted.is_none();
+        let mut session_usable = fetched.interrupted.is_none();
         if let Some(error) = fetched.interrupted.as_deref() {
             tracing::warn!(
                 folder,
@@ -2048,16 +2204,18 @@ impl MailProvider for ImapProvider {
             receiver: cfg.host.clone(),
         };
         let (mut messages, uidless) =
-            envelopes_off_runtime(entries, None, envelope_context.clone()).await?;
+            envelopes_off_runtime(entries, envelope_context.clone()).await?;
         uidless_entries += uidless;
 
         cursor_state.high_uid = high_uid;
         cursor_state.high_seq = high_seq;
         cursor_state.incremental_pending = incremental_pending;
 
-        if let Some(resume) =
-            backfill_resume_seq(since_uid, cursor_state.backfill_next_seq, tail_start)
-        {
+        if let Some(resume) = backfill_resume_seq(
+            since_uid,
+            cursor_state.backfill_next_seq,
+            if use_uid_fetch { 1 } else { tail_start },
+        ) {
             cursor_state.backfill_next_seq = resume;
             cursor_state.backfill_total_seq = resume;
         }
@@ -2073,45 +2231,34 @@ impl MailProvider for ImapProvider {
                 } else {
                     1
                 };
-                let backfill_set = format!("{backfill_start}:{backfill_end}");
-                // Headers alone when history is bounded. The bodies for the
-                // part of this batch that is still inside the window follow in
-                // a second fetch below; once the walk is past the cutoff that
-                // second fetch asks for nothing and stops happening.
-                let body_cutoff = self.body_cutoff();
-                let backfill_items = if body_cutoff.is_some() {
-                    "(UID FLAGS INTERNALDATE BODY.PEEK[HEADER])"
-                } else {
-                    "(UID FLAGS INTERNALDATE BODY.PEEK[HEADER] BODY.PEEK[TEXT])"
-                };
-                let mut older = collect_sync_fetch(
-                    &mut session,
-                    Self::op_timeout(),
-                    &format!("FETCH {backfill_set} {backfill_items}"),
-                    "BACKFILL",
+                let backfill = Self::fetch_backfill_page(
+                    session,
+                    backfill_start,
+                    backfill_end,
+                    self.body_cutoff(),
+                    FETCH_LIMITS,
                 )
-                .await?;
-                older.sort_by_key(|entry| entry.uid.unwrap_or(entry.message));
-
-                // Outside the window there is no body to parse, and the
-                // message is stored as the envelope it already is. Opening it
-                // fetches the body then — see `load_message_body`.
-                let recent_bodies = match body_cutoff {
-                    Some(cutoff) => Some(
-                        Self::fetch_recent_backfill_bodies(&mut session, &older, cutoff).await?,
-                    ),
-                    None => None,
+                .await;
+                let backfill = match backfill {
+                    Ok((older, next)) => envelopes_off_runtime(older, envelope_context)
+                        .await
+                        .map(|(messages, uidless)| (messages, uidless, next)),
+                    Err(error) => {
+                        session_usable = false;
+                        Err(error)
+                    }
                 };
-
-                let (older_messages, uidless) =
-                    envelopes_off_runtime(older, recent_bodies, envelope_context).await?;
-                uidless_entries += uidless;
-                messages.extend(older_messages);
-
-                if backfill_start <= 1 {
-                    cursor_state.backfill_next_seq = 0;
-                } else {
-                    cursor_state.backfill_next_seq = backfill_start - 1;
+                match backfill {
+                    Ok((older, uidless, next)) => {
+                        messages.extend(older);
+                        uidless_entries += uidless;
+                        cursor_state.backfill_next_seq = next;
+                    }
+                    Err(error) if fetched.completed == 0 => return Err(error.into()),
+                    Err(error) => tracing::warn!(
+                        folder, %error, backfill_start, backfill_end,
+                        "imap backfill failed, keeping incremental progress"
+                    ),
                 }
             } else {
                 cursor_state.backfill_next_seq = 0;
@@ -2121,17 +2268,7 @@ impl MailProvider for ImapProvider {
         cursor_state.format_version = Self::CURSOR_FORMAT_VERSION;
         cursor_state.uidvalidity = server_uidvalidity;
 
-        let next_cursor = if cursor_state.high_uid == 0 && cursor_state.high_seq == 0 {
-            since.cursor.unwrap_or_else(|| "seq:0".to_string())
-        } else {
-            serde_json::to_string(&cursor_state).unwrap_or_else(|_| {
-                if cursor_state.high_uid > 0 {
-                    format!("uid:{}", cursor_state.high_uid)
-                } else {
-                    format!("seq:{}", cursor_state.high_seq)
-                }
-            })
-        };
+        let next_cursor = Self::encode_cursor(cursor_state);
 
         if uidless_entries > 0 {
             tracing::warn!(
@@ -2154,6 +2291,28 @@ impl MailProvider for ImapProvider {
                 cursor: Some(next_cursor),
             },
         })
+    }
+}
+
+#[async_trait::async_trait]
+impl MailProvider for ImapProvider {
+    async fn sync_folders(&self) -> crate::sync::errors::SyncResult<Vec<RemoteFolder>> {
+        Ok(self.list_folders(false).await?.0)
+    }
+
+    async fn sync_folders_with_quota(
+        &self,
+    ) -> SyncResult<(Vec<RemoteFolder>, super::quota::QuotaProbe)> {
+        self.list_folders(true).await
+    }
+
+    async fn sync_messages(
+        &self,
+        folder: &str,
+        since: SyncCheckpoint,
+    ) -> crate::sync::errors::SyncResult<SyncBatch> {
+        let mut session = self.login_session().await?;
+        self.sync_mailbox(&mut session, folder, since).await
     }
 
     async fn fetch_messages_by_remote_ids(
@@ -2203,7 +2362,6 @@ impl MailProvider for ImapProvider {
             .collect();
             (messages, _) = envelopes_off_runtime(
                 fetched,
-                None,
                 EnvelopeContext {
                     folder: folder.to_string(),
                     uidvalidity: server_uidvalidity,
@@ -2504,30 +2662,7 @@ impl MailProvider for ImapProvider {
         }
 
         let mut session = self.login_session().await?;
-        for (folder, group) in grouped {
-            let uid_set = Self::uid_set(&group.uids);
-            let mailbox = timeout(Self::op_timeout(), session.select(folder.as_str()))
-                .await
-                .map_err(|_| format!("imap SELECT {folder} timed out"))?
-                .map_err(|err| format!("imap SELECT {folder} failed: {err}"))?;
-            group.validate_generation(&folder, mailbox.uid_validity)?;
-
-            let move_result = timeout(Self::op_timeout(), session.uid_mv(&uid_set, target))
-                .await
-                .map_err(|_| "imap UID MOVE timed out".to_string())?;
-
-            if let Err(error) = move_result {
-                // Only a declined MOVE is a case for COPY. A broken exchange
-                // may have moved part of the set already, and copying on top
-                // of that duplicates mail in the target.
-                if !is_server_rejection(&error) {
-                    return Err(format!("imap UID MOVE failed: {error}").into());
-                }
-                Self::ensure_expunge_is_possible(&mut session, &group.uids).await?;
-                Self::copy_and_remove_source(&mut session, &group.uids, target).await?;
-            }
-        }
-
+        Self::move_messages_on_session(&mut session, grouped, target).await?;
         let _ = timeout(Self::op_timeout(), session.logout()).await;
         Ok(())
     }
@@ -2542,17 +2677,7 @@ impl MailProvider for ImapProvider {
         }
 
         let mut session = self.login_session().await?;
-        for (folder, group) in grouped {
-            let uid_set = Self::uid_set(&group.uids);
-            let mailbox = timeout(Self::op_timeout(), session.select(folder.as_str()))
-                .await
-                .map_err(|_| format!("imap SELECT {folder} timed out"))?
-                .map_err(|err| format!("imap SELECT {folder} failed: {err}"))?;
-            group.validate_generation(&folder, mailbox.uid_validity)?;
-            Self::apply_uid_store(&mut session, &uid_set, "+FLAGS.SILENT (\\Deleted)").await?;
-            Self::expunge_uids(&mut session, &group.uids).await?;
-        }
-
+        Self::delete_messages_on_session(&mut session, grouped).await?;
         let _ = timeout(Self::op_timeout(), session.logout()).await;
         Ok(())
     }
@@ -2640,65 +2765,22 @@ impl MailProvider for ImapProvider {
         let mut session = self.login_session().await?;
         let folder = Self::select_draft_folder(&mut session, folder).await?;
 
-        let mut old_uids = std::collections::HashSet::<u32>::new();
         let previous_identifier = decoded_remote
             .as_ref()
             .map(|draft| draft.id.as_str())
             .or(remote_draft_id)
             .map(str::trim)
             .filter(|value| !value.is_empty());
-        if let Some(identifier) = previous_identifier {
-            // A legacy numeric draft ref has no UIDVALIDITY. It might now
-            // identify another message, so only stable Message-ID refs may
-            // select old drafts for deletion.
-            if !is_numeric_imap_uid(identifier) {
-                let escaped = identifier.replace('\\', "\\\\").replace('"', "\\\"");
-                old_uids.extend(
-                    checked_uid_search(
-                        &mut session,
-                        &format!(r#"HEADER Message-ID "{escaped}""#),
-                        Self::op_timeout(),
-                        "draft search",
-                    )
-                    .await?,
-                );
-            }
-        }
-
-        timeout(
-            Self::op_timeout(),
-            session.append(folder.as_str(), Some("(\\Draft)"), None, raw.as_bytes()),
-        )
-        .await
-        .map_err(|_| format!("imap APPEND {folder} timed out"))?
-        .map_err(|err| format!("imap APPEND {folder} failed: {err}"))?;
-        let _ = timeout(Self::op_timeout(), session.noop()).await;
-
-        let escaped = message_id.replace('\\', "\\\\").replace('"', "\\\"");
-        let current_uids = checked_uid_search(
+        let remote_id = Self::append_replacement_draft(
             &mut session,
-            &format!(r#"HEADER Message-ID "{escaped}""#),
-            Self::op_timeout(),
-            "replacement draft search",
+            &folder,
+            raw.as_bytes(),
+            &message_id,
+            previous_identifier,
         )
         .await?;
-        let newest_uid = current_uids.iter().max().copied();
-        old_uids.extend(current_uids);
-        if let Some(newest_uid) = newest_uid {
-            old_uids.remove(&newest_uid);
-        }
-        if !old_uids.is_empty() {
-            let uids = old_uids.into_iter().collect::<Vec<_>>();
-            Self::apply_uid_store(
-                &mut session,
-                &Self::uid_set(&uids),
-                "+FLAGS.SILENT (\\Deleted)",
-            )
-            .await?;
-            Self::expunge_uids(&mut session, &uids).await?;
-        }
         let _ = timeout(Self::op_timeout(), session.logout()).await;
-        Ok(Some(encode_imap_draft_ref(&folder, &message_id)))
+        Ok(Some(remote_id))
     }
 
     async fn delete_draft(&self, remote_draft_id: &str) -> crate::sync::errors::SyncResult<()> {
@@ -2720,25 +2802,7 @@ impl MailProvider for ImapProvider {
         }
         let mut session = self.login_session().await?;
         let _folder = Self::select_draft_folder(&mut session, folder).await?;
-        let escaped = identifier.replace('\\', "\\\\").replace('"', "\\\"");
-        let uids = checked_uid_search(
-            &mut session,
-            &format!(r#"HEADER Message-ID "{escaped}""#),
-            Self::op_timeout(),
-            "draft delete search",
-        )
-        .await?
-        .into_iter()
-        .collect::<Vec<_>>();
-        if !uids.is_empty() {
-            Self::apply_uid_store(
-                &mut session,
-                &Self::uid_set(&uids),
-                "+FLAGS.SILENT (\\Deleted)",
-            )
-            .await?;
-            Self::expunge_uids(&mut session, &uids).await?;
-        }
+        Self::delete_selected_draft(&mut session, identifier).await?;
         let _ = timeout(Self::op_timeout(), session.logout()).await;
         Ok(())
     }
@@ -5413,14 +5477,8 @@ pub(crate) fn allows_custom_keywords(permanent_flags: &[async_imap::types::Flag<
 }
 
 /// One `UID FETCH (UID FLAGS INTERNALDATE BODY.PEEK[HEADER] BODY.PEEK[TEXT])`
-/// entry as an envelope. `body` is the entry's `BODY[TEXT]` or, for a backfill
-/// that fetched bodies separately, what that fetch returned.
-fn envelope_from_fetch(
-    entry: &SyncFetch,
-    body: Option<&[u8]>,
-    uid: u32,
-    context: &EnvelopeContext,
-) -> MessageEnvelope {
+/// entry as an envelope.
+fn envelope_from_fetch(entry: &SyncFetch, uid: u32, context: &EnvelopeContext) -> MessageEnvelope {
     let remote_id = uid.to_string();
     let folder = context.folder.as_str();
     let server_uidvalidity = context.uidvalidity;
@@ -5433,6 +5491,7 @@ fn envelope_from_fetch(
         .unwrap_or_default();
 
     let subject = parse_header_value(&header, "Subject").unwrap_or_else(|| "(no subject)".into());
+    let body = entry.text();
     let mut parsed_body = parse_message_body(&header, body);
     if extracted_fallback_could_help(&parsed_body) {
         merge_extracted_imap_fallback(
@@ -5790,8 +5849,8 @@ mod tests {
         inbox_scoped_folder_path, is_missing_namespace_error, is_server_rejection,
         login_error_text, namespace_retry_folder, parse_attachments_from_body,
         parse_extracted_imap_email, parse_message_body, parse_message_date, parse_raw_message_body,
-        parse_raw_rfc822, plain_expunge_is_safe, store_attachment_parts,
-        strip_parenthesized_comments, AttachmentCacheKey, ImapProvider, ATTACHMENT_PART_CACHE_TTL,
+        parse_raw_rfc822, store_attachment_parts, strip_parenthesized_comments, AttachmentCacheKey,
+        ImapProvider, ATTACHMENT_PART_CACHE_TTL,
     };
     use base64::Engine as _;
     use postroom::SourceId;
@@ -6139,26 +6198,6 @@ mod tests {
             after_wire.load(Ordering::SeqCst),
             after_decoded.load(Ordering::SeqCst)
         );
-    }
-
-    /// A plain EXPUNGE takes every \Deleted message of the mailbox with it, so
-    /// it may only run while the mailbox holds nothing but our own.
-    #[test]
-    fn a_foreign_deleted_message_makes_the_plain_expunge_unsafe() {
-        assert!(!plain_expunge_is_safe(
-            &std::collections::HashSet::from([42, 99]),
-            &[42]
-        ));
-        assert!(plain_expunge_is_safe(
-            &std::collections::HashSet::from([42]),
-            &[42]
-        ));
-        // A UID another client already expunged is simply gone; removing the
-        // rest still touches nothing foreign.
-        assert!(plain_expunge_is_safe(
-            &std::collections::HashSet::new(),
-            &[42, 43]
-        ));
     }
 
     /// Only a declined command may be answered with a fallback. After a broken
@@ -7011,9 +7050,9 @@ Content-Type: text/html\r\n\r\n\
             (0, Some(222), 222, Continue),
             (111, None, 222, Reset),
             (111, Some(111), 222, Reset),
-            (111, Some(222), 222, Reset),
+            (111, Some(222), 222, WindowOnly),
             (222, None, 222, Continue),
-            (222, Some(111), 222, Continue),
+            (222, Some(111), 222, Reset),
             (222, Some(222), 222, Continue),
         ];
 
@@ -7055,33 +7094,34 @@ Content-Type: text/html\r\n\r\n\
         .expect("cursor");
 
         let checkpoint = super::imap_checkpoint(Some(stored), Some(111));
-        let state = serde_json::from_str::<super::ImapCursorState>(
-            checkpoint.cursor.as_deref().expect("cursor"),
-        )
-        .expect("state");
+        let (parsed, generation) = super::ImapProvider::parse_checkpoint(&checkpoint);
 
-        assert_eq!(state.db_uidvalidity, 111);
-        assert_eq!(state.high_uid, 5000);
+        assert_eq!(generation, Some(111));
+        assert_eq!(parsed.state.high_uid, 5000);
         assert_eq!(
-            super::imap_generation_decision(state.uidvalidity, Some(state.db_uidvalidity), 222),
+            super::imap_generation_decision(parsed.state.uidvalidity, generation, 222),
             super::GenerationDecision::Reset
         );
     }
 
     #[test]
-    fn a_checkpoint_without_anything_to_add_is_left_alone() {
-        for (cursor, database) in [
-            (None, Some(111u32)),
-            (Some("uid:5000".to_string()), Some(111)),
-            (Some("{\"high_uid\":7}".to_string()), None),
-            (Some("{\"high_uid\":7}".to_string()), Some(0)),
+    fn persisted_generation_reaches_missing_and_legacy_cursors() {
+        for (cursor, high_uid, high_seq) in [
+            (None, 0, 0),
+            (Some("uid:5000"), 5000, 0),
+            (Some("seq:30"), 0, 30),
         ] {
-            assert_eq!(
-                super::imap_checkpoint(cursor.clone(), database).cursor,
-                cursor,
-                "cursor {cursor:?}, database {database:?}"
-            );
+            let checkpoint = super::imap_checkpoint(cursor.map(str::to_string), Some(111));
+            let (parsed, generation) = super::ImapProvider::parse_checkpoint(&checkpoint);
+            assert_eq!(generation, Some(111));
+            assert_eq!(parsed.state.high_uid, high_uid);
+            assert_eq!(parsed.state.high_seq, high_seq);
+            assert_eq!(parsed.had_checkpoint, cursor.is_some());
         }
+        assert_eq!(
+            super::imap_generation_decision(222, Some(111), 222),
+            super::GenerationDecision::Reset
+        );
     }
 
     #[test]
@@ -7149,12 +7189,12 @@ Content-Type: text/html\r\n\r\n\
     #[test]
     fn chunks_are_bounded_by_count_and_bytes_and_run_oldest_first() {
         let messages: Vec<_> = (1..=5).map(|uid| listed(uid, 100)).collect();
-        let plan = super::plan_incremental_fetch(&messages, TEST_LIMITS);
+        let plan = super::plan_fetch(&messages, TEST_LIMITS);
         assert_eq!(chunk_uids(&plan), vec![vec![1, 2, 3], vec![4, 5]]);
         assert_eq!(plan.deferred, 0);
 
         let messages = [listed(1, 400), listed(2, 400), listed(3, 400)];
-        let plan = super::plan_incremental_fetch(&messages, TEST_LIMITS);
+        let plan = super::plan_fetch(&messages, TEST_LIMITS);
         assert_eq!(chunk_uids(&plan), vec![vec![1, 2], vec![3]]);
     }
 
@@ -7162,11 +7202,11 @@ Content-Type: text/html\r\n\r\n\
     #[test]
     fn a_message_above_the_budgets_goes_alone() {
         let messages = [listed(1, 10), listed(2, 50_000), listed(3, 10)];
-        let plan = super::plan_incremental_fetch(&messages, TEST_LIMITS);
+        let plan = super::plan_fetch(&messages, TEST_LIMITS);
         assert_eq!(chunk_uids(&plan), vec![vec![1]]);
         assert_eq!(plan.deferred, 2, "the large mail waits for its own run");
 
-        let plan = super::plan_incremental_fetch(&messages[1..], TEST_LIMITS);
+        let plan = super::plan_fetch(&messages[1..], TEST_LIMITS);
         assert_eq!(chunk_uids(&plan), vec![vec![2]]);
         assert_eq!(plan.deferred, 1);
     }
@@ -7174,14 +7214,14 @@ Content-Type: text/html\r\n\r\n\
     #[test]
     fn a_backlog_beyond_the_run_budget_is_deferred() {
         let messages: Vec<_> = (1..=20).map(|uid| listed(uid, 10)).collect();
-        let plan = super::plan_incremental_fetch(&messages, TEST_LIMITS);
+        let plan = super::plan_fetch(&messages, TEST_LIMITS);
         assert_eq!(
             chunk_uids(&plan),
             vec![vec![1, 2, 3], vec![4, 5, 6], vec![7]]
         );
         assert_eq!(plan.deferred, 13);
         assert_eq!(
-            super::plan_incremental_fetch(&[], TEST_LIMITS),
+            super::plan_fetch(&[], TEST_LIMITS),
             super::FetchPlan::default()
         );
     }
@@ -7191,7 +7231,7 @@ Content-Type: text/html\r\n\r\n\
     #[test]
     fn the_cursor_advances_per_completed_chunk() {
         let messages: Vec<_> = (101..=120).map(|uid| listed(uid, 10)).collect();
-        let plan = super::plan_incremental_fetch(&messages, TEST_LIMITS);
+        let plan = super::plan_fetch(&messages, TEST_LIMITS);
 
         assert_eq!(super::advance_after_chunks(100, 7, &plan, 0), (100, 7, 20));
         assert_eq!(
@@ -7362,7 +7402,7 @@ Content-Type: text/html\r\n\r\n\
         async_imap::Session<tokio::net::TcpStream>,
         tokio::task::JoinHandle<()>,
     ) {
-        use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -7385,6 +7425,17 @@ Content-Type: text/html\r\n\r\n\
                 if verdict.is_empty() {
                     return;
                 }
+                if command.starts_with("APPEND ") {
+                    writer.write_all(b"+ Send the literal\r\n").await.unwrap();
+                    let mut literal = vec![0; data.len() + 2];
+                    lines.get_mut().read_exact(&mut literal).await.unwrap();
+                    assert_eq!(literal, format!("{data}\r\n").as_bytes());
+                    writer
+                        .write_all(format!("{tag} {verdict}\r\n").as_bytes())
+                        .await
+                        .unwrap();
+                    continue;
+                }
                 writer
                     .write_all(format!("{data}{tag} {verdict}\r\n").as_bytes())
                     .await
@@ -7393,6 +7444,176 @@ Content-Type: text/html\r\n\r\n\
             assert!(lines.next_line().await.unwrap().is_none());
         });
         (chunk_session(address).await, server)
+    }
+
+    fn mailbox_provider() -> super::ImapProvider {
+        super::ImapProvider::from_account_config(
+            r#"{"host":"mail.example.test","password":"fixture"}"#,
+            "user",
+        )
+        .unwrap()
+    }
+
+    fn fetch_header(seq: u32, uid: u32, size: u32) -> String {
+        let header = format!("Message-ID: <{uid}@example.test>\r\nSubject: Mail {uid}\r\n\r\n");
+        format!(
+            "* {seq} FETCH (UID {uid} RFC822.SIZE {size} BODY[HEADER] {{{}}}\r\n{header})\r\n",
+            header.len(),
+        )
+    }
+
+    #[tokio::test]
+    async fn select_resets_a_persisted_generation_without_a_current_cursor() {
+        for (cursor, stored, reset, high_uid) in [
+            (None, Some(7), true, 0),
+            (Some("uid:900"), Some(7), true, 0),
+            (
+                Some(r#"{"high_uid":900,"uidvalidity":7}"#),
+                Some(8),
+                false,
+                0,
+            ),
+            (
+                Some(r#"{"high_uid":900,"uidvalidity":8,"db_uidvalidity":0}"#),
+                None,
+                false,
+                900,
+            ),
+            (
+                Some(r#"{"high_uid":900,"uidvalidity":7,"db_uidvalidity":0}"#),
+                None,
+                true,
+                0,
+            ),
+        ] {
+            let (mut session, server) = scripted_mailbox(vec![
+                (
+                    "SELECT \"INBOX\"".into(),
+                    "* 0 EXISTS\r\n* OK [UIDVALIDITY 8] generation\r\n".into(),
+                    "OK selected",
+                ),
+                ("LOGOUT".into(), String::new(), "OK logged out"),
+            ])
+            .await;
+            let batch = mailbox_provider()
+                .sync_mailbox(
+                    &mut session,
+                    "INBOX",
+                    super::imap_checkpoint(cursor.map(str::to_string), stored),
+                )
+                .await
+                .unwrap();
+            assert_eq!(batch.reset_folder, reset);
+            let next = batch.next.cursor.as_deref().unwrap();
+            let state: super::ImapCursorState = serde_json::from_str(next).unwrap();
+            assert_eq!((state.uidvalidity, state.high_uid), (8, high_uid));
+            assert!(super::imap_incremental_complete(next));
+            assert!(!crate::providers::cursor::backfill_pending(next));
+            drop(session);
+            server.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn backfill_bodies_obey_chunk_and_page_byte_budgets() {
+        let (mut session, server) = scripted_mailbox(vec![
+            (
+                "FETCH 1:3 (UID RFC822.SIZE FLAGS INTERNALDATE BODY.PEEK[HEADER])".into(),
+                (1..=3)
+                    .map(|seq| fetch_header(seq, seq + 10, 700))
+                    .collect(),
+                "OK headers",
+            ),
+            (
+                "UID FETCH 13 (UID BODY.PEEK[TEXT])".into(),
+                "* 3 FETCH (UID 13 BODY[TEXT] \"three\")\r\n".into(),
+                "OK body",
+            ),
+            (
+                "UID FETCH 12 (UID BODY.PEEK[TEXT])".into(),
+                "* 2 FETCH (UID 12 BODY[TEXT] \"two\")\r\n".into(),
+                "OK body",
+            ),
+        ])
+        .await;
+        let (page, next) = super::ImapProvider::fetch_backfill_page(
+            &mut session,
+            1,
+            3,
+            None,
+            super::FetchLimits {
+                run_bytes: 1500,
+                ..TEST_LIMITS
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(next, 1);
+        assert_eq!(
+            page.iter()
+                .map(|entry| (entry.uid, entry.text()))
+                .collect::<Vec<_>>(),
+            [
+                (Some(12), Some(b"two".as_slice())),
+                (Some(13), Some(b"three".as_slice()))
+            ]
+        );
+        drop(session);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_rejected_backfill_body_keeps_the_incremental_batch_and_cursor() {
+        let (mut session, server) = scripted_mailbox(vec![
+            (
+                "SELECT \"INBOX\"".into(),
+                "* 3 EXISTS\r\n* OK [UIDVALIDITY 8] generation\r\n".into(),
+                "OK selected",
+            ),
+            (
+                "UID FETCH 13:* (UID RFC822.SIZE)".into(),
+                "* 3 FETCH (UID 13 RFC822.SIZE 50)\r\n".into(),
+                "OK listed",
+            ),
+            (
+                format!("UID FETCH 13 {}", super::MESSAGE_FETCH_ITEMS),
+                fetch_header(3, 13, 50),
+                "OK fetched",
+            ),
+            (
+                "FETCH 1:1 (UID RFC822.SIZE FLAGS INTERNALDATE BODY.PEEK[HEADER])".into(),
+                fetch_header(1, 11, 50),
+                "OK headers",
+            ),
+            (
+                "UID FETCH 11 (UID BODY.PEEK[TEXT])".into(),
+                String::new(),
+                "NO body failed",
+            ),
+        ])
+        .await;
+        let batch = mailbox_provider().sync_mailbox(
+            &mut session,
+            "INBOX",
+            super::imap_checkpoint(
+                Some(r#"{"high_uid":12,"high_seq":2,"backfill_next_seq":1,"backfill_total_seq":1,"uidvalidity":8,"format_version":5}"#.into()),
+                Some(8),
+            ),
+        ).await.unwrap();
+        assert_eq!(
+            batch
+                .messages
+                .iter()
+                .map(|message| message.remote_id.as_str())
+                .collect::<Vec<_>>(),
+            ["13"]
+        );
+        let next = batch.next.cursor.as_deref().unwrap();
+        let state: super::ImapCursorState = serde_json::from_str(next).unwrap();
+        assert_eq!((state.high_uid, state.backfill_next_seq), (13, 1));
+        assert!(super::imap_incremental_complete(next));
+        drop(session);
+        server.await.unwrap();
     }
 
     #[tokio::test]
@@ -7517,23 +7738,272 @@ Content-Type: text/html\r\n\r\n\
         server.await.unwrap();
     }
 
+    fn capabilities(names: &str) -> (String, String, &'static str) {
+        (
+            "CAPABILITY".into(),
+            format!("* CAPABILITY {names}\r\n"),
+            "OK capabilities",
+        )
+    }
+
+    fn draft_search(message_id: &str, uids: &str) -> (String, String, &'static str) {
+        (
+            format!(r#"UID SEARCH HEADER Message-ID "{message_id}""#),
+            format!("* SEARCH{uids}\r\n"),
+            "OK searched",
+        )
+    }
+
+    fn mark_deleted(uids: &str, verdict: &'static str) -> (String, String, &'static str) {
+        (
+            format!("UID STORE {uids} +FLAGS.SILENT (\\Deleted)"),
+            String::new(),
+            verdict,
+        )
+    }
+
     #[tokio::test]
-    async fn copy_move_with_possible_destination_copies_requires_manual_review() {
+    async fn imap_draft_saves_without_scoped_expunge_never_append() {
+        let message_id = "<draft@example.test>";
+        for previous in [None, Some(message_id)] {
+            let (mut session, server) = scripted_mailbox(vec![capabilities("IMAP4rev1")]).await;
+            let error = ImapProvider::append_replacement_draft(
+                &mut session,
+                "Drafts",
+                b"latest draft",
+                message_id,
+                previous,
+            )
+            .await
+            .unwrap_err();
+            assert!(error.is_permanent());
+            assert_eq!(error.encoded(), "backend.errors.imapDraftSyncUnsupported");
+            drop(session);
+            server.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn imap_draft_cleanup_failure_stops_later_saves_before_another_append() {
+        let message_id = "<draft@example.test>";
+        let raw = format!("Message-ID: {message_id}\r\n\r\nNew revision");
+        for verdict in ["OK expunged", "NO expunge refused"] {
+            let (mut session, server) = scripted_mailbox(vec![
+                capabilities("IMAP4rev1 UIDPLUS"),
+                draft_search(message_id, " 7"),
+                (
+                    format!("APPEND \"Drafts\" (\\Draft) {{{}}}", raw.len()),
+                    raw.clone(),
+                    "OK [APPENDUID 42 9] appended",
+                ),
+                mark_deleted("7", "OK marked"),
+                ("UID EXPUNGE 7".into(), String::new(), verdict),
+            ])
+            .await;
+            let result = ImapProvider::append_replacement_draft(
+                &mut session,
+                "Drafts",
+                raw.as_bytes(),
+                message_id,
+                Some(message_id),
+            )
+            .await;
+            if verdict.starts_with("OK") {
+                assert_eq!(result.unwrap(), encode_imap_draft_ref("Drafts", message_id));
+            } else {
+                let error = result.unwrap_err();
+                assert!(error.is_permanent());
+                assert_eq!(error.encoded(), "backend.errors.imapDraftSyncNeedsReview");
+            }
+            drop(session);
+            server.await.unwrap();
+        }
+
         let (mut session, server) = scripted_mailbox(vec![
-            ("UID COPY 7 \"Target\"".into(), String::new(), "OK copied"),
-            (
-                "UID STORE 7 +FLAGS.SILENT (\\Deleted)".into(),
-                String::new(),
-                "NO source not writable",
-            ),
-            ("UID COPY 7 \"Target\"".into(), String::new(), ""),
+            capabilities("IMAP4rev1 UIDPLUS"),
+            draft_search(message_id, " 7 9"),
         ])
         .await;
-        for _ in 0..2 {
-            let error = super::ImapProvider::copy_and_remove_source(&mut session, &[7], "Target")
+        let error = ImapProvider::append_replacement_draft(
+            &mut session,
+            "Drafts",
+            raw.as_bytes(),
+            message_id,
+            Some(message_id),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.encoded(), "backend.errors.imapDraftSyncNeedsReview");
+        drop(session);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn imap_delete_messages_refuses_unsupported_and_rejected_scoped_deletion() {
+        let reference = crate::providers::traits::MessageRef {
+            remote_id: "7".into(),
+            source_folder: Some("Trash".into()),
+            source_uidvalidity: Some(42),
+        };
+        for (caps, writes, expected) in [
+            ("IMAP4rev1", vec![], super::IMAP_UID_EXPUNGE_UNSUPPORTED),
+            (
+                "IMAP4rev1 UIDPLUS",
+                vec![
+                    (
+                        "SELECT \"Trash\"".into(),
+                        "* 2 EXISTS\r\n* OK [UIDVALIDITY 42] generation\r\n".into(),
+                        "OK selected",
+                    ),
+                    mark_deleted("7", "OK marked"),
+                    ("UID EXPUNGE 7".into(), String::new(), "BAD refused"),
+                ],
+                "backend.errors.imapDeleteRefused",
+            ),
+        ] {
+            let (mut session, server) =
+                scripted_mailbox(std::iter::once(capabilities(caps)).chain(writes).collect()).await;
+            let grouped =
+                ImapProvider::message_refs_by_folder(std::slice::from_ref(&reference)).unwrap();
+            let error = ImapProvider::delete_messages_on_session(&mut session, grouped)
                 .await
                 .unwrap_err();
             assert!(error.is_permanent());
+            assert_eq!(error.encoded(), expected);
+            drop(session);
+            server.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn imap_delete_draft_checks_support_before_store_and_requires_store_ack() {
+        let message_id = "<draft@example.test>";
+        for (caps, store, expected) in [
+            ("IMAP4rev1", None, super::IMAP_UID_EXPUNGE_UNSUPPORTED),
+            (
+                "IMAP4rev1 UIDPLUS",
+                Some(mark_deleted("7", "NO denied")),
+                "backend.errors.imapDeleteRefused",
+            ),
+        ] {
+            let (mut session, server) = scripted_mailbox(
+                [draft_search(message_id, " 7"), capabilities(caps)]
+                    .into_iter()
+                    .chain(store)
+                    .collect(),
+            )
+            .await;
+            let error = ImapProvider::delete_selected_draft(&mut session, message_id)
+                .await
+                .unwrap_err();
+            assert!(error.is_permanent());
+            assert_eq!(error.encoded(), expected);
+            drop(session);
+            server.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn imap_copy_move_reuses_scoped_expunge_support_across_folders() {
+        let mut script = vec![capabilities("iMaP4rEv2")];
+        for uid in ["7", "8"] {
+            script.extend([
+                (
+                    format!("UID COPY {uid} \"Target\""),
+                    String::new(),
+                    "OK copied",
+                ),
+                mark_deleted(uid, "OK marked"),
+                (format!("UID EXPUNGE {uid}"), String::new(), "OK expunged"),
+            ]);
+        }
+        let (mut session, server) = scripted_mailbox(script).await;
+        let mut uid_expunge = None;
+        for uid in [7, 8] {
+            ImapProvider::copy_and_remove_source(&mut session, &[uid], "Target", &mut uid_expunge)
+                .await
+                .unwrap();
+        }
+        drop(session);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn imap_move_refusal_without_uidplus_stops_before_copy_or_store() {
+        let reference = crate::providers::traits::MessageRef {
+            remote_id: "7".into(),
+            source_folder: Some("INBOX".into()),
+            source_uidvalidity: Some(42),
+        };
+        for verdict in ["OK capabilities", "NO incomplete"] {
+            let response = if verdict.starts_with("OK") {
+                "* CAPABILITY IMAP4rev1\r\n"
+            } else {
+                "* CAPABILITY IMAP4rev1 UIDPLUS\r\n"
+            };
+            let (mut session, server) = scripted_mailbox(vec![
+                (
+                    "SELECT \"INBOX\"".into(),
+                    "* 1 EXISTS\r\n* OK [UIDVALIDITY 42] generation\r\n".into(),
+                    "OK selected",
+                ),
+                ("UID MOVE 7 \"Target\"".into(), String::new(), "BAD no MOVE"),
+                ("CAPABILITY".into(), response.into(), verdict),
+            ])
+            .await;
+            let grouped =
+                ImapProvider::message_refs_by_folder(std::slice::from_ref(&reference)).unwrap();
+            let error = ImapProvider::move_messages_on_session(&mut session, grouped, "Target")
+                .await
+                .unwrap_err();
+            if verdict.starts_with("OK") {
+                assert!(error.is_permanent());
+                assert_eq!(error.encoded(), super::IMAP_UID_EXPUNGE_UNSUPPORTED);
+            } else {
+                assert!(!error.is_permanent());
+                assert!(error.to_string().contains("no response"));
+            }
+            drop(session);
+            server.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn imap_copy_move_refusal_leaves_source_untouched() {
+        let (mut session, server) = scripted_mailbox(vec![
+            capabilities("IMAP4rev1 UIDPLUS"),
+            ("UID COPY 7 \"Target\"".into(), String::new(), "NO denied"),
+        ])
+        .await;
+        let error = ImapProvider::copy_and_remove_source(&mut session, &[7], "Target", &mut None)
+            .await
+            .unwrap_err();
+        assert!(error.is_permanent());
+        assert_eq!(error.encoded(), super::IMAP_MOVE_COPY_REFUSED);
+        drop(session);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn imap_copy_move_with_possible_destination_copies_requires_manual_review() {
+        let (mut session, server) = scripted_mailbox(vec![
+            capabilities("IMAP4rev1 uidplus"),
+            ("UID COPY 7 \"Target\"".into(), String::new(), "OK copied"),
+            mark_deleted("7", "NO source not writable"),
+            ("UID COPY 8 \"Target\"".into(), String::new(), ""),
+        ])
+        .await;
+        let mut uid_expunge = None;
+        for uid in [7, 8] {
+            let error = ImapProvider::copy_and_remove_source(
+                &mut session,
+                &[uid],
+                "Target",
+                &mut uid_expunge,
+            )
+            .await
+            .unwrap_err();
+            assert!(error.is_permanent(), "{error}");
             assert_eq!(error.encoded(), super::IMAP_MOVE_COPY_NEEDS_REVIEW);
         }
         server.await.unwrap();
@@ -7548,7 +8018,7 @@ Content-Type: text/html\r\n\r\n\
         )])
         .await;
         let messages = (1..=3).map(|uid| listed(uid, 10)).collect::<Vec<_>>();
-        let plan = super::plan_incremental_fetch(&messages, TEST_LIMITS);
+        let plan = super::plan_fetch(&messages, TEST_LIMITS);
         let error = super::fetch_planned_chunks(&mut session, &plan, Duration::from_secs(2))
             .await
             .unwrap_err();
@@ -7558,33 +8028,12 @@ Content-Type: text/html\r\n\r\n\
     }
 
     #[tokio::test]
-    async fn imap_writes_require_ack_and_plain_expunge_requires_confirmed_search() {
-        let (mut session, server) = scripted_mailbox(vec![
-            (
-                "UID STORE 7 +FLAGS.SILENT (\\Seen)".into(),
-                String::new(),
-                "NO read only",
-            ),
-            ("UID EXPUNGE 7".into(), String::new(), "BAD no UIDPLUS"),
-            (
-                "UID SEARCH DELETED".into(),
-                "* SEARCH 7\r\n".into(),
-                "NO incomplete",
-            ),
-            ("UID EXPUNGE 7".into(), String::new(), "BAD no UIDPLUS"),
-            (
-                "UID SEARCH DELETED".into(),
-                "* SEARCH 7 8\r\n".into(),
-                "OK searched",
-            ),
-            ("UID EXPUNGE 7".into(), String::new(), "BAD no UIDPLUS"),
-            (
-                "UID SEARCH DELETED".into(),
-                "* SEARCH 7\r\n".into(),
-                "OK searched",
-            ),
-            ("EXPUNGE".into(), "* 1 EXPUNGE\r\n".into(), "OK expunged"),
-        ])
+    async fn imap_flag_writes_require_ack() {
+        let (mut session, server) = scripted_mailbox(vec![(
+            "UID STORE 7 +FLAGS.SILENT (\\Seen)".into(),
+            String::new(),
+            "NO read only",
+        )])
         .await;
         assert!(
             super::ImapProvider::apply_uid_store(&mut session, "7", "+FLAGS.SILENT (\\Seen)")
@@ -7592,17 +8041,6 @@ Content-Type: text/html\r\n\r\n\
                 .unwrap_err()
                 .contains("no response")
         );
-        assert!(super::ImapProvider::expunge_uids(&mut session, &[7])
-            .await
-            .unwrap_err()
-            .contains("no response"));
-        assert!(super::ImapProvider::expunge_uids(&mut session, &[7])
-            .await
-            .unwrap_err()
-            .contains("foreign"));
-        super::ImapProvider::expunge_uids(&mut session, &[7])
-            .await
-            .unwrap();
         drop(session);
         server.await.unwrap();
     }
@@ -7614,7 +8052,7 @@ Content-Type: text/html\r\n\r\n\
         let (address, server) = chunk_server(1).await;
         let mut session = chunk_session(address).await;
         let messages: Vec<_> = (1..=7).map(|uid| listed(uid, 10)).collect();
-        let plan = super::plan_incremental_fetch(&messages, TEST_LIMITS);
+        let plan = super::plan_fetch(&messages, TEST_LIMITS);
 
         let fetched = tokio::time::timeout(
             Duration::from_secs(5),
@@ -7644,7 +8082,7 @@ Content-Type: text/html\r\n\r\n\
     async fn a_first_chunk_that_breaks_off_fails_the_fetch() {
         let (address, server) = chunk_server(0).await;
         let mut session = chunk_session(address).await;
-        let plan = super::plan_incremental_fetch(&[listed(1, 10)], TEST_LIMITS);
+        let plan = super::plan_fetch(&[listed(1, 10)], TEST_LIMITS);
         let result = tokio::time::timeout(
             Duration::from_secs(5),
             super::fetch_planned_chunks(&mut session, &plan, Duration::from_millis(100)),
@@ -7660,7 +8098,7 @@ Content-Type: text/html\r\n\r\n\
         let (address, server) = chunk_server(usize::MAX).await;
         let mut session = chunk_session(address).await;
         let messages: Vec<_> = (1..=5).map(|uid| listed(uid, 10)).collect();
-        let plan = super::plan_incremental_fetch(&messages, TEST_LIMITS);
+        let plan = super::plan_fetch(&messages, TEST_LIMITS);
         let fetched = super::fetch_planned_chunks(&mut session, &plan, Duration::from_secs(5))
             .await
             .expect("all chunks arrive");

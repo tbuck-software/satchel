@@ -8,7 +8,8 @@ import {
   type SidePlacement,
 } from '@/utils/popoverPlacement';
 
-// `aria-label` falls through to the root element via $attrs.
+defineOptions({ inheritAttrs: false });
+
 const props = withDefaults(
   defineProps<{
     anchor: AnchorBox | null;
@@ -113,6 +114,7 @@ useDismissable(() => props.anchor !== null, () => emit('close'));
       <div
         v-if="anchor"
         ref="card"
+        v-bind="$attrs"
         class="cal-popover"
         role="dialog"
         tabindex="-1"

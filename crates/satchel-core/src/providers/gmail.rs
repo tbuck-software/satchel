@@ -286,7 +286,7 @@ impl QuotaPacer {
         if self.blocked_until.is_none_or(|current| until > current) {
             self.blocked_until = Some(until);
         }
-        self.last_block_lapsed = Some(until);
+        self.last_block_lapsed = self.last_block_lapsed.max(Some(until));
         applied
     }
 
@@ -310,15 +310,24 @@ pub async fn restore_block(remaining: std::time::Duration, consecutive_blocks: u
         return;
     }
     let mut pacer = QUOTA_PACER.lock().await;
-    let until = std::time::Instant::now() + remaining;
-    if pacer.blocked_until.is_none_or(|current| until > current) {
-        pacer.blocked_until = Some(until);
+    let now = std::time::Instant::now();
+    let Some(until) = now.checked_add(remaining) else {
+        return;
+    };
+    let same_incident = pacer
+        .last_block_lapsed
+        .is_some_and(|lapsed| now.saturating_duration_since(lapsed) <= REPEAT_BLOCK_WINDOW);
+    pacer.consecutive_blocks = if same_incident {
+        pacer.consecutive_blocks.max(consecutive_blocks.max(1))
+    } else {
+        consecutive_blocks.max(1)
+    };
+    pacer.last_block_lapsed = pacer.last_block_lapsed.max(Some(until));
+    if pacer.blocked_until.is_some_and(|current| until <= current) {
+        return;
     }
-    pacer.consecutive_blocks = consecutive_blocks;
-    // Treated as one incident continuing, so the next block keeps doubling
-    // instead of restarting at the server's first, shortest figure.
-    pacer.last_block_lapsed = Some(until);
-    tracing::info!(
+    pacer.blocked_until = Some(until);
+    tracing::debug!(
         "gmail still rate limited from an earlier run: {}s remaining",
         remaining.as_secs()
     );
@@ -355,7 +364,7 @@ static QUOTA_PACER: std::sync::LazyLock<tokio::sync::Mutex<QuotaPacer>> =
 /// Wait until the budget allows a call costing `units`.
 ///
 /// `Err` means the caller is background work that must not run now.
-async fn await_quota(
+pub(crate) async fn await_quota(
     units: f64,
     priority: Priority,
     label: &str,
@@ -741,7 +750,7 @@ type ParsedGmailCursor = cursor::ParsedCursor<GmailCursorState>;
 enum BackfillStep {
     /// History is complete for this folder — incremental sync is all that's left.
     Skip,
-    /// No cursor yet: start paging the label from the newest message backwards.
+    /// Start paging the label from the newest message backwards.
     Bootstrap,
     /// Resume paging from a stored page token.
     Continue(String),
@@ -1752,7 +1761,7 @@ impl MailProvider for GmailProvider {
             });
         }
         let parsed_cursor = Self::parse_cursor_state(&since);
-        let plan = Self::plan_sync(&parsed_cursor);
+        let mut plan = Self::plan_sync(&parsed_cursor);
         let mut cursor_state = parsed_cursor.state;
 
         let mut messages = Vec::new();
@@ -1786,7 +1795,10 @@ impl MailProvider for GmailProvider {
                             // every message labelled while the cursor was dead.
                             cursor_state.history_id = None;
                             cursor_state.backfill_page_token = None;
+                            cursor_state.backfill_remaining_messages = 0;
+                            cursor_state.backfill_total_messages = 0;
                             cursor_state.history_expired = true;
+                            plan.backfill = BackfillStep::Bootstrap;
                             history_synced = false;
                             snapshot_required = true;
                             break;
@@ -1962,9 +1974,8 @@ impl MailProvider for GmailProvider {
         if backfill_advanced {
             cursor_state.format_version = Self::CURSOR_FORMAT_VERSION;
         }
-        // The re-list has reached the end of the label, so the gap the expiry
-        // left is closed. Checking that a page actually ran keeps the run that
-        // *discovers* the expiry from clearing the flag it just set.
+        // Only a successful backfill page at the end of the label closes
+        // the gap left by expiry.
         if !matches!(plan.backfill, BackfillStep::Skip)
             && backfill_advanced
             && cursor_state.backfill_page_token.is_none()

@@ -58,7 +58,7 @@ vi.mock('@/stores/accounts', () => ({
 }));
 
 vi.mock('@/stores/ui', () => ({
-  useUiStore: () => ({ isMobile: false }),
+  useUiStore: () => ({ isMobile: false, registerOverlay: () => () => {} }),
 }));
 vi.mock('@/stores/calendarUi', () => ({
   useCalendarUiStore: () => harness.calendarUi,
@@ -299,13 +299,13 @@ function setupHarness() {
   harness.toast.error.mockReset();
 }
 
-function render() {
+function render({ realPopover = false } = {}) {
   return mount(CalendarView, {
     global: {
       stubs: {
         AppButton: AppButtonStub,
         CalendarMonthGrid: CalendarMonthGridStub,
-        CalendarPopover: CalendarPopoverStub,
+        CalendarPopover: realPopover ? false : CalendarPopoverStub,
         CalendarWeekGrid: CalendarWeekGridStub,
         EventDetailsPopover: EventDetailsPopoverStub,
         EventEditorDialog: EventEditorDialogStub,
@@ -321,6 +321,24 @@ function render() {
 describe('CalendarView', () => {
   beforeEach(() => {
     setupHarness();
+  });
+
+  it('names the teleported event details dialog', async () => {
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    });
+    harness.invites!.items = [makeInvite()];
+    const wrapper = render({ realPopover: true });
+    try {
+      await wrapper.get('[data-test="select-item"]').trigger('click');
+      const dialog = document.body.querySelector('.cal-popover[role="dialog"]');
+      expect(dialog?.getAttribute('aria-label')).toBe('Event details');
+    } finally {
+      wrapper.unmount();
+      vi.unstubAllGlobals();
+    }
   });
 
   it('keeps the creation hint on New event instead of below the grid', () => {

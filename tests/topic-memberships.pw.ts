@@ -5,14 +5,14 @@ test.beforeEach(async ({ page }) => {
   await page.route(/\/src\/services\/backend\/mock\.ts(?:\?.*)?$/, async (route) => {
     const response = await route.fetch();
     const source = await response.text();
-    let body = source.replace(/async function sendCommand\(command, payload\) \{/, `$&
+    const dispatch = 'return handler(payload ?? {});';
+    expect(source.includes(dispatch), 'mock transport dispatch marker').toBe(true);
+    const body = source.replace(dispatch, `
       if (command === 'list_topic_memberships' && globalThis.__membershipFailure) throw new Error('membership test outage');
       if (command === 'list_templates') {
         if (globalThis.__holdTemplates) await new Promise(resolve => { globalThis.__releaseTemplates = resolve; });
         return [{ id: 'browser-template', name: 'Retained template', subject: '', body_text: 'Retained body', updated_at: '', created_at: '' }];
       }
-    `);
-    body = body.replace('return handler(payload ?? {});', `
       const result = handler(payload ?? {});
       if (command === 'add_topic_items' && globalThis.__delayAddReceipt) {
         globalThis.__delayAddReceipt = false;
@@ -20,7 +20,6 @@ test.beforeEach(async ({ page }) => {
       }
       return result;
     `);
-    expect(body).not.toBe(source);
     await route.fulfill({ response, body });
   });
 });
@@ -28,9 +27,12 @@ test.beforeEach(async ({ page }) => {
 test('thread and picker expose membership retry without presenting unknown toggles as unchecked', async ({ page }) => {
   await page.addInitScript(() => { Object.assign(globalThis, { __membershipFailure: true }); });
   await page.goto('/');
-  // The selected inbox thread loads memberships through the real transport.
-  const failure = page.getByText('Topic memberships could not be loaded', { exact: true });
-  await expect(failure.first()).toBeVisible();
+  // The reader is lazy. Wait for the selected thread before checking its memberships.
+  await expect(page.getByRole('heading', { name: 'Staging login 500 after deployment', exact: true, level: 1 }))
+    .toBeVisible({ timeout: 30_000 });
+  const headerState = page.locator('.detail-pane .membership-state');
+  const headerAlert = headerState.getByRole('alert');
+  await expect(headerAlert).toContainText('Topic memberships could not be loaded');
   await page.evaluate(async () => {
     const path = '/src/stores/topics.ts';
     const { useTopicsStore } = await import(path);
@@ -45,7 +47,7 @@ test('thread and picker expose membership retry without presenting unknown toggl
   await expect(picker.getByRole('alert')).toHaveCount(0);
   await expect(picker.locator('.row-check').first()).toBeVisible();
   await page.keyboard.press('Escape');
-  // Retry at the thread header too, rather than relying on the standing banner.
+  // Trigger another outage to exercise the retry in the thread header.
   await page.evaluate(async () => {
     Object.assign(globalThis, { __membershipFailure: true });
     const path = '/src/stores/topics.ts';
@@ -55,15 +57,18 @@ test('thread and picker expose membership retry without presenting unknown toggl
     await useTopicsStore().loadMembershipsFor('thread', [useThreadsStore().activeThreadId]);
     Object.assign(globalThis, { __membershipFailure: false });
   });
-  const headerState = page.locator('.membership-state').filter({ has: page.getByRole('alert') });
   await headerState.getByRole('button', { name: 'Try again', exact: true }).click();
-  await expect(headerState).toHaveCount(0);
+  await expect(headerAlert).toHaveCount(0);
   await expect(page.locator('.connection-banner')).toHaveCount(0);
 });
 
 test('a slow template refresh keeps rows in place and displays progress', async ({ page }) => {
   await page.goto('/settings?section=templates');
-  const row = page.getByText('Retained template', { exact: true });
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await expect(settings.getByRole('heading', { name: 'Templates', exact: true, level: 3 }))
+    .toBeVisible({ timeout: 30_000 });
+  const list = settings.locator('.list');
+  const row = list.getByText('Retained template', { exact: true });
   await expect(row).toBeVisible();
   const before = await row.boundingBox();
   await page.evaluate(async () => {
@@ -72,9 +77,9 @@ test('a slow template refresh keeps rows in place and displays progress', async 
     const { useTemplatesStore } = await import(path);
     void useTemplatesStore().load();
   });
-  const progress = page.locator('.collection-refresh');
+  const progress = settings.locator('.collection-refresh');
   await expect(progress).toBeVisible();
-  await expect(page.locator('.list')).toHaveAttribute('aria-busy', 'true');
+  await expect(list).toHaveAttribute('aria-busy', 'true');
   expect(await row.boundingBox()).toEqual(before);
   await expect(row).toBeVisible();
   await page.evaluate(() => {
@@ -82,6 +87,7 @@ test('a slow template refresh keeps rows in place and displays progress', async 
     state.__releaseTemplates();
   });
   await expect(progress).toHaveCount(0);
+  await expect(list).toHaveAttribute('aria-busy', 'false');
   await expect(row).toBeVisible();
 });
 

@@ -98,3 +98,21 @@ the phone. To stop the watcher, run
 `launchctl bootout gui/$(id -u)/de.tbuck.satchel.push-device` on macOS or
 `systemctl --user disable --now satchel-push` on Linux. Remove its launch
 agent or unit and private configuration when retiring the computer.
+
+## Development tests
+
+Run `make test-push-device` from the repository root with Python 3.11 or newer.
+The target creates a temporary virtual environment, installs the locked test
+dependencies and runs the five tests. It also runs as part of `make check`
+and the pull request CI workflow. To refresh the dependency lock, run the
+command recorded at the top of `requirements-test.txt`.
+
+For offline checks, download the wheels once on the same platform and Python
+version, then point pip at the local copies. The temporary test environment
+still verifies each wheel against the dependency lock.
+
+```sh
+python3 -m pip download --require-hashes --only-binary=:all: \
+  -r tooling/push-device/requirements-test.txt -d "$HOME/.cache/satchel-push-wheels"
+PIP_NO_INDEX=1 PIP_FIND_LINKS="$HOME/.cache/satchel-push-wheels" make check
+```

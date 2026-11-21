@@ -253,7 +253,7 @@ async fn open_background_database(database_path: &Path) -> Result<BackgroundData
     // WorkManager has its own process and never runs Tauri's setup hook.
     #[cfg(debug_assertions)]
     crate::load_debug_profile_env(profile);
-    crate::db::apply_pending_restore(profile)?;
+    crate::db::apply_pending_restore(profile).await?;
     let open = crate::db::profile_lock::hold_open(profile).await?;
     let options = SqliteConnectOptions::new()
         .filename(database_path)
@@ -296,16 +296,17 @@ async fn execute_background_mail_sync_inner(
         });
     }
 
-    let sync_result = crate::sync::mailbox_sync::sync_mailboxes(
-        &pool,
-        crate::sync::mailbox_sync::MailboxSyncRequest {
-            events: None,
-            app: None,
-            accounts: crate::sync::mailbox_sync::AccountSelection::AllActive,
-            folders: crate::sync::mailbox_sync::FolderSelection::Inbox,
-        },
-    )
-    .await;
+    let sync_result =
+        crate::providers::gmail::as_background(crate::sync::mailbox_sync::sync_mailboxes(
+            &pool,
+            crate::sync::mailbox_sync::MailboxSyncRequest {
+                events: None,
+                app: None,
+                accounts: crate::sync::mailbox_sync::AccountSelection::AllActive,
+                folders: crate::sync::mailbox_sync::FolderSelection::Inbox,
+            },
+        ))
+        .await;
     // Android may keep the UI process stopped for days. Its maintenance loop
     // cannot enforce the storage target while WorkManager is the only writer.
     if let Err(error) = crate::db::storage::maintain_mobile_budget(&pool).await {

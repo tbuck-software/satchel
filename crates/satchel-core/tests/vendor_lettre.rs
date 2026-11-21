@@ -79,11 +79,9 @@ fn the_documented_version_is_the_pinned_one() {
 fn the_patch_note_records_the_deviating_files() {
     let patch = read("vendor/lettre/SATCHEL_PATCH.md");
     for expected in [
-        "src/transport/smtp/client/tls.rs",
+        "src/transport/smtp/client/net.rs",
+        "src/transport/smtp/client/async_net.rs",
         "src/transport/smtp/error.rs",
-        "src/transport/smtp/client/mod.rs",
-        "src/transport/smtp/client/connection.rs",
-        "src/transport/smtp/client/async_connection.rs",
         "Cargo.toml",
         "rustls/rustls-platform-verifier",
     ] {
@@ -95,7 +93,7 @@ fn the_patch_note_records_the_deviating_files() {
 }
 
 /// The fork only takes effect through the patch table; without it the vendor
-/// tree is dead weight and the Android build breaks again.
+/// tree is dead weight, and its SMTP changes no longer reach Satchel.
 #[test]
 fn the_workspace_still_patches_lettre_to_the_vendor_tree() {
     let manifest = read("Cargo.toml");
@@ -159,75 +157,9 @@ fn upstream_has_no_newer_release() {
         panic!("upstream check requested, but crates.io did not answer");
     };
     let pinned = pinned_version();
-    let exception = upstream_exception();
     assert!(
-        !is_behind(&pinned, &latest)
-            || drift_is_reviewed(
-                &pinned,
-                &latest,
-                &exception,
-                chrono::Utc::now().date_naive()
-            ),
-        "lettre {latest} is out and the fork is still on {pinned}. Re-diff the \
-         vendor tree against the new release, carry the Android patch over, and \
-         update vendor/lettre/SATCHEL_PATCH.md — or drop the fork if upstream \
-         fixed it."
+        !is_behind(&pinned, &latest),
+        "lettre {latest} is out and the fork is still on {pinned}. Review the \
+         new release and update the fork and vendor/lettre/SATCHEL_PATCH.md."
     );
-}
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct UpstreamException {
-    pinned: String,
-    reviewed_upstream: String,
-    review_by: chrono::NaiveDate,
-    reason: String,
-}
-
-fn upstream_exception() -> UpstreamException {
-    serde_json::from_str(&read(".cargo/lettre-upstream-exception.json"))
-        .expect("dated lettre exception")
-}
-
-fn drift_is_reviewed(
-    pinned: &str,
-    latest: &str,
-    exception: &UpstreamException,
-    today: chrono::NaiveDate,
-) -> bool {
-    pinned == exception.pinned
-        && !is_behind(&exception.reviewed_upstream, latest)
-        && today <= exception.review_by
-        && !exception.reason.trim().is_empty()
-}
-
-#[test]
-fn the_upstream_exception_has_a_current_review_deadline() {
-    let exception = upstream_exception();
-    assert_eq!(exception.pinned, pinned_version());
-    assert!(
-        chrono::Utc::now().date_naive() <= exception.review_by,
-        "lettre upstream exception expired on {}; review the vendor diff",
-        exception.review_by
-    );
-    assert!(!exception.reason.trim().is_empty());
-}
-
-#[test]
-fn reviewed_drift_does_not_hide_new_releases_or_expired_exceptions() {
-    let exception = UpstreamException {
-        pinned: "0.11.19".into(),
-        reviewed_upstream: "0.11.23".into(),
-        review_by: chrono::NaiveDate::from_ymd_opt(2026, 11, 12).unwrap(),
-        reason: "Android verifier compatibility".into(),
-    };
-    let today = chrono::NaiveDate::from_ymd_opt(2026, 10, 12).unwrap();
-    assert!(drift_is_reviewed("0.11.19", "0.11.23", &exception, today));
-    assert!(!drift_is_reviewed("0.11.19", "0.11.24", &exception, today));
-    assert!(!drift_is_reviewed("0.11.18", "0.11.23", &exception, today));
-    assert!(!drift_is_reviewed(
-        "0.11.19",
-        "0.11.23",
-        &exception,
-        chrono::NaiveDate::from_ymd_opt(2026, 11, 13).unwrap()
-    ));
 }

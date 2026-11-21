@@ -9,6 +9,10 @@ export type OutboxItemDto = {
     created_at: string;
     updated_at: string;
     last_error: string | null;
+    /**
+     * The original failure before the copied action was held.
+     */
+    pre_restore_error: string | null;
     next_retry_at: string | null;
     scheduled_for: string | null;
     subject: string | null;

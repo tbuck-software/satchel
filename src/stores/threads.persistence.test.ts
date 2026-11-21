@@ -225,6 +225,26 @@ describe('thread organization persistence', () => {
     expect(store.newSenderStack?.senders.map((sender) => sender.senderEmail)).toEqual(['jonas@example.test']);
   });
 
+  it('keeps an IMAP deletion in Trash while it waits for server confirmation', async () => {
+    listThreadsMock.mockResolvedValueOnce({
+      threads: [backendThread({ id: 'queued' }), backendThread({ id: 'deleted' })],
+      next_cursor: null,
+      has_more: false,
+    });
+    vi.mocked(backendTrashThreads).mockResolvedValueOnce({
+      undo_token: null,
+      undo_thread_ids: [],
+      permanently_deleted: ['deleted'],
+      queued_deletions: ['queued'],
+    });
+    const store = useThreadsStore();
+    await store.load();
+    listThreadsMock.mockRejectedValueOnce(new Error('offline'));
+
+    await store.trashThreads(['queued', 'deleted']);
+    expect(store.threads.map((thread) => thread.id)).toEqual(['queued']);
+  });
+
   it.each(['trash', 'spam'] as const)('puts back what a stopped %s left where it was', async (action) => {
     listThreadsMock.mockResolvedValueOnce({
       threads: [

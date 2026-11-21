@@ -3376,7 +3376,9 @@ mod tests {
         .await
         .unwrap();
         assert!(
-            satchel_core::backup::apply_pending_restore(profile.path(), Some(&[9; 32])).unwrap()
+            satchel_core::backup::apply_pending_restore(profile.path(), Some(&[9; 32]))
+                .await
+                .unwrap()
         );
         drop(original_cache);
         let restored = SqlitePoolOptions::new()

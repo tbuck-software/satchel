@@ -10,10 +10,10 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
-edition = "2021"
-rust-version = "1.74"
+edition = "2024"
+rust-version = "1.85"
 name = "lettre"
-version = "0.11.19"
+version = "0.11.24"
 authors = [
     "Alexis Mousset <contact@amousset.me>",
     "Paolo Barbolini <paolo@paolo565.org>",
@@ -115,6 +115,7 @@ mime03 = ["dep:mime"]
 pool = ["dep:futures-util"]
 ring = ["rustls?/ring"]
 rustls = ["dep:rustls"]
+rustls-no-provider = ["rustls"]
 rustls-tls = [
     "webpki-roots",
     "rustls",
@@ -127,7 +128,6 @@ sendmail-transport = [
 ]
 smtp-transport = [
     "dep:base64",
-    "dep:nom",
     "dep:socket2",
     "dep:url",
     "dep:percent-encoding",
@@ -279,6 +279,10 @@ name = "transport_smtp"
 path = "tests/transport_smtp.rs"
 
 [[test]]
+name = "transport_smtp_partial_recipients"
+path = "tests/transport_smtp_partial_recipients.rs"
+
+[[test]]
 name = "transport_smtp_pool"
 path = "tests/transport_smtp_pool.rs"
 
@@ -301,26 +305,23 @@ version = "1.8"
 optional = true
 
 [dependencies.async-trait]
-version = "0.1"
+version = "0.1.7"
 optional = true
 
 [dependencies.base64]
-version = "0.22"
+version = "0.23"
 optional = true
 
 [dependencies.boring]
-version = "4"
+version = "5"
 optional = true
-
-[dependencies.chumsky]
-version = "0.9"
 
 [dependencies.ed25519-dalek]
 version = "2"
 optional = true
 
 [dependencies.email-encoding]
-version = "0.4"
+version = "0.4.3"
 optional = true
 
 [dependencies.email_address]
@@ -332,7 +333,7 @@ version = "2.0"
 optional = true
 
 [dependencies.futures-io]
-version = "0.3.7"
+version = "0.3.31"
 optional = true
 
 [dependencies.futures-rustls]
@@ -345,7 +346,7 @@ optional = true
 default-features = false
 
 [dependencies.futures-util]
-version = "0.3.7"
+version = "0.3.31"
 features = ["io"]
 optional = true
 default-features = false
@@ -362,7 +363,7 @@ optional = true
 version = "1"
 
 [dependencies.mime]
-version = "0.3.4"
+version = "0.3.5"
 optional = true
 
 [dependencies.native-tls]
@@ -371,7 +372,6 @@ optional = true
 
 [dependencies.nom]
 version = "8"
-optional = true
 
 [dependencies.percent-encoding]
 version = "2.3"
@@ -386,7 +386,7 @@ version = "0.9"
 optional = true
 
 [dependencies.rustls]
-version = "0.23.18"
+version = "0.23.27"
 features = [
     "logging",
     "std",
@@ -399,21 +399,22 @@ default-features = false
 version = "0.8"
 optional = true
 
+# Satchel: share the verifier initialized by the Android app and worker.
 [dependencies.rustls-platform-verifier]
-version = "0.6.0"
+version = "0.6.2"
 optional = true
 
 [dependencies.serde]
-version = "1.0.110"
+version = "1.0.166"
 features = ["derive"]
 optional = true
 
 [dependencies.serde_json]
-version = "1"
+version = "1.0.100"
 optional = true
 
 [dependencies.sha2]
-version = "0.10"
+version = "0.10.6"
 features = ["oid"]
 optional = true
 
@@ -422,12 +423,12 @@ version = "0.6"
 optional = true
 
 [dependencies.tokio1_boring]
-version = "4"
+version = "5"
 optional = true
 package = "tokio-boring"
 
 [dependencies.tokio1_crate]
-version = "1"
+version = "1.18.2"
 optional = true
 package = "tokio"
 
@@ -470,22 +471,22 @@ version = "1.8"
 features = ["attributes"]
 
 [dev-dependencies.criterion]
-version = "0.5"
+version = "0.7"
 
 [dev-dependencies.glob]
 version = "0.3"
 
 [dev-dependencies.maud]
-version = "0.26"
+version = "0.27"
 
 [dev-dependencies.pretty_assertions]
 version = "1"
 
 [dev-dependencies.serde_json]
-version = "1"
+version = "1.0.100"
 
 [dev-dependencies.tokio1_crate]
-version = "1"
+version = "1.18.2"
 features = [
     "macros",
     "rt-multi-thread",
@@ -501,7 +502,7 @@ default-features = false
 version = "0.3"
 
 [dev-dependencies.walkdir]
-version = "2"
+version = "2.3"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies.web-time]
 version = "1.1.0"

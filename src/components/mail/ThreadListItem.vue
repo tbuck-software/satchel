@@ -142,27 +142,27 @@ const {
     }
   },
   onCommit: (action) => {
+    if (action === 'none') return;
+    const ids = actionThreadIds([props.thread.id]);
     switch (action) {
       case 'toggle-read':
-        void threadActions.setRead([props.thread.id], isUnread.value);
+        void threadActions.setRead(ids, isUnread.value);
         break;
       case 'done':
-        void threadActions.toggleDone([props.thread.id]);
+        void threadActions.toggleDone(ids);
         break;
       case 'pin':
-        void threadActions.setPinned([props.thread.id], !props.thread.isStarred);
+        void threadActions.setPinned(ids, !props.thread.isStarred);
         break;
       case 'aside':
         if (props.thread.workflowState === 'aside') {
-          void threadActions.moveToInbox([props.thread.id]);
+          void threadActions.moveToInbox(ids);
         } else {
-          void threadActions.setAside([props.thread.id]);
+          void threadActions.setAside(ids);
         }
         break;
       case 'trash':
-        void threadActions.trash([props.thread.id]);
-        break;
-      case 'none':
+        void threadActions.trash(ids);
         break;
     }
   },
@@ -301,14 +301,24 @@ function targetThreadIds(): string[] {
   return selected.includes(props.thread.id) ? [...selected] : [props.thread.id];
 }
 
+function actionThreadIds(ids = targetThreadIds()): string[] {
+  threadsStore.adoptListedThreads(ids);
+  return ids;
+}
+
+const targetsAreDone = computed(() => {
+  const ids = targetThreadIds();
+  return ids.length === 1 ? isDone.value : threadActions.allDone(ids);
+});
+
 async function togglePinned() {
   closeContextMenu();
-  await threadActions.setPinned(targetThreadIds(), !props.thread.isStarred);
+  await threadActions.setPinned(actionThreadIds(), !props.thread.isStarred);
 }
 
 async function toggleAside() {
   closeContextMenu();
-  const ids = targetThreadIds();
+  const ids = actionThreadIds();
   if (props.thread.workflowState === 'aside') await threadActions.moveToInbox(ids);
   else await threadActions.setAside(ids);
 }
@@ -316,19 +326,19 @@ async function toggleAside() {
 /** Done, or back to the Inbox when every target is done already. */
 async function markDone() {
   closeContextMenu();
-  await threadActions.toggleDone(targetThreadIds());
+  await threadActions.toggleDone(actionThreadIds());
 }
 
 const showNotSpam = computed(() => offersNotSpam(props.thread, threadsStore.mailboxFilter));
 
 async function markNotSpam() {
   closeContextMenu();
-  await threadActions.markNotSpam(targetThreadIds());
+  await threadActions.markNotSpam(actionThreadIds());
 }
 
 async function toggleRead() {
   closeContextMenu();
-  await threadActions.setRead(targetThreadIds(), isUnread.value);
+  await threadActions.setRead(actionThreadIds(), isUnread.value);
 }
 
 function copyLink() {
@@ -345,6 +355,7 @@ function fileTo() {
 
 async function toggleThreadPriority() {
   closeContextMenu();
+  threadsStore.adoptListedThreads([props.thread.id]);
   await threadActions.togglePriority(props.thread.id);
 }
 
@@ -368,7 +379,6 @@ async function applyFollowUp(date: string) {
 
 function quickAction(action: 'snooze' | 'done', event: MouseEvent) {
   event.stopPropagation();
-  threadsStore.selectThread(props.thread.id);
   if (action === 'snooze') {
     waitingPickerOpen.value = true;
     return;
@@ -378,7 +388,7 @@ function quickAction(action: 'snooze' | 'done', event: MouseEvent) {
 
 function applyWaiting(date: string) {
   waitingPickerOpen.value = false;
-  void threadActions.snoozeAt(targetThreadIds(), date);
+  void threadActions.snoozeAt(actionThreadIds(), date);
 }
 
 function onDragStart(event: DragEvent) {
@@ -672,8 +682,8 @@ function onDragStart(event: DragEvent) {
   >
     <div class="menu-group" @mouseenter="senderMenuAnchor = null">
       <MenuItem
-        :icon="threadActions.allDone(targetThreadIds()) ? 'inbox' : 'check'"
-        :label="threadActions.allDone(targetThreadIds()) ? $t('thread.actions.moveToInbox') : $t('common.done')"
+        :icon="targetsAreDone ? 'inbox' : 'check'"
+        :label="targetsAreDone ? $t('thread.actions.moveToInbox') : $t('common.done')"
         @select="markDone"
       />
       <MenuItem

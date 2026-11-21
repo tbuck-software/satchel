@@ -13,8 +13,8 @@ use std::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{
-    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
-    SqlitePool,
+    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
+    Executor, SqlitePool,
 };
 
 use crate::{
@@ -27,7 +27,13 @@ pub mod publication;
 const READY: &str = "satchel.restore-ready.json";
 const APPLYING: &str = "satchel.restore-applying.json";
 const DATABASE: &str = "satchel.db";
-const PROFILE_FILES: &[&str] = &[DATABASE, "satchel.db-wal", "satchel.db-shm"];
+const APPLY_INCOMING_CUTOFF: &str = include_str!("backup/apply_incoming_cutoff.sql");
+const PROFILE_FILES: &[&str] = &[
+    DATABASE,
+    "satchel.db-wal",
+    "satchel.db-shm",
+    "satchel.db-journal",
+];
 /// Written beside `satchel.db` in a backup directory. Purely descriptive: the
 /// authoritative schema version is the one inside the database, so a backup
 /// from before this file existed still restores.
@@ -60,6 +66,21 @@ struct RestoreManifest {
     database_hash: String,
     key_hash: Option<String>,
     previous: Option<String>,
+    #[serde(default)]
+    replay_protection: ReplayProtection,
+    #[serde(default)]
+    activation_cutoff: Option<String>,
+}
+
+#[derive(Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ReplayProtection {
+    #[default]
+    Legacy,
+    Prepared,
+    // The original hash was verified and the old sidecars were removed.
+    // SQLite may have changed the hash or left a hot journal since then.
+    RecoveringInstalled,
 }
 
 fn key_hash(key: &[u8; 32]) -> String {
@@ -201,6 +222,7 @@ async fn rewrap_secrets(
             "passphrase" => crypto::SecretContext::pgp_passphrase(),
             "pem_private_key_encrypted" => crypto::SecretContext::smime_private_key(),
             "encrypted_api_key" => crypto::SecretContext::translation_api_key(row_id),
+            "credential" => crypto::SecretContext::push_link(row_id),
             _ => crypto::SecretContext::oauth_code_verifier(row_id),
         }
     }
@@ -211,6 +233,7 @@ async fn rewrap_secrets(
         ("smime_certificates", "id", "pem_private_key_encrypted"),
         ("oauth_flow_sessions", "state", "encrypted_code_verifier"),
         ("translation_engine_keys", "engine", "encrypted_api_key"),
+        ("desktop_push_links", "id", "credential"),
     ] {
         let exists: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?")
@@ -311,6 +334,12 @@ pub async fn stage_restore(
         if backup_schema > app_schema {
             return Err(schema_too_new(backup_schema, app_schema));
         }
+        // Inspect the source schema before migrating it. In particular, a
+        // claimed send predating submission_started_at has an unknown outcome.
+        suppress_copied_work(&pool, None).await.map_err(|error| {
+            tracing::warn!(%error, "restore work could not be held");
+            "backend.errors.restoreDatabaseInvalid".to_string()
+        })?;
         // Use the startup migrator, including its checksum and dirty-version
         // checks. This private copy needs neither a migration lock nor WAL.
         if let Err(error) = crate::db::run_migrations(&pool).await {
@@ -351,12 +380,110 @@ pub async fn stage_restore(
             None
         },
         previous: None,
+        replay_protection: ReplayProtection::Prepared,
+        activation_cutoff: None,
     };
     temporary
         .persist(profile.join(format!("{DATABASE}{RESTORE_PENDING_SUFFIX}")))
         .map_err(|e| e.to_string())?;
     sync_directory(profile)?;
     write_manifest(&profile.join(READY), &manifest)
+}
+
+/// Updates only the copied queue, schedules, and active intents. Also used
+/// before opening a legacy installed restore, where the schema may be older.
+async fn suppress_copied_work(
+    pool: &SqlitePool,
+    activation_cutoff: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let (submission_marker, draft_schedules, mail_merge, ingest, notifications, has_cutoff):
+        (bool, bool, bool, bool, bool, bool) = sqlx::query_as(
+        "SELECT
+            EXISTS (SELECT 1 FROM pragma_table_info('sync_queue') WHERE name = 'submission_started_at'),
+            EXISTS (SELECT 1 FROM pragma_table_info('messages') WHERE name = 'scheduled_for'),
+            EXISTS (SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'mail_merge_jobs'),
+            EXISTS (SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'ingest_effects'),
+            EXISTS (SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'notification_outbox'),
+            EXISTS (SELECT 1 FROM pragma_table_info('accounts') WHERE name = 'incoming_effects_cutoff')",
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    let hold_sends = include_str!("backup/hold_sends.sql");
+    let legacy_hold_sends;
+    let hold_sends = if submission_marker {
+        hold_sends
+    } else {
+        legacy_hold_sends =
+            hold_sends.replace("submission_started_at IS NOT NULL", "status = 'sending'");
+        &legacy_hold_sends
+    };
+    for (present, statement) in [
+        (
+            true,
+            include_str!("db/migrations/0198_restore_queue_failures.sql"),
+        ),
+        (true, include_str!("backup/preserve_queue_failures.sql")),
+        (true, hold_sends),
+        (true, include_str!("backup/hold_sent_copies.sql")),
+        (
+            draft_schedules,
+            include_str!("backup/clear_draft_schedules.sql"),
+        ),
+        (mail_merge, include_str!("backup/pause_mail_merge.sql")),
+        (ingest, include_str!("backup/skip_ingest_rules.sql")),
+        (
+            notifications,
+            include_str!("backup/clear_notification_intents.sql"),
+        ),
+    ] {
+        if present {
+            tx.execute(sqlx::raw_sql(statement)).await?;
+        }
+    }
+    if let Some(cutoff) = activation_cutoff {
+        sqlx::query(include_str!("backup/record_incoming_cutoff.sql"))
+            .bind(cutoff)
+            .execute(&mut *tx)
+            .await?;
+        if has_cutoff {
+            tx.execute(sqlx::raw_sql(APPLY_INCOMING_CUTOFF)).await?;
+        }
+    }
+    tx.commit().await
+}
+
+/// Apply a legacy restore cutoff after migration. An imported Daily profile
+/// can sit unused while Stable processes mail, so advance it on its first open.
+pub(crate) async fn finish_imported_cutoff(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    let pending: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM app_settings WHERE key IN
+          ('restore.incoming_effects_cutoff', 'daily_import.awaiting_first_open'))",
+    )
+    .fetch_one(pool)
+    .await?;
+    if pending {
+        let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+        let first_open =
+            sqlx::query("DELETE FROM app_settings WHERE key = 'daily_import.awaiting_first_open'")
+                .execute(&mut *tx)
+                .await?
+                .rows_affected()
+                > 0;
+        if first_open {
+            sqlx::query(include_str!("backup/record_incoming_cutoff.sql"))
+                .bind(activation_time())
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.execute(sqlx::raw_sql(APPLY_INCOMING_CUTOFF)).await?;
+        tx.commit().await?;
+    }
+    Ok(())
+}
+
+fn activation_time() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
 fn copy_synced(from: &Path, to: &Path) -> Result<(), String> {
@@ -366,21 +493,25 @@ fn copy_synced(from: &Path, to: &Path) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-/// Recover the previous profile if interruption happened before the atomic DB
-/// replacement. Its WAL travels with it, so committed pages are never dropped.
-fn recover_interrupted_apply(profile: &Path) -> Result<(), String> {
+/// Finish an installed restore or recover the previous profile if the atomic
+/// replacement did not happen. Rollback restores the previous WAL with its DB.
+async fn recover_interrupted_apply(profile: &Path) -> Result<bool, String> {
     let path = profile.join(APPLYING);
     if !path.exists() {
-        return Ok(());
+        return Ok(false);
     }
-    let manifest = read_manifest(&path)?;
+    let mut manifest = read_manifest(&path)?;
     // The atomic rename consumes staging. Hash equality alone cannot tell a
     // completed swap from an identical base database with newer WAL pages.
     let installed = !profile
         .join(format!("{DATABASE}{RESTORE_PENDING_SUFFIX}"))
-        .exists()
-        && file_hash(&profile.join(DATABASE)).ok().as_ref() == Some(&manifest.database_hash);
+        .try_exists()
+        .map_err(|e| e.to_string())?;
     if !installed {
+        if manifest.replay_protection == ReplayProtection::RecoveringInstalled {
+            tracing::error!("unexpected staging file during installed restore recovery");
+            return Err("backend.errors.restoreDatabaseInvalid".into());
+        }
         let previous = manifest
             .previous
             .as_deref()
@@ -401,23 +532,57 @@ fn recover_interrupted_apply(profile: &Path) -> Result<(), String> {
             }
         }
     } else {
-        for name in &PROFILE_FILES[1..] {
-            let live = profile.join(name);
-            if live.exists() {
-                fs::remove_file(live).map_err(|e| e.to_string())?;
+        let live = profile.join(DATABASE);
+        if manifest.replay_protection != ReplayProtection::RecoveringInstalled {
+            if file_hash(&live)? != manifest.database_hash {
+                tracing::error!("installed restore does not match the recovery manifest");
+                return Err("backend.errors.restoreDatabaseInvalid".into());
+            }
+            for name in &PROFILE_FILES[1..] {
+                let sidecar = profile.join(name);
+                if sidecar.exists() {
+                    fs::remove_file(sidecar).map_err(|e| e.to_string())?;
+                }
             }
         }
+        if manifest.replay_protection != ReplayProtection::RecoveringInstalled
+            || manifest.activation_cutoff.is_none()
+        {
+            // A retry must keep the activation time even if SQLite changed the hash.
+            manifest.replay_protection = ReplayProtection::RecoveringInstalled;
+            manifest
+                .activation_cutoff
+                .get_or_insert_with(activation_time);
+            write_manifest(&path, &manifest)?;
+        }
+        let result = {
+            let pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect_with(
+                    SqliteConnectOptions::new()
+                        .filename(&live)
+                        .journal_mode(SqliteJournalMode::Delete)
+                        .synchronous(SqliteSynchronous::Extra),
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+            let result = suppress_copied_work(&pool, manifest.activation_cutoff.as_deref()).await;
+            pool.close().await;
+            result
+        };
+        result.map_err(|e| e.to_string())?;
         if profile.join(READY).exists() {
             fs::remove_file(profile.join(READY)).map_err(|e| e.to_string())?;
         }
     }
     sync_directory(profile)?;
     fs::remove_file(path).map_err(|e| e.to_string())?;
-    sync_directory(profile)
+    sync_directory(profile)?;
+    Ok(installed)
 }
 
 /// Called before opening the live database; staged credentials use the active key.
-pub fn apply_pending_restore(
+pub async fn apply_pending_restore(
     profile: &Path,
     current_key: Option<&[u8; 32]>,
 ) -> Result<bool, String> {
@@ -430,14 +595,18 @@ pub fn apply_pending_restore(
         tracing::warn!("staged restore deferred: the database is open in another process");
         return Ok(false);
     };
-    recover_interrupted_apply(profile)?;
+    if recover_interrupted_apply(profile).await? {
+        return Ok(true);
+    }
     let ready = profile.join(READY);
     if !ready.exists() {
         return Ok(false);
     }
     let mut manifest = read_manifest(&ready)?;
     let pending = profile.join(format!("{DATABASE}{RESTORE_PENDING_SUFFIX}"));
-    if file_hash(&pending)? != manifest.database_hash {
+    if manifest.replay_protection != ReplayProtection::Prepared
+        || file_hash(&pending)? != manifest.database_hash
+    {
         return Err("backend.errors.restoreStagingChanged".into());
     }
     if manifest.key_hash.is_some() && current_key.map(key_hash) != manifest.key_hash {
@@ -454,6 +623,7 @@ pub fn apply_pending_restore(
     }
     sync_directory(&backup)?;
     manifest.previous = Some(previous);
+    manifest.activation_cutoff = Some(activation_time());
     write_manifest(&profile.join(APPLYING), &manifest)?;
     for name in &PROFILE_FILES[1..] {
         let live = profile.join(name);
@@ -463,13 +633,44 @@ pub fn apply_pending_restore(
     }
     fs::rename(&pending, profile.join(DATABASE)).map_err(|e| e.to_string())?;
     sync_directory(profile)?;
-    recover_interrupted_apply(profile)?;
-    Ok(true)
+    recover_interrupted_apply(profile).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn daily_first_open_applies_its_cutoff_once() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::raw_sql(
+            "CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT);
+             INSERT INTO app_settings VALUES ('daily_import.awaiting_first_open', '1', '');
+             CREATE TABLE accounts (id TEXT, incoming_effects_cutoff TEXT, last_sync_at TEXT, created_at TEXT);
+             INSERT INTO accounts VALUES ('account', '2001-01-01', '2000-01-01', '1999-01-01');"
+        ).execute(&pool).await.unwrap();
+        let before = activation_time();
+        finish_imported_cutoff(&pool).await.unwrap();
+        let cutoff: String = sqlx::query_scalar("SELECT incoming_effects_cutoff FROM accounts")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert!(cutoff >= before && cutoff <= activation_time());
+        sqlx::query("UPDATE accounts SET incoming_effects_cutoff = '2002-01-01'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        finish_imported_cutoff(&pool).await.unwrap();
+        let next: String = sqlx::query_scalar("SELECT incoming_effects_cutoff FROM accounts")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(next, "2002-01-01");
+    }
 
     /// Backup manifests record this hash next to the key they carry.
     #[test]
@@ -488,6 +689,7 @@ mod tests {
             "passphrase" => crypto::SecretContext::pgp_passphrase(),
             "pem_private_key_encrypted" => crypto::SecretContext::smime_private_key(),
             "encrypted_api_key" => crypto::SecretContext::translation_api_key("row-1"),
+            "credential" => crypto::SecretContext::push_link("row-1"),
             _ => crypto::SecretContext::oauth_code_verifier("row-1"),
         }
     }
@@ -515,6 +717,7 @@ mod tests {
              VALUES ('row-1', 'row-1', 'gmail', '', '', '')",
             "INSERT INTO translation_engine_keys (engine, encrypted_api_key, updated_at)
              VALUES ('row-1', '', '')",
+            "INSERT INTO desktop_push_links (id, name, credential) VALUES ('row-1', 'Phone', '')",
         ] {
             sqlx::query(statement).execute(&pool).await.unwrap();
         }
@@ -525,6 +728,7 @@ mod tests {
             ("smime_certificates", "pem_private_key_encrypted"),
             ("oauth_flow_sessions", "encrypted_code_verifier"),
             ("translation_engine_keys", "encrypted_api_key"),
+            ("desktop_push_links", "credential"),
         ] {
             sqlx::query(&format!("UPDATE {table} SET {column} = ?"))
                 .bind(crypto::encrypt_aead_with_key(column, key, test_context(column)).unwrap())
@@ -550,12 +754,12 @@ mod tests {
 
         // What the background process holds while its pool is open.
         let open = crate::db::profile_lock::hold_open(&profile).await.unwrap();
-        assert!(!apply_pending_restore(&profile, Some(&key)).unwrap());
+        assert!(!apply_pending_restore(&profile, Some(&key)).await.unwrap());
         assert!(restore_pending(&profile));
         assert_eq!(fs::read(&live).unwrap(), b"live database");
 
         drop(open);
-        assert!(apply_pending_restore(&profile, Some(&key)).unwrap());
+        assert!(apply_pending_restore(&profile, Some(&key)).await.unwrap());
         assert!(!restore_pending(&profile));
     }
 
@@ -572,9 +776,13 @@ mod tests {
             .unwrap();
         // Keychain changes between staging and restart must never activate an
         // unreadable profile.
-        assert!(apply_pending_restore(&profile, Some(&source_key)).is_err());
+        assert!(apply_pending_restore(&profile, Some(&source_key))
+            .await
+            .is_err());
         assert!(!profile.join(DATABASE).exists());
-        assert!(apply_pending_restore(&profile, Some(&active_key)).unwrap());
+        assert!(apply_pending_restore(&profile, Some(&active_key))
+            .await
+            .unwrap());
         assert!(!restore_pending(&profile));
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
@@ -588,6 +796,7 @@ mod tests {
             ("smime_certificates", "pem_private_key_encrypted"),
             ("oauth_flow_sessions", "encrypted_code_verifier"),
             ("translation_engine_keys", "encrypted_api_key"),
+            ("desktop_push_links", "credential"),
         ] {
             let value: String = sqlx::query_scalar(&format!("SELECT {column} FROM {table}"))
                 .fetch_one(&pool)
@@ -600,6 +809,254 @@ mod tests {
             assert!(crypto::decrypt_with_key(&value, &source_key, test_context(column)).is_err());
         }
         pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn restore_holds_send_work_until_explicitly_reopened_or_resumed() {
+        use crate::{
+            drafts::{
+                outgoing::{OutgoingAttachmentInput, OutgoingMessageInput},
+                send_queue::build_send_action,
+            },
+            mail_merge::job,
+            sync::queue::{QueuedAction, SyncQueue, ACTION_RULE_FORWARD},
+        };
+
+        let directory = tempfile::tempdir().unwrap();
+        let profile = directory.path().join("profile");
+        let source = directory.path().join("backup.db");
+        let key = [7; 32];
+        backup_file(&source, &key).await;
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(SqliteConnectOptions::new().filename(&source))
+            .await
+            .unwrap();
+        let queue = SyncQueue::new();
+        let now = chrono::Utc::now();
+        let scheduled = build_send_action(
+            "row-1".into(),
+            OutgoingMessageInput {
+                to: vec!["recipient@example.test".into()],
+                draft_id: Some("saved-draft".into()),
+                subject: "Preserved draft".into(),
+                body: "Unsent body".into(),
+                attachments: vec![OutgoingAttachmentInput {
+                    filename: "offer.pdf".into(),
+                    mime_type: "application/pdf".into(),
+                    content_base64: "YXR0YWNobWVudA==".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            Some(now + chrono::Duration::days(1)),
+        )
+        .unwrap();
+        crate::drafts::enqueue_send_with_draft(&pool, &queue, &scheduled)
+            .await
+            .unwrap();
+
+        let make_action = |id: &str, status: &str, action_type, last_error: Option<&str>| {
+            let mut action = QueuedAction::new("row-1".into(), action_type, serde_json::json!({}));
+            action.id = id.into();
+            action.status = status.into();
+            action.last_error = last_error.map(str::to_owned);
+            action
+        };
+        let mut submitted = make_action("submitted", "sending", "send_message", None);
+        submitted.submission_started_at = Some(now.to_rfc3339());
+        for action in [
+            make_action("pending", "pending", "send_message", None),
+            submitted,
+            make_action(
+                "old-failure",
+                "failed",
+                "send_message",
+                Some("network offline"),
+            ),
+            make_action("forward", "pending", ACTION_RULE_FORWARD, None),
+            make_action("merge-copy", "pending", "send_message", None),
+        ] {
+            queue.enqueue(&pool, action).await.unwrap();
+        }
+        let mut sent_copy = make_action("sent-copy", "sending", "remote_mutation", None);
+        sent_copy.payload = serde_json::json!({
+            "kind": "append_sent",
+            "raw_base64": "bWFpbA==",
+            "folder_hint": "Sent"
+        });
+        sent_copy.last_error = Some("network offline".into());
+        queue.enqueue(&pool, sent_copy.clone()).await.unwrap();
+        let mut discard_copy = sent_copy.clone();
+        discard_copy.id = "discard-copy".into();
+        queue.enqueue(&pool, discard_copy).await.unwrap();
+
+        for statement in [
+            "INSERT INTO threads (id, account_id, last_message_date, created_at, updated_at)
+             VALUES ('incoming-thread', 'row-1', '', '', '')",
+            "INSERT INTO messages (id, account_id, folder_id, thread_id, from_address,
+                  to_addresses, date, created_at, updated_at)
+             SELECT 'incoming', account_id, folder_id, 'incoming-thread',
+                    'sender@example.test', '[]', '', '', ''
+             FROM messages WHERE id = 'saved-draft'",
+            "INSERT INTO ingest_effects (message_id, thread_id, account_id, run_rules, created_at)
+             VALUES ('incoming', 'incoming-thread', 'row-1', 1, '')",
+            "INSERT OR REPLACE INTO notification_outbox (message_id, state, created_at)
+             VALUES ('incoming', 'pending', '')",
+            "INSERT INTO mail_merge_jobs (id, account_id, status, subject, template,
+                  delay_seconds, created_at, updated_at)
+             VALUES ('merge', 'row-1', 'running', 'Merge', '{}', 10, '', '')",
+            "INSERT INTO mail_merge_recipients (id, job_id, position, email, fields, status,
+                  queue_id, message_id_header, updated_at)
+             VALUES ('recipient', 'merge', 1, 'recipient@example.test', '{}', 'queued',
+                     'merge-copy', '<merge@example.test>', '')",
+        ] {
+            sqlx::query(statement).execute(&pool).await.unwrap();
+        }
+        pool.close().await;
+
+        stage_restore(&profile, &source, &[key], Some(&key))
+            .await
+            .unwrap();
+        assert!(apply_pending_restore(&profile, Some(&key)).await.unwrap());
+        let restored = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(SqliteConnectOptions::new().filename(profile.join(DATABASE)))
+            .await
+            .unwrap();
+        assert_eq!(queue.reset_sending(&restored).await.unwrap(), 0);
+        assert_eq!(queue.requeue_failed_transient(&restored).await.unwrap(), 0);
+        assert!(queue.claim_next(&restored).await.unwrap().is_none());
+        let pending_notifications: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM notification_outbox WHERE state IN ('pending', 'dispatching')",
+        )
+        .fetch_one(&restored)
+        .await
+        .unwrap();
+        assert_eq!(pending_notifications, 0);
+        let run_rules: i64 = sqlx::query_scalar("SELECT run_rules FROM ingest_effects")
+            .fetch_one(&restored)
+            .await
+            .unwrap();
+        assert_eq!(run_rules, 0);
+        assert!(queue.requeue_mail(&restored, "submitted").await.is_err());
+        assert_eq!(
+            queue
+                .requeue_failed_remote_mutations(&restored)
+                .await
+                .unwrap(),
+            0
+        );
+        let failed = queue.list_failed_sync_actions(&restored).await.unwrap();
+        assert!(failed.iter().any(|action| action.id == "forward"));
+        let held_copy = failed
+            .iter()
+            .find(|action| action.id == "sent-copy")
+            .unwrap();
+        assert_eq!(held_copy.payload, sent_copy.payload);
+        assert_eq!(
+            held_copy.pre_restore_error.as_deref(),
+            Some("network offline")
+        );
+        let mail = queue.list_mail_outbox(&restored).await.unwrap();
+        assert_eq!(
+            mail.iter()
+                .find(|item| item.id == "old-failure")
+                .unwrap()
+                .pre_restore_error
+                .as_deref(),
+            Some("network offline")
+        );
+        assert!(
+            crate::mail_actions::discard_failed_sync_action(&restored, "discard-copy")
+                .await
+                .unwrap()
+        );
+        assert!(
+            !crate::mail_actions::discard_failed_sync_action(&restored, "discard-copy")
+                .await
+                .unwrap()
+        );
+        assert!(!queue
+            .list_failed_sync_actions(&restored)
+            .await
+            .unwrap()
+            .iter()
+            .any(|item| item.id == "discard-copy"));
+        job::tick(&restored, &queue, now).await.unwrap();
+        let merge: (String, String) = sqlx::query_as(
+            "SELECT j.status, r.status FROM mail_merge_jobs j
+             JOIN mail_merge_recipients r ON r.job_id = j.id",
+        )
+        .fetch_one(&restored)
+        .await
+        .unwrap();
+        assert_eq!(merge, ("paused".into(), "failed".into()));
+        let schedule: Option<String> =
+            sqlx::query_scalar("SELECT scheduled_for FROM messages WHERE is_draft = 1")
+                .fetch_one(&restored)
+                .await
+                .unwrap();
+        assert!(schedule.is_none());
+        let draft = crate::drafts::restore_queued_draft(&restored, &queue, &scheduled.id)
+            .await
+            .unwrap();
+        assert_eq!(draft.subject, "Preserved draft");
+        assert_eq!(draft.body, "Unsent body");
+        assert_eq!(draft.to, ["recipient@example.test"]);
+        assert!(draft.scheduled_for.is_none());
+        assert_eq!(draft.attachments[0].content_base64, "YXR0YWNobWVudA==");
+
+        queue.requeue_mail(&restored, "pending").await.unwrap();
+        assert_eq!(
+            queue.claim_next(&restored).await.unwrap().unwrap().id,
+            "pending"
+        );
+        assert!(queue
+            .requeue_failed_sync_action(&restored, "forward")
+            .await
+            .unwrap());
+        assert_eq!(
+            queue.claim_next(&restored).await.unwrap().unwrap().id,
+            "forward"
+        );
+        assert!(queue
+            .requeue_failed_sync_action(&restored, "sent-copy")
+            .await
+            .unwrap());
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM restored_queue_failures WHERE queue_id IN ('discard-copy', 'sent-copy')")
+                .fetch_one(&restored).await.unwrap(),
+            0
+        );
+        assert_eq!(
+            queue.claim_next(&restored).await.unwrap().unwrap().id,
+            "sent-copy"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_restore_staged_before_send_holding_cannot_replace_the_live_database() {
+        let directory = tempfile::tempdir().unwrap();
+        let profile = directory.path();
+        let pending = profile.join(format!("{DATABASE}{RESTORE_PENDING_SUFFIX}"));
+        fs::write(&pending, b"old staged database").unwrap();
+        fs::write(profile.join(DATABASE), b"live database").unwrap();
+        atomic_write(
+            &profile.join(READY),
+            &serde_json::to_vec(&serde_json::json!({
+                "database_hash": file_hash(&pending).unwrap(),
+                "key_hash": null,
+                "previous": null
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            apply_pending_restore(profile, None).await.unwrap_err(),
+            "backend.errors.restoreStagingChanged"
+        );
+        assert_eq!(fs::read(profile.join(DATABASE)).unwrap(), b"live database");
     }
 
     /// Record a schema version in a backup file the way sqlx would.
@@ -703,7 +1160,7 @@ mod tests {
         let source_hash = file_hash(&source).unwrap();
 
         stage_restore(&profile, &source, &[], None).await.unwrap();
-        assert!(apply_pending_restore(&profile, None).unwrap());
+        assert!(apply_pending_restore(&profile, None).await.unwrap());
         let restored = SqlitePoolOptions::new()
             .connect_with(SqliteConnectOptions::new().filename(profile.join(DATABASE)))
             .await
@@ -784,7 +1241,9 @@ mod tests {
             b"partial",
         )
         .unwrap();
-        assert!(apply_pending_restore(&profile, Some(&[9; 32])).is_err());
+        assert!(apply_pending_restore(&profile, Some(&[9; 32]))
+            .await
+            .is_err());
         assert_eq!(
             fs::read(profile.join(DATABASE)).unwrap(),
             b"existing database"
@@ -793,8 +1252,8 @@ mod tests {
         assert!(!restore_pending(&profile));
     }
 
-    #[test]
-    fn interruption_before_swap_restores_wal_even_when_database_hash_matches() {
+    #[tokio::test]
+    async fn interruption_before_swap_restores_wal_even_when_database_hash_matches() {
         let directory = tempfile::tempdir().unwrap();
         let profile = directory.path();
         let previous = "satchel.db.replaced-test";
@@ -815,9 +1274,11 @@ mod tests {
             database_hash: file_hash(&profile.join(DATABASE)).unwrap(),
             key_hash: None,
             previous: Some(previous.into()),
+            replay_protection: ReplayProtection::Legacy,
+            activation_cutoff: None,
         };
         write_manifest(&profile.join(APPLYING), &manifest).unwrap();
-        recover_interrupted_apply(profile).unwrap();
+        recover_interrupted_apply(profile).await.unwrap();
         assert_eq!(
             fs::read(profile.join("satchel.db-wal")).unwrap(),
             b"committed newer pages"
@@ -825,22 +1286,252 @@ mod tests {
         assert!(!profile.join(APPLYING).exists());
     }
 
-    #[test]
-    fn interruption_after_swap_finishes_without_reverting_new_database() {
+    #[tokio::test]
+    async fn interruption_after_swap_finishes_without_reverting_new_database() {
         let directory = tempfile::tempdir().unwrap();
         let profile = directory.path();
-        fs::write(profile.join(DATABASE), b"installed").unwrap();
+        older_backup_file(&profile.join(DATABASE)).await;
         fs::write(profile.join("satchel.db-wal"), b"stale pages").unwrap();
         let manifest = RestoreManifest {
             database_hash: file_hash(&profile.join(DATABASE)).unwrap(),
             key_hash: None,
             previous: Some("satchel.db.replaced-test".into()),
+            replay_protection: ReplayProtection::Prepared,
+            activation_cutoff: Some("2026-01-01T01:00:00Z".into()),
         };
         write_manifest(&profile.join(READY), &manifest).unwrap();
         write_manifest(&profile.join(APPLYING), &manifest).unwrap();
-        recover_interrupted_apply(profile).unwrap();
-        assert_eq!(fs::read(profile.join(DATABASE)).unwrap(), b"installed");
+        recover_interrupted_apply(profile).await.unwrap();
+        assert_eq!(
+            assert_older_work_held(&profile.join(DATABASE)).await,
+            "2026-01-01T01:00:00Z"
+        );
         assert!(!profile.join("satchel.db-wal").exists());
         assert!(!restore_pending(profile));
+    }
+
+    /// Migration 57 has notification leases but predates submission markers,
+    /// ingest effects and mail merge.
+    async fn older_backup_file(path: &Path) {
+        use sqlx::migrate::Migrate;
+        use sqlx::Connection;
+
+        let options = SqliteConnectOptions::new()
+            .filename(path)
+            .create_if_missing(true);
+        let mut conn = sqlx::SqliteConnection::connect_with(&options)
+            .await
+            .unwrap();
+        conn.ensure_migrations_table().await.unwrap();
+        for migration in sqlx::migrate!("./src/db/migrations")
+            .iter()
+            .take_while(|m| m.version <= 57)
+        {
+            conn.apply(migration).await.unwrap();
+        }
+        for statement in [
+            "INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+             VALUES ('a', 'Backup', 'backup@example.test', 'imap', '', '', '', '')",
+            "INSERT INTO folders (id, account_id, name, full_path, folder_type, created_at, updated_at)
+             VALUES ('f', 'a', 'Inbox', 'INBOX', 'inbox', '', '')",
+            "INSERT INTO messages (id, account_id, folder_id, from_address, to_addresses, date, created_at, updated_at)
+             VALUES ('new', 'a', 'f', 'sender@example.test', '[]', '', '', ''),
+                    ('claimed', 'a', 'f', 'sender@example.test', '[]', '', '', ''),
+                    ('shown', 'a', 'f', 'sender@example.test', '[]', '', '', '')",
+            "INSERT OR REPLACE INTO notification_outbox (message_id, state, created_at, dispatch_token, dispatch_at)
+             VALUES ('new', 'pending', '', NULL, NULL), ('claimed', 'dispatching', '', 'old-token', ''),
+                    ('shown', 'delivered', '', NULL, NULL)",
+            r#"INSERT INTO sync_queue (id, account_id, action_type, payload, status, last_error, created_at, updated_at)
+               VALUES ('send', 'a', 'send_message', '{"input":{"subject":"Original draft"}}', 'sending', NULL, '', ''),
+                      ('copy', 'a', 'remote_mutation', '{"kind":"append_sent","raw_base64":"bWFpbA=="}', 'failed', 'network offline', '', ''),
+                      ('flags', 'a', 'remote_mutation', '{"kind":"flags","refs":[{"remote_id":"1","source_folder":"INBOX","kind":"append_sent"}],"read":true}', 'pending', NULL, '', ''),
+                      ('bad', 'a', 'remote_mutation', 'malformed append_sent payload', 'failed', 'old error', '', '')"#,
+        ] {
+            sqlx::query(statement).execute(&mut conn).await.unwrap();
+        }
+        conn.close().await.unwrap();
+    }
+
+    async fn assert_older_work_held(path: &Path) -> String {
+        let pool = SqlitePoolOptions::new()
+            .connect_with(SqliteConnectOptions::new().filename(path))
+            .await
+            .unwrap();
+        let rows: Vec<(String, String, Option<String>, String)> =
+            sqlx::query_as("SELECT id, status, last_error, payload FROM sync_queue ORDER BY id")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            rows,
+            [
+                (
+                    "bad".into(),
+                    "failed".into(),
+                    Some("old error".into()),
+                    "malformed append_sent payload".into()
+                ),
+                (
+                    "copy".into(),
+                    "failed".into(),
+                    Some("backend.errors.sentCopyHeldAfterRestore".into()),
+                    r#"{"kind":"append_sent","raw_base64":"bWFpbA=="}"#.into()
+                ),
+                (
+                    "flags".into(),
+                    "pending".into(),
+                    None,
+                    r#"{"kind":"flags","refs":[{"remote_id":"1","source_folder":"INBOX","kind":"append_sent"}],"read":true}"#.into()
+                ),
+                (
+                    "send".into(),
+                    "delivery_unknown".into(),
+                    Some("backend.errors.messageDeliveryStatusUnknown".into()),
+                    r#"{"input":{"subject":"Original draft"}}"#.into()
+                ),
+            ]
+        );
+        let notifications: Vec<String> =
+            sqlx::query_scalar("SELECT message_id FROM notification_outbox")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(notifications, ["shown"]);
+        let message_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM messages")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(message_count, 3);
+        crate::db::run_migrations(&pool).await.unwrap();
+        let cutoff: String = sqlx::query_scalar("SELECT incoming_effects_cutoff FROM accounts")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO messages (id, account_id, folder_id, from_address,
+                                   to_addresses, date, created_at, updated_at)
+             VALUES ('fresh', 'a', 'f', 'sender@example.test', '[]', datetime(?, '+1 second'), '', ''),
+                    ('catchup', 'a', 'f', 'sender@example.test', '[]', datetime(?, '-1 second'), '', '')",
+        )
+        .bind(&cutoff)
+        .bind(&cutoff)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let fresh: String =
+            sqlx::query_scalar("SELECT state FROM notification_outbox WHERE message_id = 'fresh'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(fresh, "pending");
+        let catchup: String = sqlx::query_scalar(
+            "SELECT state FROM notification_outbox WHERE message_id = 'catchup'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(catchup, "dismissed");
+        pool.close().await;
+        cutoff
+    }
+
+    #[tokio::test]
+    async fn restore_holds_work_from_before_submission_markers() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("old-backup.db");
+        older_backup_file(&source).await;
+        let hash = file_hash(&source).unwrap();
+
+        let profile = directory.path().join("profile");
+        stage_restore(&profile, &source, &[], None).await.unwrap();
+        assert!(apply_pending_restore(&profile, None).await.unwrap());
+        assert_older_work_held(&profile.join(DATABASE)).await;
+        assert_eq!(file_hash(&source).unwrap(), hash);
+    }
+
+    #[tokio::test]
+    async fn old_applying_manifest_preserves_an_installed_database_and_holds_its_work() {
+        let directory = tempfile::tempdir().unwrap();
+        let profile = directory.path();
+        let live = profile.join(DATABASE);
+        older_backup_file(&live).await;
+        let previous = profile.join("satchel.db.replaced-test");
+        fs::create_dir(&previous).unwrap();
+        fs::write(previous.join(DATABASE), b"previous profile").unwrap();
+        let old_manifest = serde_json::json!({
+            "database_hash": file_hash(&live).unwrap(),
+            "key_hash": null,
+            "previous": previous.file_name().unwrap().to_str().unwrap(),
+        });
+        let json = serde_json::to_vec(&old_manifest).unwrap();
+        atomic_write(&profile.join(READY), &json).unwrap();
+        atomic_write(&profile.join(APPLYING), &json).unwrap();
+
+        assert!(apply_pending_restore(profile, None).await.unwrap());
+        assert_older_work_held(&live).await;
+        assert_eq!(
+            fs::read(previous.join(DATABASE)).unwrap(),
+            b"previous profile"
+        );
+        assert!(!restore_pending(profile));
+    }
+
+    #[tokio::test]
+    async fn interrupted_legacy_cleanup_retries_after_the_live_hash_changes() {
+        let directory = tempfile::tempdir().unwrap();
+        let profile = directory.path();
+        let live = profile.join(DATABASE);
+        older_backup_file(&live).await;
+        let manifest = RestoreManifest {
+            database_hash: file_hash(&live).unwrap(),
+            key_hash: None,
+            previous: Some("satchel.db.replaced-test".into()),
+            replay_protection: ReplayProtection::RecoveringInstalled,
+            activation_cutoff: Some("2026-01-01T01:00:00Z".into()),
+        };
+        write_manifest(&profile.join(APPLYING), &manifest).unwrap();
+        // SQLite committed the holds; the process died before clearing APPLYING.
+        let pool = SqlitePoolOptions::new()
+            .connect_with(SqliteConnectOptions::new().filename(&live))
+            .await
+            .unwrap();
+        suppress_copied_work(&pool, manifest.activation_cutoff.as_deref())
+            .await
+            .unwrap();
+        pool.close().await;
+        assert_ne!(file_hash(&live).unwrap(), manifest.database_hash);
+
+        assert!(apply_pending_restore(profile, None).await.unwrap());
+        assert_eq!(assert_older_work_held(&live).await, "2026-01-01T01:00:00Z");
+        assert!(!restore_pending(profile));
+    }
+
+    #[tokio::test]
+    async fn a_missing_staging_file_and_unverified_live_hash_leave_recovery_pending() {
+        let directory = tempfile::tempdir().unwrap();
+        let profile = directory.path();
+        let live = profile.join(DATABASE);
+        let previous = "satchel.db.replaced-test";
+        fs::create_dir(profile.join(previous)).unwrap();
+        fs::write(
+            profile.join(previous).join(DATABASE),
+            b"retained previous database",
+        )
+        .unwrap();
+        fs::write(&live, b"unverified live database").unwrap();
+        write_manifest(
+            &profile.join(APPLYING),
+            &RestoreManifest {
+                database_hash: "expected hash".into(),
+                key_hash: None,
+                previous: Some(previous.into()),
+                replay_protection: ReplayProtection::Legacy,
+                activation_cutoff: None,
+            },
+        )
+        .unwrap();
+        assert!(apply_pending_restore(profile, None).await.is_err());
+        assert_eq!(fs::read(live).unwrap(), b"unverified live database");
+        assert!(recovery_in_progress(profile));
     }
 }

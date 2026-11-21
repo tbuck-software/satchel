@@ -5,6 +5,10 @@ export type TrashReceipt = {
     undo_thread_ids: Array<string>;
     permanently_deleted: Array<string>;
     /**
+     * IMAP deletes remain visible until the server confirms scoped expunge.
+     */
+    queued_deletions?: Array<string>;
+    /**
      * Set when a later batch failed: the receipt covers the threads before it.
      */
     stopped_early?: StoppedEarly;

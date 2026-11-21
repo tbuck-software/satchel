@@ -6,12 +6,12 @@ use std::{
 };
 
 use ed25519_dalek::Signer;
-use rsa::{pkcs1::DecodeRsaPrivateKey, pkcs1v15::Pkcs1v15Sign, RsaPrivateKey};
+use rsa::{RsaPrivateKey, pkcs1::DecodeRsaPrivateKey, pkcs1v15::Pkcs1v15Sign};
 use sha2::{Digest, Sha256};
 
 use crate::message::{
-    header::{HeaderName, HeaderValue},
     Headers, Message,
+    header::{HeaderName, HeaderValue},
 };
 
 /// Describe Dkim Canonicalization to apply to either body or headers
@@ -101,10 +101,8 @@ impl StdError for DkimSigningKeyError {
 }
 
 /// Describe a signing key to be carried by [`DkimConfig`] struct
-#[derive(Debug)]
 pub struct DkimSigningKey(InnerDkimSigningKey);
 
-#[derive(Debug)]
 enum InnerDkimSigningKey {
     Rsa(RsaPrivateKey),
     Ed25519(ed25519_dalek::SigningKey),
@@ -139,6 +137,15 @@ impl DkimSigningKey {
             InnerDkimSigningKey::Rsa(_) => DkimSigningAlgorithm::Rsa,
             InnerDkimSigningKey::Ed25519(_) => DkimSigningAlgorithm::Ed25519,
         }
+    }
+}
+
+impl fmt::Debug for DkimSigningKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The private key must not end up wherever the configuration is logged
+        f.debug_struct("DkimSigningKey")
+            .field("algorithm", &self.get_signing_algorithm())
+            .finish_non_exhaustive()
     }
 }
 
@@ -252,58 +259,60 @@ fn dkim_canonicalize_body(
 }
 
 fn dkim_canonicalize_headers_relaxed(headers: &str) -> String {
-    let mut r = String::with_capacity(headers.len());
-
     fn skip_whitespace(h: &str) -> &str {
-        match h.as_bytes().first() {
-            Some(b' ' | b'\t') => skip_whitespace(&h[1..]),
-            _ => h,
-        }
+        h.trim_start_matches([' ', '\t'])
     }
 
-    fn name(h: &str, out: &mut String) {
-        if let Some(name_end) = h.bytes().position(|c| c == b':') {
-            let (name, rest) = h.split_at(name_end + 1);
-            *out += name;
-            // Space after header colon is stripped.
-            value(skip_whitespace(rest), out);
-        } else {
+    let mut out = String::with_capacity(headers.len());
+
+    // This is a loop, and not a function calling itself for the rest of the
+    // headers, because the depth of that recursion would be the length of
+    // the headers, overflowing the stack unless the compiler optimizes it
+    let mut h = headers;
+    'headers: loop {
+        // Header name.
+        let Some(name_end) = h.bytes().position(|c| c == b':') else {
             // This should never happen.
-            *out += h;
+            out += h;
+            break;
+        };
+        let (name, rest) = h.split_at(name_end + 1);
+        out += name;
+        // Space after header colon is stripped.
+        h = skip_whitespace(rest);
+
+        // Header value.
+        loop {
+            match h.as_bytes() {
+                // Continuation lines.
+                [b'\r', b'\n', b' ' | b'\t', ..] => {
+                    out.push(' ');
+                    h = skip_whitespace(&h[2..]);
+                }
+                // End of header.
+                [b'\r', b'\n', ..] => {
+                    out += "\r\n";
+                    h = &h[2..];
+                    continue 'headers;
+                }
+                // Sequential whitespace.
+                [b' ' | b'\t', b' ' | b'\t' | b'\r', ..] => h = &h[1..],
+                // All whitespace becomes spaces.
+                [b'\t', ..] => {
+                    out.push(' ');
+                    h = &h[1..];
+                }
+                [_, ..] => {
+                    let mut chars = h.chars();
+                    out.push(chars.next().unwrap());
+                    h = chars.as_str();
+                }
+                [] => break 'headers,
+            }
         }
     }
 
-    fn value(h: &str, out: &mut String) {
-        match h.as_bytes() {
-            // Continuation lines.
-            [b'\r', b'\n', b' ' | b'\t', ..] => {
-                out.push(' ');
-                value(skip_whitespace(&h[2..]), out);
-            }
-            // End of header.
-            [b'\r', b'\n', ..] => {
-                *out += "\r\n";
-                name(&h[2..], out);
-            }
-            // Sequential whitespace.
-            [b' ' | b'\t', b' ' | b'\t' | b'\r', ..] => value(&h[1..], out),
-            // All whitespace becomes spaces.
-            [b'\t', ..] => {
-                out.push(' ');
-                value(&h[1..], out);
-            }
-            [_, ..] => {
-                let mut chars = h.chars();
-                out.push(chars.next().unwrap());
-                value(chars.as_str(), out);
-            }
-            [] => {}
-        }
-    }
-
-    name(headers, &mut r);
-
-    r
+    out
 }
 
 /// Canonicalize header tag
@@ -419,12 +428,11 @@ mod test {
 
     use super::{
         super::{
-            header::{HeaderName, HeaderValue},
             Header, Message,
+            header::{HeaderName, HeaderValue},
         },
-        dkim_canonicalize_body, dkim_canonicalize_headers, dkim_sign_fixed_time,
         DkimCanonicalization, DkimCanonicalizationType, DkimConfig, DkimSigningAlgorithm,
-        DkimSigningKey,
+        DkimSigningKey, dkim_canonicalize_body, dkim_canonicalize_headers, dkim_sign_fixed_time,
     };
     use crate::StdError;
 
@@ -484,17 +492,65 @@ cJ5Ku0OTwRtSMaseRPX+T4EfG1Caa/eunPPN4rh+CSup2BVVarOT
     }
 
     #[test]
+    fn test_signing_key_debug() {
+        let signing_key = DkimSigningKey::new(KEY_RSA, DkimSigningAlgorithm::Rsa).unwrap();
+        let config = DkimConfig::default_config(
+            "dkimtest".to_owned(),
+            "example.org".to_owned(),
+            signing_key,
+        );
+
+        let debug = format!("{config:?}");
+        assert!(debug.contains("private_key: DkimSigningKey { algorithm: Rsa, .. }"));
+        // No big number of the key is printed
+        assert!(debug.len() < 500, "{debug}");
+    }
+
+    #[test]
     fn test_headers_simple_canonicalize() {
         let message = test_message();
         dbg!(message.headers.to_string());
-        assert_eq!(dkim_canonicalize_headers(["From", "Test"], &message.headers, DkimCanonicalizationType::Simple), "From: =?utf-8?b?VGVzdCBPJ0xlYXJ5?= <test+ezrz@example.net>\r\nTest: test  test very very long with spaces and extra spaces   \twill be\r\n folded to several lines \r\n");
+        assert_eq!(
+            dkim_canonicalize_headers(
+                ["From", "Test"],
+                &message.headers,
+                DkimCanonicalizationType::Simple
+            ),
+            "From: =?utf-8?b?VGVzdCBPJ0xlYXJ5?= <test+ezrz@example.net>\r\nTest: test  test very very long with spaces and extra spaces   \twill be\r\n folded to several lines \r\n"
+        );
     }
 
     #[test]
     fn test_headers_relaxed_canonicalize() {
         let message = test_message();
         dbg!(message.headers.to_string());
-        assert_eq!(dkim_canonicalize_headers(["From", "Test"], &message.headers, DkimCanonicalizationType::Relaxed),"from:=?utf-8?b?VGVzdCBPJ0xlYXJ5?= <test+ezrz@example.net>\r\ntest:test test very very long with spaces and extra spaces will be folded to several lines\r\n");
+        assert_eq!(
+            dkim_canonicalize_headers(
+                ["From", "Test"],
+                &message.headers,
+                DkimCanonicalizationType::Relaxed
+            ),
+            "from:=?utf-8?b?VGVzdCBPJ0xlYXJ5?= <test+ezrz@example.net>\r\ntest:test test very very long with spaces and extra spaces will be folded to several lines\r\n"
+        );
+    }
+
+    #[test]
+    fn test_headers_relaxed_canonicalize_long() {
+        // Used to overflow the stack, unless built with optimizations
+        let message = Message::builder()
+            .from("test@example.net".parse().unwrap())
+            .to("test2@example.org".parse().unwrap())
+            .header(TestHeader("a b\t".repeat(250_000)))
+            .body(String::new())
+            .unwrap();
+
+        let canonicalized = dkim_canonicalize_headers(
+            ["Test"],
+            &message.headers,
+            DkimCanonicalizationType::Relaxed,
+        );
+        let expected = format!("test:{}\r\n", "a b ".repeat(250_000).trim_end());
+        assert!(canonicalized == expected);
     }
 
     #[test]
@@ -597,7 +653,8 @@ cJ5Ku0OTwRtSMaseRPX+T4EfG1Caa/eunPPN4rh+CSup2BVVarOT
                 "To: Test2 <test2@example.org>\r\n",
                 "Date: Thu, 01 Jan 1970 00:00:00 +0000\r\n",
                 "Test: test  test very very long with spaces and extra spaces   \twill be\r\n",
-                " folded to several lines \r\n","Subject: Test with utf-8 =?utf-8?b?w6s=?=\r\n",
+                " folded to several lines \r\n",
+                "Subject: Test with utf-8 =?utf-8?b?w6s=?=\r\n",
                 "Content-Transfer-Encoding: 7bit\r\n",
                 "DKIM-Signature: v=1; a=rsa-sha256; d=example.org; s=dkimtest;\r\n",
                 " c=relaxed/relaxed; q=dns/txt; t=0; h=date:from:subject:to;\r\n",

@@ -166,12 +166,9 @@ pub fn run() {
                 utils::telemetry::init(log_dir);
             }
 
-            // Recover any interrupted database replacement before opening a
-            // pool. Prepared secrets already use the active profile key; its
-            // fingerprint is verified before the snapshot is installed.
+            // Preload the key for the restore check in connect_pools.
             let profile_dir = utils::profile_dir(app.handle()).map_err(std::io::Error::other)?;
             utils::crypto::start_master_key_load(profile_dir.clone());
-            db::apply_pending_restore(&profile_dir).map_err(std::io::Error::other)?;
 
             // Must run on the main thread and before the first notification is
             // delivered — a notification shown without an installed delegate
@@ -237,7 +234,10 @@ pub fn run() {
             }
             // Before any worker can call a provider: a block recorded by an
             // earlier run is still running on the server, and knocking renews it.
-            tauri::async_runtime::block_on(sync::rate_limit_state::restore(&pool));
+            if let Err(error) = tauri::async_runtime::block_on(sync::rate_limit_state::restore(&pool))
+            {
+                tracing::warn!(%error, "could not read Gmail rate limit");
+            }
             // Before the first handshake too: IDLE and body fetches connect
             // without waiting for a sync run.
             if let Err(error) =
@@ -513,15 +513,19 @@ pub fn run() {
                             let outcome: Result<Option<String>, String> = if let Some(count) =
                                 coalesced
                             {
-                                commands::notifications::show_mail_summary(
+                                match commands::notifications::show_mail_summary(
                                     &event_app,
                                     count,
                                     prefs.sound,
-                                );
-                                Err(commands::notifications::reason_note(
-                                    commands::notifications::reason::FILTER_COALESCED,
-                                    format!("burst; shown in a summary of {count}"),
-                                ))
+                                )
+                                .await
+                                {
+                                    Ok(()) => Err(commands::notifications::reason_note(
+                                        commands::notifications::reason::FILTER_COALESCED,
+                                        format!("burst; shown in a summary of {count}"),
+                                    )),
+                                    Err(note) => Err(note),
+                                }
                             } else if allowed {
                                 let title = from_name
                                     .clone()

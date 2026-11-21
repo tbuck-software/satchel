@@ -1,13 +1,21 @@
 // @vitest-environment jsdom
-import { computed, ref, shallowRef } from 'vue';
-import { mount, flushPromises } from '@vue/test-utils';
+import { computed, defineComponent, h, ref, shallowRef } from 'vue';
+import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Thread } from '@/types/mail';
+import { useKeyboard } from '@/composables/useKeyboard';
 
-const harness = vi.hoisted(() => ({ push: vi.fn(), rows: null as unknown }));
+const harness = vi.hoisted(() => ({ push: vi.fn(), transition: vi.fn(), rows: null as unknown }));
 
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: harness.push }) }));
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ name: 'inbox' }),
+  useRouter: () => ({ push: harness.push, currentRoute: ref({ name: 'inbox' }) }),
+}));
+vi.mock('@/services/backend', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/services/backend')>(),
+  backendTransitionThreads: harness.transition,
+}));
 vi.mock('@/composables/useListSearch', () => ({
   useListSearch: () => {
     const rows = harness.rows as { value: Thread[] };
@@ -31,6 +39,9 @@ vi.mock('@/composables/useListSearch', () => ({
 import ListSearchResults from './ListSearchResults.vue';
 import { useListSearchStore } from '@/stores/listSearch';
 import { useThreadsStore } from '@/stores/threads';
+import { useUiStore } from '@/stores/ui';
+
+enableAutoUnmount(afterEach);
 
 function thread(id: string, workflowState: Thread['workflowState'] = 'inbox'): Thread {
   return {
@@ -52,18 +63,102 @@ const ThreadGroupList = {
   </div>`,
 };
 
-function render() {
-  return mount(ListSearchResults, {
-    props: { mailboxLabel: 'Inbox', mailbox: { accountId: '', workflowFilter: 'all', mailboxFilter: { kind: 'section', value: 'inbox' }, activeContactEmail: '' } },
-    global: { stubs: { ThreadGroupList } },
+function render({ realRows = false, openThreadId }: { realRows?: boolean; openThreadId?: string } = {}) {
+  return mount(defineComponent({
+    setup() {
+      useKeyboard();
+      return () => h(ListSearchResults, {
+        mailboxLabel: 'Inbox',
+        mailbox: { accountId: '', workflowFilter: 'all', mailboxFilter: { kind: 'section', value: 'inbox' }, activeContactEmail: '' },
+        openThreadId,
+      });
+    },
+  }), {
+    attachTo: document.body,
+    global: { stubs: { ThreadGroupList: realRows ? false : ThreadGroupList } },
   });
+}
+
+function press(key: string) {
+  document.body.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
 }
 
 beforeEach(() => {
   setActivePinia(createPinia());
   harness.push.mockReset();
+  harness.transition.mockReset();
+  useUiStore().isSinglePane = false;
+  useListSearchStore().setQuery('first query');
   harness.rows = shallowRef([thread('th-hit-1'), thread('th-loaded'), thread('th-hit-2', 'todo')]);
   useThreadsStore().threads = [thread('th-loaded')];
+});
+
+describe('list search result actions', () => {
+  it.each([false, true])('ignores a stale hit while searching and after results arrive (keyboard focus: %s)', async (withKeyboardFocus) => {
+    const rows = harness.rows as { value: Thread[] };
+    rows.value = [thread('th-loaded')];
+    const wrapper = render({ openThreadId: 'th-loaded' });
+    await flushPromises();
+    if (withKeyboardFocus) {
+      press('ArrowDown');
+      expect(useListSearchStore().openThreadId).toBe('th-loaded');
+    }
+    const trash = vi.spyOn(useThreadsStore(), 'trashThreads').mockResolvedValue({
+      undo_token: null, undo_thread_ids: [], permanently_deleted: [],
+    });
+
+    useListSearchStore().setQuery('next query');
+    rows.value = [];
+    await flushPromises();
+    press('#');
+    press('Enter');
+    await flushPromises();
+    expect(trash).not.toHaveBeenCalled();
+    expect(harness.push).not.toHaveBeenCalled();
+
+    rows.value = [thread('th-hit-2')];
+    await flushPromises();
+    press('#');
+    await flushPromises();
+    expect(trash).not.toHaveBeenCalled();
+    press('Enter');
+    expect(harness.push).toHaveBeenCalledExactlyOnceWith({ name: 'thread', params: { id: 'th-hit-2' } });
+    wrapper.unmount();
+  });
+
+  it.each(['Pin', 'Done'])('applies %s from an unopened off-page result without opening it', async (action) => {
+    const wrapper = render({ realRows: true, openThreadId: 'th-loaded' });
+    const threads = useThreadsStore();
+    vi.spyOn(threads, 'refreshHead').mockResolvedValue();
+    harness.transition.mockResolvedValue({ applied: ['th-hit-2'], failed: [] });
+    useListSearchStore().openThreadId = 'th-loaded';
+    threads.selectThread('th-loaded');
+    await wrapper.get('[data-list-target-key="thread:th-loaded"] [data-test="thread-row-check"]').trigger('click');
+    expect(threads.find('th-hit-2')).toBeUndefined();
+
+    const row = wrapper.get('[data-list-target-key="thread:th-hit-2"]');
+    if (action === 'Done') {
+      await row.get('.thread-quick-action--done').trigger('click');
+      await vi.waitFor(() => expect(harness.transition).toHaveBeenCalledWith({
+        threads: [{ thread_id: 'th-hit-2', from: 'todo' }], to: 'done', snooze_until: null,
+      }));
+    } else {
+      await row.trigger('contextmenu');
+      const pin = await vi.waitFor(() => {
+        const item = [...document.body.querySelectorAll<HTMLButtonElement>('.context-menu button')]
+          .find((button) => button.textContent?.trim() === 'Pin');
+        expect(item).toBeDefined();
+        return item!;
+      });
+      pin.click();
+      await vi.waitFor(() => expect(threads.find('th-hit-2')?.isStarred).toBe(true));
+    }
+    await flushPromises();
+    expect(threads.activeThreadId).toBe('th-loaded');
+    expect(threads.selectedThreadIds).toEqual(['th-loaded']);
+    expect(useListSearchStore().openThreadId).toBe('th-loaded');
+    expect(harness.push).not.toHaveBeenCalled();
+  });
 });
 
 describe('list search results and the selection', () => {

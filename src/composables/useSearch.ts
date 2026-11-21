@@ -110,6 +110,8 @@ export function useSearch(options?: {
   liveUpdates?: boolean;
   /** Bounded preview size; full search uses the default page size. */
   limit?: number;
+  /** Clear hits immediately when the request changes, for lists with row actions. */
+  clearPreviousResults?: boolean;
   /**
    * Only hits whose thread is in this list, as the list itself decides —
    * the list search's "this mailbox". `null` searches everywhere.
@@ -387,8 +389,14 @@ export function useSearch(options?: {
       }
 
       beginLoading();
+      if (options?.clearPreviousResults) {
+        results.value = [];
+        warnings.value = [];
+        errorText.value = '';
+      }
       debounceHandle = setTimeout(() => void scheduleSearch(next, id), SEARCH_DEBOUNCE_MS);
     },
+    { flush: options?.clearPreviousResults ? 'sync' : 'pre' },
   );
 
   // Guarded so the composable is also usable outside of a component setup().

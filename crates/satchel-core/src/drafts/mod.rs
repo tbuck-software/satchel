@@ -55,10 +55,19 @@ pub async fn has_pending_upload(
         "SELECT EXISTS(SELECT 1 FROM sync_queue
          WHERE account_id = ? AND action_type = ?
            AND status IN ('pending', 'scheduled', 'sending', 'failed')
-           AND json_valid(payload) AND json_extract(payload, '$.input.id') = ?)",
+           AND json_valid(payload) AND json_extract(payload, '$.input.id') = ?)
+          OR EXISTS(SELECT 1 FROM sync_queue
+         WHERE account_id = ? AND action_type = ?
+           AND status IN ('pending', 'scheduled', 'sending', 'failed')
+           AND json_valid(payload) AND json_extract(payload, '$.kind') = 'delete_draft'
+           AND json_extract(payload, '$.discard_revision') IS NOT NULL
+           AND json_extract(payload, '$.local_draft_id') = ?)",
     )
     .bind(account_id)
     .bind(ACTION_SYNC_DRAFT)
+    .bind(draft_id)
+    .bind(account_id)
+    .bind(ACTION_REMOTE_MUTATION)
     .bind(draft_id)
     .fetch_one(&mut **tx)
     .await
@@ -370,6 +379,7 @@ async fn save_draft_in_transaction(
                 remote_draft_id: old_draft_id,
                 remote_message_id: old_message_id,
                 source_folder: old_folder,
+                discard_revision: None,
             })
             .map_err(DraftError::unexpected)?;
             queue
@@ -789,9 +799,7 @@ pub async fn execute_queued_draft_sync(
     let id = payload.input.id.clone().ok_or_else(|| {
         crate::sync::errors::SyncError::Permanent("backend.errors.draftSyncQueueInvalid".into())
     })?;
-    sync_draft_remotely(pool, queue, payload.input, id, payload.revision)
-        .await
-        .map_err(Into::into)
+    sync_draft_remotely(pool, queue, payload.input, id, payload.revision).await
 }
 
 async fn sync_draft_remotely(
@@ -800,7 +808,7 @@ async fn sync_draft_remotely(
     input: DraftInput,
     id: String,
     revision: UploadRevision,
-) -> Result<(), String> {
+) -> crate::sync::errors::SyncResult<()> {
     // Provider calls are serialized, but this lock never delays a local write.
     // A newer local revision supersedes a queued upload before it starts.
     let _remote_guard = REMOTE_DRAFT_SYNC_LOCK
@@ -830,6 +838,18 @@ async fn sync_draft_remotely(
         UploadRevision::LegacyTimestamp(expected) => updated_at == expected,
     };
     if account_id != input.account_id || !current_revision {
+        return Ok(());
+    }
+    let pending_discard: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM sync_queue WHERE id = 'imap-draft-discard:' || ? || ':' ||
+            (SELECT draft_revision + provider_draft_revision FROM messages WHERE id = ?))",
+    )
+    .bind(&id)
+    .bind(&id)
+    .fetch_one(pool)
+    .await
+    .map_err(|error| error.to_string())?;
+    if pending_discard {
         return Ok(());
     }
     // A delete that was already sending during A -> B -> A can fail after the
@@ -918,6 +938,7 @@ async fn record_remote_draft_id(
             remote_draft_id: Some(remote_id),
             remote_message_id: None,
             source_folder: None,
+            discard_revision: None,
         })
         .map_err(|err| err.to_string())?;
         queue
@@ -1194,10 +1215,12 @@ pub async fn delete_after_send(
 ) -> Result<(), String> {
     delete_draft_with_queue(pool, queue, id, false)
         .await
+        .map(|_| ())
         .map_err(|error| error.encoded())
 }
 
-pub async fn discard(pool: &SqlitePool, queue: &SyncQueue, id: &str) -> DraftResult<()> {
+/// True when the draft remains visible pending confirmation from IMAP.
+pub async fn discard(pool: &SqlitePool, queue: &SyncQueue, id: &str) -> DraftResult<bool> {
     delete_draft_with_queue(pool, queue, id, true).await
 }
 
@@ -1206,7 +1229,7 @@ async fn delete_draft_with_queue(
     queue: &SyncQueue,
     id: &str,
     cancel_send: bool,
-) -> DraftResult<()> {
+) -> DraftResult<bool> {
     // Lock before reading the identity: a concurrent save may have just created
     // or replaced the remote draft and must publish that id before deletion.
     let _remote_guard = REMOTE_DRAFT_SYNC_LOCK
@@ -1242,45 +1265,120 @@ async fn delete_draft_with_queue(
             return Err(DraftError::OutboxActionCannotBeDiscarded);
         }
     }
-    let remote: Option<(String, Option<String>, Option<String>, Option<String>)> = sqlx::query_as(
-        "SELECT m.account_id, m.remote_draft_id, m.remote_id, f.remote_id
+    #[derive(sqlx::FromRow)]
+    struct DraftIdentity {
+        account_id: String,
+        provider: String,
+        remote_draft_id: Option<String>,
+        remote_message_id: Option<String>,
+        source_folder: String,
+        message_id_header: Option<String>,
+        revision: i64,
+    }
+
+    let remote: Option<DraftIdentity> = sqlx::query_as(
+        "SELECT m.account_id, a.provider, m.remote_draft_id, m.remote_id AS remote_message_id,
+                COALESCE(f.remote_id, f.full_path) AS source_folder, m.message_id_header,
+                m.draft_revision + m.provider_draft_revision AS revision
          FROM messages m
          JOIN folders f ON f.id = m.folder_id
+         JOIN accounts a ON a.id = m.account_id
          WHERE m.id = ? AND m.is_draft = 1",
     )
     .bind(id)
     .fetch_optional(&mut *tx)
     .await
-    .map_err(|err| err.to_string())?;
+    .map_err(DraftError::unexpected)?;
 
-    // The provider copy is queued, never awaited here. Deleting it inline made
-    // the whole discard fail whenever the provider was rate limited — with the
-    // draft still in the conversation and an error the user cannot act on. The
-    // queue owns the retry; the local row goes now.
-    if let Some((account_id, stored_draft_id, message_remote_id, folder_remote_id)) = remote {
-        if stored_draft_id.is_some() || message_remote_id.is_some() {
+    let mut queued_discard = false;
+    if let Some(draft) = remote {
+        if draft.remote_draft_id.is_some() || draft.remote_message_id.is_some() {
+            queued_discard = cancel_send && draft.provider.eq_ignore_ascii_case("imap");
+            let remote_draft_id = draft.remote_draft_id.or_else(|| {
+                queued_discard
+                    .then_some(draft.message_id_header)
+                    .flatten()
+                    .map(|header| {
+                        crate::providers::imap::encode_imap_draft_ref(&draft.source_folder, &header)
+                    })
+            });
             let payload = serde_json::to_value(RemoteMutationPayload::DeleteDraft {
                 local_draft_id: Some(id.into()),
-                remote_draft_id: stored_draft_id,
-                remote_message_id: message_remote_id,
-                source_folder: folder_remote_id,
+                remote_draft_id,
+                remote_message_id: draft.remote_message_id,
+                source_folder: Some(draft.source_folder),
+                discard_revision: queued_discard.then_some(draft.revision),
             })
             .map_err(DraftError::unexpected)?;
-            queue
-                .enqueue_in_transaction(
-                    &mut tx,
-                    &QueuedAction::new(account_id, ACTION_REMOTE_MUTATION, payload),
-                )
-                .await?;
+            let mut action = QueuedAction::new(draft.account_id, ACTION_REMOTE_MUTATION, payload);
+            if queued_discard {
+                action.id = format!("imap-draft-discard:{id}:{}", draft.revision);
+            }
+            let already_queued: bool =
+                sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM sync_queue WHERE id = ?)")
+                    .bind(&action.id)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(DraftError::unexpected)?;
+            if !already_queued {
+                queue.enqueue_in_transaction(&mut tx, &action).await?;
+            }
         }
     }
+    sqlx::query("DELETE FROM sync_queue WHERE action_type = 'sync_draft' AND status <> 'sending' AND json_extract(payload, '$.input.id') = ?")
+        .bind(id).execute(&mut *tx).await.map_err(DraftError::unexpected)?;
+    if !queued_discard {
+        remove_local_draft(&mut tx, id).await?;
+    }
+    tx.commit().await.map_err(DraftError::unexpected)?;
+    queue.wake_worker();
+    Ok(queued_discard)
+}
+
+pub(crate) async fn is_current_discard<'e>(
+    executor: impl sqlx::SqliteExecutor<'e>,
+    id: &str,
+    account_id: &str,
+    revision: i64,
+) -> Result<bool, String> {
+    sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM messages WHERE id = ? AND account_id = ? AND is_draft = 1
+            AND draft_revision + provider_draft_revision = ?)",
+    )
+    .bind(id)
+    .bind(account_id)
+    .bind(revision)
+    .fetch_one(executor)
+    .await
+    .map_err(|error| error.to_string())
+}
+
+pub(crate) async fn finish_remote_discard(
+    pool: &SqlitePool,
+    id: &str,
+    account_id: &str,
+    revision: i64,
+) -> Result<(), String> {
+    let mut tx = pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(|error| error.to_string())?;
+    if is_current_discard(&mut *tx, id, account_id, revision).await? {
+        remove_local_draft(&mut tx, id)
+            .await
+            .map_err(|error| error.encoded())?;
+    }
+    tx.commit().await.map_err(|error| error.to_string())
+}
+
+async fn remove_local_draft(tx: &mut Transaction<'_, Sqlite>, id: &str) -> DraftResult<()> {
     // Read the conversation before the row is gone: a draft written inside a
     // thread leaves message count, snippet and date behind, and the thread
     // itself has to disappear when the draft was all it held.
     let thread_id: Option<String> =
         sqlx::query_scalar("SELECT thread_id FROM messages WHERE id = ? AND is_draft = 1")
             .bind(id)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut **tx)
             .await
             .map_err(|err| err.to_string())?
             .flatten();
@@ -1292,25 +1390,21 @@ async fn delete_draft_with_queue(
          WHERE message_id IN (SELECT id FROM messages WHERE id = ? AND is_draft = 1)",
     )
     .bind(id)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await
     .map_err(|err| err.to_string())?;
 
     sqlx::query("DELETE FROM messages WHERE id = ? AND is_draft = 1")
         .bind(id)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(|err| err.to_string())?;
 
-    sqlx::query("DELETE FROM sync_queue WHERE action_type = 'sync_draft' AND status <> 'sending' AND json_extract(payload, '$.input.id') = ?")
-        .bind(id).execute(&mut *tx).await.map_err(DraftError::unexpected)?;
     if let Some(thread_id) = thread_id {
-        crate::db::threads::refresh_thread_projections_tx(&mut tx, &[thread_id])
+        crate::db::threads::refresh_thread_projections_tx(tx, &[thread_id])
             .await
             .map_err(DraftError::from)?;
     }
-    tx.commit().await.map_err(DraftError::unexpected)?;
-    queue.wake_worker();
     Ok(())
 }
 
@@ -1320,7 +1414,7 @@ async fn push_draft_to_remote(
     local_draft_id: &str,
     remote_draft_id: Option<&str>,
     remote_message_id: Option<&str>,
-) -> Result<Option<String>, String> {
+) -> crate::sync::errors::SyncResult<Option<String>> {
     let row: Option<(String, String, String, String, String)> = sqlx::query_as(
         "SELECT id, display_name, provider, email, config FROM accounts WHERE id = ? LIMIT 1",
     )
@@ -1342,8 +1436,7 @@ async fn push_draft_to_remote(
         &provider_kind,
         &stored_config,
     )
-    .await
-    .map_err(|err| err.encoded())?;
+    .await?;
 
     let provider =
         provider_for_stored_account(pool, &account_id, &provider_kind, &config, &email, None)?;
@@ -1351,14 +1444,22 @@ async fn push_draft_to_remote(
         if let Some(message_remote_id) = remote_message_id {
             provider
                 .resolve_draft_id(message_remote_id, Some(&drafts_folder))
-                .await
-                .map_err(|error| error.to_string())?
+                .await?
         } else {
             None
         }
     } else {
         remote_draft_id.map(str::to_string)
     };
+
+    if provider_kind.eq_ignore_ascii_case("imap")
+        && resolved_remote_draft_id.is_none()
+        && remote_message_id.is_some()
+    {
+        return Err(crate::sync::errors::SyncError::Permanent(
+            "backend.errors.imapDraftSyncUnverified".into(),
+        ));
+    }
 
     let attachments = input
         .attachments
@@ -1427,7 +1528,6 @@ async fn push_draft_to_remote(
             Some(&drafts_folder),
         )
         .await
-        .map_err(|error| error.to_string())
 }
 
 fn snippet(body: &str, fallback_subject: &str) -> String {
@@ -1818,6 +1918,87 @@ mod tests {
         .unwrap();
         assert_eq!(draft.body, "Cached body");
         drop((first, second));
+    }
+
+    #[tokio::test]
+    async fn imap_failed_draft_upload_and_discard_keep_an_editable_local_revision() {
+        use crate::sync::{
+            errors::{SyncError, IMAP_UID_EXPUNGE_UNSUPPORTED},
+            worker::settle_action,
+        };
+
+        let pool = draft_test_pool().await;
+        let queue = crate::sync::queue::SyncQueue::new();
+        sqlx::query("UPDATE accounts SET provider = 'imap' WHERE id = 'A'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        save(&pool, &queue, &draft_input("A", "latest local edits"))
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE messages SET remote_draft_id = '<old@example.test>' WHERE id = 'draft'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let upload = queue.claim_next(&pool).await.unwrap().unwrap();
+        settle_action(
+            &pool,
+            &queue,
+            &upload,
+            Err(SyncError::Permanent(
+                "backend.errors.imapDraftSyncUnsupported".into(),
+            )),
+        )
+        .await
+        .unwrap();
+        assert!(discard(&pool, &queue, "draft").await.unwrap());
+        assert!(discard(&pool, &queue, "draft").await.unwrap());
+        let deletion = queue.claim_next(&pool).await.unwrap().unwrap();
+        assert_eq!(deletion.payload["kind"], "delete_draft");
+        let discard_revision = deletion.payload["discard_revision"].as_i64().unwrap();
+        settle_action(
+            &pool,
+            &queue,
+            &deletion,
+            Err(SyncError::Permanent(IMAP_UID_EXPUNGE_UNSUPPORTED.into())),
+        )
+        .await
+        .unwrap();
+        assert!(queue.claim_next(&pool).await.unwrap().is_none());
+        let failed = queue.list_failed_sync_actions(&pool).await.unwrap();
+        assert_eq!(failed.len(), 1);
+        assert_eq!(
+            failed[0].last_error.as_deref(),
+            Some(IMAP_UID_EXPUNGE_UNSUPPORTED)
+        );
+        let (saved, _) = save(&pool, &queue, &draft_input("A", "edited after refusal"))
+            .await
+            .unwrap();
+        assert_eq!(saved.id, "draft");
+        assert_eq!(saved.body, "edited after refusal");
+        assert!(queue
+            .list_failed_sync_actions(&pool)
+            .await
+            .unwrap()
+            .is_empty());
+        super::finish_remote_discard(&pool, "draft", "A", discard_revision)
+            .await
+            .unwrap();
+        let draft = load_draft_inner(&pool, &pool, "draft")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(draft.body, "edited after refusal");
+        assert!(discard(&pool, &queue, "draft").await.unwrap());
+        super::finish_remote_discard(&pool, "draft", "A", saved.revision)
+            .await
+            .unwrap();
+        assert!(load_draft_inner(&pool, &pool, "draft")
+            .await
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]
@@ -3226,11 +3407,24 @@ mod queued_send_tests {
                 restore_queued_draft(&pool, &queue, &action.id).await,
                 Err(DraftError::QueuedDraftNotRestorable)
             ));
-            discard(&pool, &queue, "saved").await.unwrap();
+            let pending = discard(&pool, &queue, "saved").await.unwrap();
+            assert_eq!(pending, change != "removed", "{change}");
             assert!(
                 queue.list_mail_outbox(&pool).await.unwrap().is_empty(),
                 "{change}"
             );
+            if pending {
+                let deletion = queue.claim_next(&pool).await.unwrap().unwrap();
+                assert_eq!(deletion.payload["local_draft_id"], "saved");
+                assert_eq!(deletion.payload["kind"], "delete_draft");
+                let revision = deletion.payload["discard_revision"].as_i64().unwrap();
+                assert!(super::is_current_discard(&pool, "saved", "a", revision)
+                    .await
+                    .unwrap());
+                super::finish_remote_discard(&pool, "saved", "a", revision)
+                    .await
+                    .unwrap();
+            }
             let drafts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM messages")
                 .fetch_one(&pool)
                 .await

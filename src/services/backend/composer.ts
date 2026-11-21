@@ -131,8 +131,8 @@ export async function backendLoadDraft(id: string): Promise<BackendDraft | null>
 }
 
 
-export async function backendDeleteDraft(id: string): Promise<void> {
-  return invoke<void>('delete_draft', { id });
+export async function backendDeleteDraft(id: string): Promise<boolean> {
+  return invoke<boolean>('delete_draft', { id });
 }
 
 

@@ -62,7 +62,10 @@ export function useDraftActions() {
 
     const previous = await snapshot(draftId);
     try {
-      await drafts.remove(draftId);
+      if (await drafts.remove(draftId)) {
+        toast.info(t('drafts.deletionQueued'));
+        return true;
+      }
     } catch (err) {
       toast.error(t('drafts.deleteFailed', { error: reason(err) }));
       return false;

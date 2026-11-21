@@ -40,7 +40,7 @@ use super::InnerTlsParameters;
 use super::TlsParameters;
 #[cfg(feature = "tokio1")]
 use crate::transport::smtp::client::net::resolved_address_filter;
-use crate::transport::smtp::{error, Error};
+use crate::transport::smtp::{Error, error};
 
 /// A network stream
 #[derive(Debug)]
@@ -89,7 +89,7 @@ enum InnerAsyncNetworkStream {
     /// Encrypted Tokio 1.x TCP stream
     #[cfg(feature = "async-std1-rustls")]
     AsyncStd1Rustls(AsyncStd1RustlsStream<AsyncStd1TcpStream>),
-    /// Can't be built
+    /// What is left of the stream when its TLS upgrade fails
     None,
 }
 
@@ -120,12 +120,7 @@ impl AsyncNetworkStream {
             InnerAsyncNetworkStream::AsyncStd1Tcp(s) => s.peer_addr(),
             #[cfg(feature = "async-std1-rustls")]
             InnerAsyncNetworkStream::AsyncStd1Rustls(s) => s.get_ref().0.peer_addr(),
-            InnerAsyncNetworkStream::None => {
-                debug_assert!(false, "InnerAsyncNetworkStream::None must never be built");
-                Err(IoError::other(
-                    "InnerAsyncNetworkStream::None must never be built",
-                ))
-            }
+            InnerAsyncNetworkStream::None => Err(closed()),
         }
     }
 
@@ -194,6 +189,8 @@ impl AsyncNetworkStream {
         }
 
         let tcp_stream = try_connect(server, timeout, local_addr).await?;
+        // Nagle would hold the `\r\n.\r\n` ending a message until the body is acked.
+        tcp_stream.set_nodelay(true).map_err(error::connection)?;
         socket2::SockRef::from(&tcp_stream)
             .set_tcp_keepalive(
                 &socket2::TcpKeepalive::new()
@@ -254,6 +251,8 @@ impl AsyncNetworkStream {
                 .map_err(error::connection)?,
         };
 
+        // Nagle would hold the `\r\n.\r\n` ending a message until the body is acked.
+        tcp_stream.set_nodelay(true).map_err(error::connection)?;
         let mut stream = AsyncNetworkStream::new(InnerAsyncNetworkStream::AsyncStd1Tcp(tcp_stream));
         if let Some(tls_parameters) = tls_parameters {
             stream.upgrade_tls(tls_parameters).await?;
@@ -273,7 +272,9 @@ impl AsyncNetworkStream {
             ))]
             InnerAsyncNetworkStream::Tokio1Tcp(_) => {
                 let _ = tls_parameters;
-                panic!("Trying to upgrade an AsyncNetworkStream without having enabled either the tokio1-native-tls or the tokio1-rustls feature");
+                panic!(
+                    "Trying to upgrade an AsyncNetworkStream without having enabled either the tokio1-native-tls or the tokio1-rustls feature"
+                );
             }
 
             #[cfg(any(
@@ -296,7 +297,9 @@ impl AsyncNetworkStream {
             #[cfg(all(feature = "async-std1", not(feature = "async-std1-rustls")))]
             InnerAsyncNetworkStream::AsyncStd1Tcp(_) => {
                 let _ = tls_parameters;
-                panic!("Trying to upgrade an AsyncNetworkStream without having enabled the async-std1-rustls feature");
+                panic!(
+                    "Trying to upgrade an AsyncNetworkStream without having enabled the async-std1-rustls feature"
+                );
             }
 
             #[cfg(feature = "async-std1-rustls")]
@@ -377,7 +380,7 @@ impl AsyncNetworkStream {
                 #[cfg(feature = "tokio1-boring-tls")]
                 return {
                     let mut config = connector.configure().map_err(error::connection)?;
-                    config.set_verify_hostname(accept_invalid_hostnames);
+                    config.set_verify_hostname(!accept_invalid_hostnames);
 
                     let stream = tokio1_boring::connect(config, &domain, tcp_stream)
                         .await
@@ -399,7 +402,9 @@ impl AsyncNetworkStream {
         match tls_parameters.connector {
             #[cfg(feature = "native-tls")]
             InnerTlsParameters::NativeTls { connector } => {
-                panic!("native-tls isn't supported with async-std yet. See https://github.com/lettre/lettre/pull/531#issuecomment-757893531");
+                panic!(
+                    "native-tls isn't supported with async-std yet. See https://github.com/lettre/lettre/pull/531#issuecomment-757893531"
+                );
             }
             #[cfg(feature = "rustls")]
             InnerTlsParameters::Rustls { config } => {
@@ -468,7 +473,7 @@ impl AsyncNetworkStream {
             }
             #[cfg(feature = "async-std1-rustls")]
             InnerAsyncNetworkStream::AsyncStd1Rustls(_) => panic!("Unsupported"),
-            InnerAsyncNetworkStream::None => panic!("InnerNetworkStream::None must never be built"),
+            InnerAsyncNetworkStream::None => Err(error::client("Connection is closed")),
         }
     }
 
@@ -510,7 +515,7 @@ impl AsyncNetworkStream {
                 .iter()
                 .map(|c| c.to_vec())
                 .collect()),
-            InnerAsyncNetworkStream::None => panic!("InnerNetworkStream::None must never be built"),
+            InnerAsyncNetworkStream::None => Err(error::client("Connection is closed")),
         }
     }
 
@@ -557,7 +562,7 @@ impl AsyncNetworkStream {
                 .first()
                 .unwrap()
                 .to_vec()),
-            InnerAsyncNetworkStream::None => panic!("InnerNetworkStream::None must never be built"),
+            InnerAsyncNetworkStream::None => Err(error::client("Connection is closed")),
         }
     }
 }
@@ -610,10 +615,7 @@ impl FuturesAsyncRead for AsyncNetworkStream {
             InnerAsyncNetworkStream::AsyncStd1Tcp(s) => Pin::new(s).poll_read(cx, buf),
             #[cfg(feature = "async-std1-rustls")]
             InnerAsyncNetworkStream::AsyncStd1Rustls(s) => Pin::new(s).poll_read(cx, buf),
-            InnerAsyncNetworkStream::None => {
-                debug_assert!(false, "InnerAsyncNetworkStream::None must never be built");
-                Poll::Ready(Ok(0))
-            }
+            InnerAsyncNetworkStream::None => Poll::Ready(Ok(0)),
         }
     }
 }
@@ -638,10 +640,7 @@ impl FuturesAsyncWrite for AsyncNetworkStream {
             InnerAsyncNetworkStream::AsyncStd1Tcp(s) => Pin::new(s).poll_write(cx, buf),
             #[cfg(feature = "async-std1-rustls")]
             InnerAsyncNetworkStream::AsyncStd1Rustls(s) => Pin::new(s).poll_write(cx, buf),
-            InnerAsyncNetworkStream::None => {
-                debug_assert!(false, "InnerAsyncNetworkStream::None must never be built");
-                Poll::Ready(Ok(0))
-            }
+            InnerAsyncNetworkStream::None => Poll::Ready(Err(closed())),
         }
     }
 
@@ -659,10 +658,7 @@ impl FuturesAsyncWrite for AsyncNetworkStream {
             InnerAsyncNetworkStream::AsyncStd1Tcp(s) => Pin::new(s).poll_flush(cx),
             #[cfg(feature = "async-std1-rustls")]
             InnerAsyncNetworkStream::AsyncStd1Rustls(s) => Pin::new(s).poll_flush(cx),
-            InnerAsyncNetworkStream::None => {
-                debug_assert!(false, "InnerAsyncNetworkStream::None must never be built");
-                Poll::Ready(Ok(()))
-            }
+            InnerAsyncNetworkStream::None => Poll::Ready(Ok(())),
         }
     }
 
@@ -680,10 +676,12 @@ impl FuturesAsyncWrite for AsyncNetworkStream {
             InnerAsyncNetworkStream::AsyncStd1Tcp(s) => Pin::new(s).poll_close(cx),
             #[cfg(feature = "async-std1-rustls")]
             InnerAsyncNetworkStream::AsyncStd1Rustls(s) => Pin::new(s).poll_close(cx),
-            InnerAsyncNetworkStream::None => {
-                debug_assert!(false, "InnerAsyncNetworkStream::None must never be built");
-                Poll::Ready(Ok(()))
-            }
+            InnerAsyncNetworkStream::None => Poll::Ready(Ok(())),
         }
     }
+}
+
+/// The error of an operation on a stream that a failed TLS upgrade closed
+fn closed() -> IoError {
+    IoError::new(io::ErrorKind::NotConnected, "the connection is closed")
 }

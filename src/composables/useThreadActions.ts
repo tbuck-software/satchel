@@ -451,6 +451,8 @@ export function useThreadActions() {
       threads.deselectThreads(filed);
       continueTriageAfterFiling(filed);
 
+      const queuedDeletions = receipt.queued_deletions?.length ?? 0;
+      if (queuedDeletions > 0) toast.info(tc('thread.result.deletionQueued', queuedDeletions));
       if (receipt.permanently_deleted.length > 0) {
         toast.info(tc('thread.result.permanentlyDeleted', receipt.permanently_deleted.length));
       }

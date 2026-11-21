@@ -9,17 +9,18 @@ use std::{
 use async_trait::async_trait;
 
 #[cfg(feature = "pool")]
-use super::pool::async_impl::Pool;
-#[cfg(feature = "pool")]
 use super::PoolConfig;
 #[cfg(any(
     feature = "tokio1-native-tls",
     feature = "tokio1-rustls",
+    feature = "tokio1-boring-tls",
     feature = "async-std1-rustls"
 ))]
 use super::Tls;
+#[cfg(feature = "pool")]
+use super::pool::async_impl::Pool;
 use super::{
-    client::AsyncSmtpConnection, ClientId, Credentials, Error, Mechanism, Response, SmtpInfo,
+    ClientId, Credentials, Error, Mechanism, Response, SmtpInfo, client::AsyncSmtpConnection,
 };
 #[cfg(feature = "async-std1")]
 use crate::AsyncStd1Executor;
@@ -98,7 +99,8 @@ impl AsyncTransport for AsyncSmtpTransport<AsyncStd1Executor> {
 
         let result = conn.send(envelope, email).await?;
 
-        conn.quit().await?;
+        #[cfg(not(feature = "pool"))]
+        conn.abort().await;
 
         Ok(result)
     }
@@ -122,6 +124,7 @@ where
     #[cfg(any(
         feature = "tokio1-native-tls",
         feature = "tokio1-rustls",
+        feature = "tokio1-boring-tls",
         feature = "async-std1-rustls"
     ))]
     #[cfg_attr(
@@ -129,11 +132,12 @@ where
         doc(cfg(any(
             feature = "tokio1-native-tls",
             feature = "tokio1-rustls",
+            feature = "tokio1-boring-tls",
             feature = "async-std1-rustls"
         )))
     )]
     pub fn relay(relay: &str) -> Result<AsyncSmtpTransportBuilder, Error> {
-        use super::{Tls, TlsParameters, SUBMISSIONS_PORT};
+        use super::{SUBMISSIONS_PORT, Tls, TlsParameters};
 
         let tls_parameters = TlsParameters::new(relay.into())?;
 
@@ -156,6 +160,7 @@ where
     #[cfg(any(
         feature = "tokio1-native-tls",
         feature = "tokio1-rustls",
+        feature = "tokio1-boring-tls",
         feature = "async-std1-rustls"
     ))]
     #[cfg_attr(
@@ -163,11 +168,12 @@ where
         doc(cfg(any(
             feature = "tokio1-native-tls",
             feature = "tokio1-rustls",
+            feature = "tokio1-boring-tls",
             feature = "async-std1-rustls"
         )))
     )]
     pub fn starttls_relay(relay: &str) -> Result<AsyncSmtpTransportBuilder, Error> {
-        use super::{Tls, TlsParameters, SUBMISSION_PORT};
+        use super::{SUBMISSION_PORT, Tls, TlsParameters};
 
         let tls_parameters = TlsParameters::new(relay.into())?;
 
@@ -225,7 +231,7 @@ where
     /// | `smtps` | unset                 | `smtps://user:pass@hostname:port`                  | 465          | SMTP over TLS, recommended method                                                                                                     |
     /// | `smtp`  | `required`            | `smtp://user:pass@hostname:port?tls=required`      | 587          | SMTP with STARTTLS required, when SMTP over TLS is not available                                                                      |
     /// | `smtp`  | `opportunistic`       | `smtp://user:pass@hostname:port?tls=opportunistic` | 587          | SMTP with optionally STARTTLS when supported by the server. Not suitable for production use: vulnerable to a man-in-the-middle attack |
-    /// | `smtp`  | unset                 | `smtp://user:pass@hostname:port`                   | 587          | Always unencrypted SMTP. Not suitable for production use: sends all data unencrypted                                                  |
+    /// | `smtp`  | unset                 | `smtp://user:pass@hostname:port`                   | 25           | Always unencrypted SMTP. Not suitable for production use: sends all data unencrypted                                                  |
     ///
     /// IMPORTANT: some parameters like `user` and `pass` cannot simply
     /// be concatenated to construct the final URL because special characters
@@ -270,8 +276,8 @@ where
     ///
     /// ```rust,no_run
     /// use lettre::{
-    ///     message::header::ContentType, transport::smtp::authentication::Credentials,
-    ///     AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
+    ///     AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor, message::header::ContentType,
+    ///     transport::smtp::authentication::Credentials,
     /// };
     /// # use tokio1_crate as tokio;
     ///
@@ -427,6 +433,7 @@ impl AsyncSmtpTransportBuilder {
     #[cfg(any(
         feature = "tokio1-native-tls",
         feature = "tokio1-rustls",
+        feature = "tokio1-boring-tls",
         feature = "async-std1-rustls"
     ))]
     #[cfg_attr(
@@ -434,6 +441,7 @@ impl AsyncSmtpTransportBuilder {
         doc(cfg(any(
             feature = "tokio1-native-tls",
             feature = "tokio1-rustls",
+            feature = "tokio1-boring-tls",
             feature = "async-std1-rustls"
         )))
     )]
@@ -449,6 +457,23 @@ impl AsyncSmtpTransportBuilder {
     #[cfg_attr(docsrs, doc(cfg(feature = "pool")))]
     pub fn pool_config(mut self, pool_config: PoolConfig) -> Self {
         self.pool_config = pool_config;
+        self
+    }
+
+    /// Allow the server to reject some recipients without failing the send
+    ///
+    /// When set to `true`, recipients rejected by the server (a 4xx or 5xx
+    /// reply to `RCPT`) are skipped and the message is still delivered to the
+    /// accepted recipients. Rejections are logged with `tracing` when the
+    /// `tracing` feature is enabled.
+    ///
+    /// When set to `false` (the default), any recipient rejection fails the
+    /// whole send, as before.
+    ///
+    /// Either way transport and protocol errors remain fatal, and an envelope
+    /// with no accepted recipient still fails without sending any message data.
+    pub fn allow_partial_recipients(mut self, allow: bool) -> Self {
+        self.info.allow_partial_recipients = allow;
         self
     }
 
@@ -495,6 +520,7 @@ where
         if let Some(credentials) = &self.info.credentials {
             conn.auth(&self.info.authentication, credentials).await?;
         }
+        conn.set_allow_partial_recipients(self.info.allow_partial_recipients);
         Ok(conn)
     }
 }

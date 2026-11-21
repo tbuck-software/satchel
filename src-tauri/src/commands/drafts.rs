@@ -51,7 +51,7 @@ pub async fn delete_draft(
     pool: tauri::State<'_, SqlitePool>,
     state: tauri::State<'_, AppState>,
     id: String,
-) -> CommandResult<()> {
+) -> CommandResult<bool> {
     satchel_core::drafts::discard(pool.inner(), &state.queue, &id)
         .await
         .map_err(CommandError::from)

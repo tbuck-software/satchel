@@ -34,6 +34,9 @@ The Unicode confusables table retains the notice in
 
 ## Rust and JavaScript dependencies
 
+The vendored imap-proto parser retains its [MIT](vendor/imap-proto/LICENSE-MIT) and
+[Apache 2.0](vendor/imap-proto/LICENSE-APACHE) licenses. The local change is
+documented in [vendor/imap-proto/SATCHEL_PATCH.md](vendor/imap-proto/SATCHEL_PATCH.md).
 The vendored lettre fork retains its MIT license in [vendor/lettre/LICENSE](vendor/lettre/LICENSE)
 and documents changes in [vendor/lettre/SATCHEL_PATCH.md](vendor/lettre/SATCHEL_PATCH.md).
 postroom is Apache-2.0 licensed. Other dependencies retain the licenses declared

@@ -441,6 +441,7 @@ async fn run_scenario() -> serde_json::Value {
                 "undo_token": receipt.undo_token.map(|token| normalizer.id("r", &token)),
                 "undo_thread_ids": receipt.undo_thread_ids,
                 "permanently_deleted": receipt.permanently_deleted,
+                "queued_deletions": receipt.queued_deletions,
             }),
             Err(error) => json!({"error": error}),
         }
@@ -603,7 +604,7 @@ async fn bulk_moves_match_the_recorded_results() {
     let golden: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(GOLDEN).expect("golden file"))
             .expect("golden json");
-    // One batch for the whole fixture: exactly what main recorded.
+    // One batch for the whole fixture, including IMAP deletions awaiting confirmation.
     let replayed = run_scenario().await;
     assert!(
         replayed == golden,

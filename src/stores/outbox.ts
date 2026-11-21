@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import {
   backendCancelOutboxAction,
+  backendUndoOutboxSend,
   backendListFailedSyncActions,
   backendDiscardFailedSyncAction,
   backendCommandsAvailable,
@@ -74,6 +75,12 @@ export const useOutboxStore = defineStore('outbox', () => {
     }
   }
 
+  async function restoreDraft(id: string) {
+    const draft = await backendUndoOutboxSend(id);
+    await load();
+    return draft;
+  }
+
   async function retry(id: string) {
     const actionType = items.value.find((item) => item.id === id)?.action_type;
     await backendRetryOutboxAction(id);
@@ -143,5 +150,5 @@ export const useOutboxStore = defineStore('outbox', () => {
     unlisteners = [];
   }
 
-  return { items, loading, loadedOnce, error, failedSendCount, failedChangeCount, attentionCount, load, retry, retryFailedSyncActions, cancel, start, stop };
+  return { items, loading, loadedOnce, error, failedSendCount, failedChangeCount, attentionCount, load, restoreDraft, retry, retryFailedSyncActions, cancel, start, stop };
 });

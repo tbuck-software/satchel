@@ -1410,6 +1410,14 @@ pub async fn merge_threads_tx(
         .execute(&mut **tx)
         .await?;
     sqlx::query(
+        "INSERT OR IGNORE INTO imap_generation_recovery (folder_id, message_id_header, thread_id)
+         SELECT folder_id, message_id_header, ? FROM imap_generation_recovery WHERE thread_id = ?",
+    )
+    .bind(canonical_thread_id)
+    .bind(child_thread_id)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
         "DELETE FROM threads
          WHERE id = ? AND NOT EXISTS (SELECT 1 FROM messages WHERE thread_id = ?)",
     )
@@ -1457,8 +1465,7 @@ macro_rules! message_dedupe_key {
 }
 
 /// [`refresh_thread_projection_tx`] for many threads in a constant number of
-/// statements. Threads left without messages go the single way: they are
-/// removed with their tags, events and topic links.
+/// statements. Empty threads use the same cleanup as the single-thread path.
 pub(crate) async fn refresh_thread_projections_batch_tx(
     tx: &mut Transaction<'_, Sqlite>,
     thread_ids: &[String],
@@ -1530,6 +1537,24 @@ pub(crate) async fn refresh_thread_projection_tx(
     .await?;
 
     if message_count <= 0 {
+        // A later recovery page can still reattach the real Message-ID.
+        let held = sqlx::query(
+            "UPDATE threads SET message_count = 0, unread_count = 0, is_starred = 0,
+                    has_attachments = 0, updated_at = ?
+             WHERE id = ? AND EXISTS (
+                 SELECT 1 FROM imap_generation_recovery WHERE thread_id = threads.id
+             )",
+        )
+        .bind(now)
+        .bind(thread_id)
+        .execute(&mut **tx)
+        .await?
+        .rows_affected()
+            > 0;
+        if held {
+            return Ok(());
+        }
+
         sqlx::query("DELETE FROM thread_tags WHERE thread_id = ?")
             .bind(thread_id)
             .execute(&mut **tx)

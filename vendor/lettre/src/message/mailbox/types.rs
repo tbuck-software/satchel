@@ -5,7 +5,6 @@ use std::{
     str::FromStr,
 };
 
-use chumsky::prelude::*;
 use email_encoding::headers::writer::EmailWriter;
 
 use super::parsers;
@@ -56,7 +55,7 @@ impl Mailbox {
     /// # Examples
     ///
     /// ```
-    /// use lettre::{message::Mailbox, Address};
+    /// use lettre::{Address, message::Mailbox};
     ///
     /// # use std::error::Error;
     /// # fn main() -> Result<(), Box<dyn Error>> {
@@ -114,7 +113,7 @@ impl FromStr for Mailbox {
     type Err = AddressError;
 
     fn from_str(src: &str) -> Result<Mailbox, Self::Err> {
-        let (name, (user, domain)) = parsers::mailbox().parse(src).map_err(|_errs| {
+        let (_rest, (name, (user, domain))) = parsers::mailbox(src).map_err(|_errs| {
             // TODO: improve error management
             AddressError::InvalidInput
         })?;
@@ -158,8 +157,8 @@ impl Mailboxes {
     ///
     /// ```
     /// use lettre::{
-    ///     message::{Mailbox, Mailboxes},
     ///     Address,
+    ///     message::{Mailbox, Mailboxes},
     /// };
     ///
     /// # use std::error::Error;
@@ -180,8 +179,8 @@ impl Mailboxes {
     ///
     /// ```
     /// use lettre::{
-    ///     message::{Mailbox, Mailboxes},
     ///     Address,
+    ///     message::{Mailbox, Mailboxes},
     /// };
     ///
     /// # use std::error::Error;
@@ -202,8 +201,8 @@ impl Mailboxes {
     ///
     /// ```
     /// use lettre::{
-    ///     message::{Mailbox, Mailboxes},
     ///     Address,
+    ///     message::{Mailbox, Mailboxes},
     /// };
     ///
     /// # use std::error::Error;
@@ -229,8 +228,8 @@ impl Mailboxes {
     ///
     /// ```
     /// use lettre::{
-    ///     message::{Mailbox, Mailboxes},
     ///     Address,
+    ///     message::{Mailbox, Mailboxes},
     /// };
     ///
     /// # use std::error::Error;
@@ -345,7 +344,7 @@ impl FromStr for Mailboxes {
     fn from_str(src: &str) -> Result<Self, Self::Err> {
         let mut mailboxes = Vec::new();
 
-        let parsed_mailboxes = parsers::mailbox_list().parse(src).map_err(|_errs| {
+        let (_rest, parsed_mailboxes) = parsers::mailbox_list(src).map_err(|_errs| {
             // TODO: improve error management
             AddressError::InvalidInput
         })?;
@@ -411,8 +410,14 @@ fn is_valid_atom_char(c: u8) -> bool {
 // https://datatracker.ietf.org/doc/html/rfc2822#section-3.2.5
 fn write_quoted_string_char(f: &mut Formatter<'_>, c: char) -> FmtResult {
     match c {
-        // Can not be encoded.
-        '\n' | '\r' => Err(std::fmt::Error),
+        // CR and LF can not appear in a quoted-string. Render them as a space
+        // rather than returning an error, because `Display` is consumed through
+        // the infallible `Header::display()` path where an error would turn
+        // into a panic. The output is also the raw value of the address
+        // headers, which is parsed again (e.g. to build the envelope), so it
+        // must stay valid; only the display name is affected. The wire value
+        // is RFC 2047 encoded separately (see `Mailbox::encode`).
+        '\n' | '\r' => f.write_char(' '),
 
         // Note, not qcontent but can be put before or after any qcontent.
         '\t' | ' ' => f.write_char(c),
@@ -446,7 +451,7 @@ fn write_quoted_string_char(f: &mut Formatter<'_>, c: char) -> FmtResult {
 mod test {
     use pretty_assertions::assert_eq;
 
-    use super::Mailbox;
+    use super::{Address, Mailbox, Mailboxes};
 
     #[test]
     fn mailbox_format_address_only() {
@@ -468,6 +473,24 @@ mod test {
             ),
             "\"K.\" <kayo@example.com>"
         );
+    }
+
+    #[test]
+    fn mailbox_format_name_with_crlf_does_not_panic() {
+        // A display name containing CR/LF must not panic when formatted (the
+        // `Display` impl is reached through the infallible `Header::display()`).
+        // CR/LF are rendered as spaces; the value is not allowed to contain a
+        // raw newline.
+        let formatted = format!(
+            "{}",
+            Mailbox::new(
+                Some("Foo\r\nBar".into()),
+                "kayo@example.com".parse().unwrap()
+            )
+        );
+        assert_eq!(formatted, "\"Foo  Bar\" <kayo@example.com>");
+        assert!(!formatted.contains('\r'));
+        assert!(!formatted.contains('\n'));
     }
 
     #[test]
@@ -611,5 +634,46 @@ mod test {
                 "kayo@example.com".parse().unwrap()
             ))
         );
+    }
+
+    #[test]
+    fn parse_quoted_display_name_preserves_spaces() {
+        assert_eq!(
+            "\"Last, First\" <kayo@example.com>".parse(),
+            Ok(Mailbox::new(
+                Some("Last, First".into()),
+                "kayo@example.com".parse().unwrap()
+            ))
+        );
+    }
+
+    // A quoted local part must be kept as written, or the mailbox would
+    // designate a different recipient than the same string parsed as an
+    // `Address` (GHSA-62w5-58xq-p27j)
+    #[test]
+    fn parse_quoted_local_part_matches_address() {
+        for addr in [
+            r#""d "@d"#,
+            r#""\"x\""@y"#,
+            r#""\".\""@A"#,
+            r#""a b"@example.com"#,
+            r#""john..doe"@example.com"#,
+            r#""abc"@example.com"#,
+        ] {
+            let address: Address = addr.parse().unwrap();
+            for src in [
+                addr.to_owned(),
+                format!("<{addr}>"),
+                format!("K. <{addr}>"),
+                format!("\"Q, R\" <  {addr}>"),
+            ] {
+                let mailbox: Mailbox = src.parse().unwrap();
+                assert_eq!(mailbox.email, address, "{src}");
+                assert_eq!(mailbox.to_string().parse(), Ok(mailbox), "{src}");
+
+                let mailboxes: Mailboxes = format!("{src}, x@example.com").parse().unwrap();
+                assert_eq!(mailboxes.iter().next().unwrap().email, address, "{src}");
+            }
+        }
     }
 }
