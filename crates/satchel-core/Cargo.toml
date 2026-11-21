@@ -46,7 +46,7 @@ postroom-imap = { git = "https://github.com/tbuck-software/postroom.git", rev = 
 # change with whatever OpenSSL a desktop happens to have installed. This does
 # not touch TLS — reqwest, sqlx and lettre stay rustls-only.
 openssl = { version = "=0.10.82", features = ["vendored"] }
-pgp = "0.20"
+pgp = "0.21"
 rand = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "blocking"] }
 ring = "0.17"
