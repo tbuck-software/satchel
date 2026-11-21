@@ -2,30 +2,46 @@
   "en": {
     "backend": {
       "errors": {
-        "imapUidValidityChanged": "The IMAP folder \"{folder}\" changed on the server. This action was stopped to protect other messages. Sync the folder and try again.",
-        "imapUidValidityMissing": "The IMAP folder \"{folder}\" has no verified mailbox identity. Sync the folder before trying this action again.",
-        "imapMixedUidValidity": "This action contains messages from different versions of the IMAP folder \"{folder}\". Sync the folder and try again.",
-        "imapMutationInvalidRef": "This queued IMAP action has an incomplete message identity. Sync the folder and try again.",
-        "imapMoveCopyNeedsReview": "The server may have copied the messages to the destination. Check both folders before trying to move them again.",
-        "imapDraftUidWithoutValidity": "This older draft in \"{folder}\" has no verified server identity. Its server copy was left untouched."
+        "imapUidValidityChanged": "Folder \"{folder}\" changed on the server. Sync the folder before retrying.",
+        "imapUidValidityMissing": "Cannot verify folder \"{folder}\". Sync the folder before retrying.",
+        "imapMixedUidValidity": "The messages belong to different versions of \"{folder}\". Sync the folder before retrying.",
+        "imapMutationInvalidRef": "The message ID is incomplete. Sync the folder before retrying.",
+        "imapMoveCopyRefused": "The server refused to copy these messages. Check the destination folder in webmail and retry.",
+        "imapMoveCopyNeedsReview": "The server may have copied the messages. Check both folders before moving them again.",
+        "imapUidExpungeUnsupported": "This server cannot delete selected messages safely. Use webmail or ask your provider for UIDPLUS or IMAP4rev2.",
+        "imapDeleteRefused": "The server refused to finish deleting these messages. Check the folder in webmail before retrying.",
+        "imapDraftSyncUnsupported": "Your draft is saved on this device. Draft sync needs UIDPLUS or IMAP4rev2 to replace older server copies.",
+        "imapDraftSyncNeedsReview": "Your draft is saved on this device. Check Drafts in webmail and remove older copies before retrying.",
+        "imapDraftSyncUnverified": "Your draft is saved on this device. Satchel could not identify the old server copy. Check Drafts in webmail.",
+        "imapDraftDeleteUnverified": "Satchel could not identify the server draft. Check Drafts in webmail.",
+        "imapDraftUidWithoutValidity": "Cannot verify this draft in \"{folder}\". Its server copy was kept."
       }
     },
     "drafts": {
+      "deletionQueued": "This draft stays here until the server confirms deletion.",
       "unavailable": "Draft unavailable"
     }
   },
   "de": {
     "backend": {
       "errors": {
-        "imapUidValidityChanged": "Der IMAP-Ordner \"{folder}\" hat sich auf dem Server geändert. Die Aktion wurde gestoppt, um andere Nachrichten zu schützen. Synchronisiere den Ordner und versuche es erneut.",
-        "imapUidValidityMissing": "Für den IMAP-Ordner \"{folder}\" fehlt eine bestätigte Postfachkennung. Synchronisiere den Ordner, bevor du die Aktion erneut versuchst.",
-        "imapMixedUidValidity": "Diese Aktion enthält Nachrichten aus verschiedenen Versionen des IMAP-Ordners \"{folder}\". Synchronisiere den Ordner und versuche es erneut.",
-        "imapMutationInvalidRef": "Für diese vorgemerkte IMAP-Aktion ist die Nachrichtenkennung unvollständig. Synchronisiere den Ordner und versuche es erneut.",
-        "imapMoveCopyNeedsReview": "Der Server hat die Nachrichten möglicherweise in den Zielordner kopiert. Prüfe beide Ordner, bevor du sie erneut verschiebst.",
-        "imapDraftUidWithoutValidity": "Für diesen älteren Entwurf in \"{folder}\" fehlt eine bestätigte Serverkennung. Seine Serverkopie wurde nicht verändert."
+        "imapUidValidityChanged": "Ordner „{folder}“ wurde auf dem Server geändert. Synchronisiere ihn vor dem nächsten Versuch.",
+        "imapUidValidityMissing": "Die Kennung von „{folder}“ ist unbestätigt. Synchronisiere den Ordner vor dem nächsten Versuch.",
+        "imapMixedUidValidity": "Die Nachrichten stammen aus verschiedenen Versionen von „{folder}“. Synchronisiere den Ordner vor dem nächsten Versuch.",
+        "imapMutationInvalidRef": "Die Nachrichtenkennung ist unvollständig. Synchronisiere den Ordner vor dem nächsten Versuch.",
+        "imapMoveCopyRefused": "Der Server hat das Kopieren dieser Nachrichten abgelehnt. Prüfe den Zielordner in Webmail und versuche es erneut.",
+        "imapMoveCopyNeedsReview": "Der Server hat die Nachrichten eventuell kopiert. Prüfe vor dem nächsten Verschieben beide Ordner.",
+        "imapUidExpungeUnsupported": "Dieser Server kann ausgewählte Nachrichten nicht sicher löschen. Nutze Webmail oder frage deinen Anbieter nach UIDPLUS oder IMAP4rev2.",
+        "imapDeleteRefused": "Der Server hat das Löschen dieser Nachrichten abgelehnt. Prüfe den Ordner vor einem erneuten Versuch in Webmail.",
+        "imapDraftSyncUnsupported": "Dein Entwurf ist auf diesem Gerät gespeichert. Zum Ersetzen älterer Serverkopien braucht die Synchronisierung UIDPLUS oder IMAP4rev2.",
+        "imapDraftSyncNeedsReview": "Dein Entwurf ist auf diesem Gerät gespeichert. Prüfe die Entwürfe in Webmail und lösche ältere Kopien vor einem erneuten Versuch.",
+        "imapDraftSyncUnverified": "Dein Entwurf ist auf diesem Gerät gespeichert. Satchel konnte die alte Serverkopie nicht zuordnen. Prüfe die Entwürfe in Webmail.",
+        "imapDraftDeleteUnverified": "Satchel konnte den Entwurf auf dem Server nicht zuordnen. Prüfe die Entwürfe in Webmail.",
+        "imapDraftUidWithoutValidity": "Die Kennung des Entwurfs in „{folder}“ ist unbestätigt. Die Serverkopie bleibt erhalten."
       }
     },
     "drafts": {
+      "deletionQueued": "Dieser Entwurf bleibt hier, bis der Server das Löschen bestätigt.",
       "unavailable": "Entwurf nicht verfügbar"
     }
   }

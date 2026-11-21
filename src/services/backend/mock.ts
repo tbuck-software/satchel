@@ -290,6 +290,7 @@ function spamFilterStatus() {
     move_ham_needed: hamNeededForMove,
   };
 }
+const importPhase = typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('mockImportPhase');
 const outbox: BackendOutboxItem[] = mockOutboxItems.map((item) => ({
   ...item,
   last_error: item.id === 'failed-move' ? 'backend.errors.queueFolderChanged'
@@ -2395,7 +2396,8 @@ const handlers: Record<string, Handler> = {
   list_failed_sync_actions: () => outbox.filter((item) => item.action_type !== 'send_message' && item.status === 'failed').map((item) => ({ ...item })),
   discard_failed_sync_action: (payload) => {
     const index = outbox.findIndex((item) => item.id === payload.id && item.action_type !== 'send_message'
-      && item.status === 'failed' && item.mutation_kind !== 'append_sent');
+      && item.status === 'failed' && (item.mutation_kind !== 'append_sent'
+        || item.last_error === 'backend.errors.sentCopyHeldAfterRestore'));
     if (index < 0) throw new Error('backend.errors.outboxActionCannotBeDiscarded');
     outbox.splice(index, 1);
   },
@@ -2412,7 +2414,10 @@ const handlers: Record<string, Handler> = {
     queuedDrafts.delete(payload.id as string);
   },
   retry_failed_sync_actions: () => {
-    const failed = outbox.filter((item) => item.action_type !== 'send_message' && item.status === 'failed');
+    const failed = outbox.filter((item) =>
+      item.action_type !== 'send_message'
+      && item.status === 'failed'
+      && item.last_error !== 'backend.errors.sentCopyHeldAfterRestore');
     for (const item of failed) {
       item.status = 'pending';
       item.retry_count = 0;
@@ -2448,6 +2453,7 @@ const handlers: Record<string, Handler> = {
     const index = drafts.findIndex((draft) => draft.id === payload.id);
     if (index >= 0) drafts.splice(index, 1);
     removeDraftMessage(payload.id as string);
+    return false;
   },
 
   /* --- topics --------------------------------------------------------- */
@@ -2674,10 +2680,14 @@ const handlers: Record<string, Handler> = {
     failures: [],
   }),
   current_connection_state: () => ({
-    sync_progress: [],
+    sync_progress: importPhase === 'folder' || importPhase === 'waiting' ? [{
+      account_id: 'work', account_name: 'Work', email: 'alex@example.test',
+      phase: importPhase, folder: 'Archive', folder_index: 4, folder_total: 12,
+      backfill_remaining: 20000, backfill_total: 40000, updated_at: new Date().toISOString(),
+    }] : [],
     unread_count: threads.filter(thread => accountVisible(thread.accountId) && thread.workflowState === 'inbox' && thread.unreadCount > 0 && !thread.isMuted && thread.mailboxNames?.some(name => name.toLowerCase() === 'inbox')).length,
     online: true,
-    syncing: false,
+    syncing: importPhase === 'folder',
     last_sync_at: null,
     pending_outbox: outbox.length,
     pending_sends: outbox.filter((item) => item.action_type === 'send_message').length,

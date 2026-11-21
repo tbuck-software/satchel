@@ -13,6 +13,7 @@ import {
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { copyProfileMasterKey } from './profile-master-key.mjs';
+import { advanceImportedCutoff, holdImportedSends } from './hold-imported-sends.mjs';
 
 const home = process.env.HOME;
 if (!home) {
@@ -157,9 +158,19 @@ const tempDb = join(dailyRoot, `satchel.import-${timestamp()}.db`);
 rmSync(tempDb, { force: true });
 run('sqlite3', [stableDb, `.backup ${sqliteLiteral(tempDb)}`]);
 
+// Sanitize the private snapshot before touching the Daily key or database.
+try {
+  holdImportedSends(tempDb);
+} catch (error) {
+  rmSync(tempDb, { force: true });
+  console.error(error.message);
+  process.exit(1);
+}
+
 // Verify the imported key before replacing the database.
 try {
   copyProfileMasterKey(stableRoot, dailyRoot);
+  advanceImportedCutoff(tempDb);
   for (const suffix of ['-wal', '-shm']) rmSync(`${dailyDb}${suffix}`, { force: true });
   renameSync(tempDb, dailyDb);
 } catch (error) {
@@ -189,3 +200,4 @@ if (existsSync(join(stableRoot, 'crypto'))) {
 
 console.log(`Imported Stable data into Daily: "${dailyDb}"`);
 console.log('Copied the credential master key for the Daily profile.');
+console.log('Held imported sends in the Outbox and paused mail merges.');

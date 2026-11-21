@@ -23,7 +23,20 @@ function keyPaths(value: unknown, trail: string[] = []): string[] {
 const en = JSON.parse(readFileSync(new URL('../src/i18n/en.json', import.meta.url), 'utf8'));
 const catalogue = new Set(keyPaths(en));
 
-const VIEWS = ['/inbox', '/later', '/calendar', '/tasks', '/contacts', '/outbox', '/drafts', '/cleanup', '/new-senders', '/search', '/compose'];
+// Wait for content that belongs to the route, even if its labels are raw keys.
+const VIEWS = {
+  '/inbox': '.inbox-layout .detail-pane h1',
+  '/later': '.inbox-header h2',
+  '/calendar': '.calendar__heading h2',
+  '/tasks': '.tasks-view h2',
+  '/contacts': '.contact-header h2',
+  '/outbox': '.outbox .list li',
+  '/drafts': '.drafts .list li',
+  '/cleanup': '.cleanup-view h2',
+  '/new-senders': '.new-senders-view h2',
+  '/search': '.search-pane h2',
+  '/compose': '.compose .ProseMirror',
+};
 
 /** A message chunk request: `/src/i18n/chunks/<id>.<locale>.json` in dev, `<id>.<locale>-<hash>.js` built. */
 const CHUNK_URL = /\/([A-Za-z]+\.[\w.]+)\.(en|de)(?:\.json|-[\w-]+\.js)(?:\?|$)/;
@@ -96,16 +109,17 @@ for (const locale of ['en', 'de'] as const) {
       expect(missing).toEqual([]);
     });
 
-    test('views show no raw keys', async ({ page }) => {
-      const { missing } = watch(page);
-      const found: string[] = [];
-      for (const view of VIEWS) {
+    for (const [view, ready] of Object.entries(VIEWS)) {
+      test(`views show no raw keys on ${view}`, async ({ page }) => {
+        const { missing } = watch(page);
         await page.goto(view);
-        found.push(...await rawKeys(page, view));
-      }
-      expect(found).toEqual([]);
-      expect(missing).toEqual([]);
-    });
+        // Each cold deep link gets its own budget. Background requests do not
+        // tell us whether the view we want to inspect is mounted.
+        await expect(page.locator(ready).first()).toBeVisible({ timeout: 30_000 });
+        expect(await rawKeys(page, view, { idle: false })).toEqual([]);
+        expect(missing).toEqual([]);
+      });
+    }
 
     test('the availability strip and the insert-availability dialog show no raw keys', async ({ page }) => {
       const { missing } = watch(page);

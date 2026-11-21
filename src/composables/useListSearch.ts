@@ -89,7 +89,9 @@ export function useListSearch(options: { mailbox: () => ListSearchMailbox }) {
 
   const listScope = computed(() => (narrowed.value ? listSearchScope(options.mailbox()) : null));
 
-  const search = useSearch({ accountFilter, listScope, liveUpdates: true, limit: LIST_SEARCH_PAGE_SIZE });
+  const search = useSearch({
+    accountFilter, listScope, liveUpdates: true, limit: LIST_SEARCH_PAGE_SIZE, clearPreviousResults: true,
+  });
   watch(() => store.query.trim(), (query) => { search.query.value = query; }, { immediate: true, flush: 'sync' });
 
   // Hits name threads; the list needs the threads. Fetched once per id and

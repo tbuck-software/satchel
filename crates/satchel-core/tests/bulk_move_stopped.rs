@@ -195,7 +195,7 @@ async fn a_trash_a_later_batch_stops_keeps_an_undo_for_exactly_what_moved() {
 }
 
 #[tokio::test]
-async fn a_stopped_trash_that_only_deleted_permanently_leaves_no_empty_receipt() {
+async fn a_stopped_trash_with_only_a_queued_deletion_leaves_no_empty_receipt() {
     let pool = pool().await;
     let threads = seed(&pool, 2).await;
     put_thread_in_trash(&pool, "imap-a", "Trash", Some(12), "t00000").await;
@@ -207,7 +207,8 @@ async fn a_stopped_trash_that_only_deleted_permanently_leaves_no_empty_receipt()
         .expect("the first batch committed");
     mail_actions::set_move_batch_threads_for_tests(None);
 
-    assert_eq!(receipt.permanently_deleted, ids(0..1));
+    assert!(receipt.permanently_deleted.is_empty());
+    assert_eq!(receipt.queued_deletions, ids(0..1));
     assert!(receipt.undo_thread_ids.is_empty());
     assert!(receipt.undo_token.is_none());
     assert_eq!(receipt.stopped_early.expect("stopped").remaining, ids(1..2));

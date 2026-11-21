@@ -8,8 +8,8 @@ on:
       - Cargo.lock
       - fuzz/Cargo.lock
       - .cargo/audit.toml
-      - .cargo/lettre-upstream-exception.json
       - deny.toml
+      - 'vendor/imap-proto/**'
       - 'vendor/lettre/**'
       - 'vendor/wasmtime-internal-cache/**'
       - 'vendor/sqlx-sqlite/**'
@@ -22,8 +22,8 @@ on:
       - Cargo.lock
       - fuzz/Cargo.lock
       - .cargo/audit.toml
-      - .cargo/lettre-upstream-exception.json
       - deny.toml
+      - 'vendor/imap-proto/**'
       - 'vendor/lettre/**'
       - 'vendor/wasmtime-internal-cache/**'
       - 'vendor/sqlx-sqlite/**'

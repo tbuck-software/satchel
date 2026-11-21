@@ -13,6 +13,10 @@ pub const ACTION_SYNC_DRAFT: &str = "sync_draft";
 /// queued after it changes its folder-scoped UID; and while it waits for a
 /// retry it does not hold up the account's other actions.
 pub const ACTION_RULE_FORWARD: &str = "rule_forward";
+/// Identifies outgoing work held when a copied profile was prepared.
+pub const OUTGOING_SEND_HELD_ERROR_KEY: &str = "backend.errors.outgoingSendHeldAfterRestore";
+/// A copied Sent message can be filed only by retrying that individual row.
+pub(crate) const SENT_COPY_HELD_ERROR_KEY: &str = "backend.errors.sentCopyHeldAfterRestore";
 
 /// The states an outgoing message may be discarded from. Anything else means
 /// the worker already owns the row: `sending` is mid-submission, and a row that
@@ -63,6 +67,8 @@ pub struct QueuedAction {
     pub created_at: String,
     pub updated_at: String,
     pub last_error: Option<String>,
+    #[serde(skip)]
+    pub pre_restore_error: Option<String>,
     pub next_retry_at: Option<String>,
     pub scheduled_for: Option<String>,
     /// Set the moment the message is handed to the provider. Until then a
@@ -92,6 +98,7 @@ impl QueuedAction {
             created_at: now.clone(),
             updated_at: now,
             last_error: None,
+            pre_restore_error: None,
             next_retry_at: None,
             scheduled_for: None,
             submission_started_at: None,
@@ -117,6 +124,8 @@ struct QueueRow {
     created_at: String,
     updated_at: String,
     last_error: Option<String>,
+    #[sqlx(default)]
+    pre_restore_error: Option<String>,
     next_retry_at: Option<String>,
     scheduled_for: Option<String>,
     submission_started_at: Option<String>,
@@ -135,6 +144,7 @@ impl QueueRow {
             created_at: self.created_at,
             updated_at: self.updated_at,
             last_error: self.last_error,
+            pre_restore_error: self.pre_restore_error,
             next_retry_at: self.next_retry_at,
             scheduled_for: self.scheduled_for,
             submission_started_at: self.submission_started_at,
@@ -313,7 +323,8 @@ impl SyncQueue {
                 sync_queue.action_type = ?
                 AND sync_queue.status IN ('sending', 'delivered', 'delivery_unknown')
                 OR sync_queue.action_type = 'remote_mutation'
-                AND sync_queue.status = 'sending'
+                AND (sync_queue.status = 'sending'
+                     OR (sync_queue.status = 'failed' AND COALESCE(sync_queue.last_error, '') = ?))
              )",
         )
         .bind(&action.id)
@@ -331,6 +342,7 @@ impl SyncQueue {
         .bind(action.submission_started_at.as_deref())
         .bind((action.status == "sending").then(sending_session))
         .bind(ACTION_SEND_MESSAGE)
+        .bind(super::errors::IMAP_MOVE_COPY_NEEDS_REVIEW)
         .execute(&mut **tx)
         .await
         .map_err(|err| err.to_string())?;
@@ -642,6 +654,35 @@ impl SyncQueue {
     ) -> Result<(), String> {
         let now = Utc::now().to_rfc3339();
         let now_ms = Utc::now().timestamp_millis();
+        if matches!(
+            error,
+            super::errors::IMAP_UID_EXPUNGE_UNSUPPORTED
+                | super::errors::IMAP_MOVE_COPY_NEEDS_REVIEW
+        ) {
+            let mut tx = pool
+                .begin_with("BEGIN IMMEDIATE")
+                .await
+                .map_err(|err| err.to_string())?;
+            let row: Option<(String, String)> = sqlx::query_as(
+                "UPDATE sync_queue
+                 SET status = 'failed', last_error = ?, next_retry_at = NULL,
+                     updated_at = ?, updated_at_ms = ?
+                 WHERE id = ?
+                 RETURNING account_id, payload",
+            )
+            .bind(error)
+            .bind(&now)
+            .bind(now_ms)
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|err| err.to_string())?;
+            if let Some((account_id, payload)) = row {
+                crate::mail_actions::rollback_failed_imap_move(&mut tx, id, &account_id, &payload)
+                    .await?;
+            }
+            return tx.commit().await.map_err(|err| err.to_string());
+        }
         sqlx::query(
             "UPDATE sync_queue
              SET status = 'failed',
@@ -909,7 +950,8 @@ impl SyncQueue {
     pub async fn list_mail_outbox(&self, pool: &SqlitePool) -> Result<Vec<QueuedAction>, String> {
         let rows: Vec<QueueRow> = sqlx::query_as::<_, QueueRow>(
             "SELECT id, account_id, action_type, payload, status, retry_count, created_at, updated_at, last_error, next_retry_at, scheduled_for,
-                    submission_started_at, rate_limit_rounds
+                    submission_started_at, rate_limit_rounds,
+                    (SELECT error FROM restored_queue_failures WHERE queue_id = sync_queue.id) AS pre_restore_error
              FROM sync_queue
              WHERE status IN ('failed', 'delivered', 'delivery_unknown', 'pending', 'scheduled', 'sending')
                AND action_type = ?
@@ -1045,20 +1087,23 @@ impl SyncQueue {
         Ok(woken)
     }
 
-    /// Failed non-send work the user can inspect: every remote mutation and
-    /// draft upload. Moves are no longer the only kind that can fail for good.
+    /// Failed sync changes and automatic forwards held for individual review.
     pub async fn list_failed_sync_actions(
         &self,
         pool: &SqlitePool,
     ) -> Result<Vec<QueuedAction>, String> {
         let rows = sqlx::query_as::<_, QueueRow>(
             "SELECT id, account_id, action_type, payload, status, retry_count, created_at, updated_at,
-             last_error, next_retry_at, scheduled_for, submission_started_at, rate_limit_rounds
-             FROM sync_queue WHERE action_type IN (?, ?) AND status = 'failed'
+             last_error, next_retry_at, scheduled_for, submission_started_at, rate_limit_rounds,
+             (SELECT error FROM restored_queue_failures WHERE queue_id = sync_queue.id) AS pre_restore_error
+             FROM sync_queue WHERE status = 'failed'
+               AND (action_type IN (?, ?) OR (action_type = ? AND last_error = ?))
              ORDER BY created_at LIMIT 200",
         )
         .bind(crate::sync::remote_mutations::ACTION_REMOTE_MUTATION)
         .bind(ACTION_SYNC_DRAFT)
+        .bind(ACTION_RULE_FORWARD)
+        .bind(OUTGOING_SEND_HELD_ERROR_KEY)
         .fetch_all(pool)
         .await
         .map_err(|e| e.to_string())?;
@@ -1073,7 +1118,8 @@ impl SyncQueue {
         let changed = sqlx::query(
             "UPDATE sync_queue SET status = 'pending', retry_count = 0, next_retry_at = NULL, last_error = NULL,
              updated_at = ?, updated_at_ms = CASE WHEN id LIKE 'notification:%' THEN 0 ELSE ? END
-             WHERE id = ? AND action_type IN (?, ?) AND status = 'failed'
+             WHERE id = ? AND status = 'failed'
+               AND (action_type IN (?, ?) OR (action_type = ? AND last_error = ?))
                AND COALESCE(last_error, '') <> ?",
         )
         .bind(Utc::now().to_rfc3339())
@@ -1081,6 +1127,8 @@ impl SyncQueue {
         .bind(id)
         .bind(crate::sync::remote_mutations::ACTION_REMOTE_MUTATION)
         .bind(ACTION_SYNC_DRAFT)
+        .bind(ACTION_RULE_FORWARD)
+        .bind(OUTGOING_SEND_HELD_ERROR_KEY)
         .bind(crate::sync::errors::IMAP_MOVE_COPY_NEEDS_REVIEW)
         .execute(pool)
         .await
@@ -1100,13 +1148,14 @@ impl SyncQueue {
              SET status = 'pending', retry_count = 0, next_retry_at = NULL,
                  last_error = NULL, updated_at = ?, updated_at_ms = CASE WHEN id LIKE 'notification:%' THEN 0 ELSE ? END
              WHERE action_type IN (?, ?) AND status = 'failed'
-               AND COALESCE(last_error, '') <> ?",
+               AND COALESCE(last_error, '') NOT IN (?, ?)",
         )
         .bind(&now)
         .bind(now_ms)
         .bind(crate::sync::remote_mutations::ACTION_REMOTE_MUTATION)
         .bind(ACTION_SYNC_DRAFT)
         .bind(crate::sync::errors::IMAP_MOVE_COPY_NEEDS_REVIEW)
+        .bind(SENT_COPY_HELD_ERROR_KEY)
         .execute(pool)
         .await
         .map_err(|err| err.to_string())?
@@ -1663,6 +1712,30 @@ mod tests {
             assert_eq!(payload["source_uidvalidity_before"]["INBOX"], 41);
             assert_eq!(payload["refs"][0]["remote_id"], "old");
         }
+    }
+
+    #[tokio::test]
+    async fn reenqueue_does_not_replay_an_uncertain_imap_copy() {
+        let pool = fresh_pool().await;
+        let queue = SyncQueue::new();
+        let action = QueuedAction::new(
+            "acc-1".into(),
+            "remote_mutation",
+            serde_json::json!({"kind": "blocked_move", "blocked_thread_id": "thread-1"}),
+        );
+        queue.enqueue(&pool, action.clone()).await.unwrap();
+        let key = crate::sync::errors::IMAP_MOVE_COPY_NEEDS_REVIEW;
+        queue
+            .mark_failed_permanent(&pool, &action.id, key)
+            .await
+            .unwrap();
+
+        queue.enqueue(&pool, action).await.unwrap();
+
+        assert!(queue.claim_next(&pool).await.unwrap().is_none());
+        let failed = queue.list_failed_sync_actions(&pool).await.unwrap();
+        assert_eq!(failed.len(), 1);
+        assert_eq!(failed[0].last_error.as_deref(), Some(key));
     }
 
     #[tokio::test]

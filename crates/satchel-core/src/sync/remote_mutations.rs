@@ -97,6 +97,10 @@ pub enum RemoteMutationPayload {
         /// worker resolves to a draft id when it runs.
         remote_message_id: Option<String>,
         source_folder: Option<String>,
+        /// An explicit IMAP discard keeps its editable local row until
+        /// the server confirms deletion of this revision.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        discard_revision: Option<i64>,
     },
     CreateFolder {
         path: String,
@@ -593,6 +597,7 @@ pub async fn enqueue_draft_delete(
         remote_draft_id,
         remote_message_id,
         source_folder,
+        discard_revision: None,
     })
     .map_err(|err| err.to_string())?;
     queue
@@ -720,7 +725,14 @@ pub async fn execute_remote_mutation(
             Ok(())
         }
         RemoteMutationPayload::UndoTrash { .. } => Err("backend.errors.mailUndoUnavailable".into()),
-        RemoteMutationPayload::Delete { refs } => provider.delete_messages(&refs).await,
+        RemoteMutationPayload::Delete { refs } => {
+            provider.delete_messages(&refs).await?;
+            if account.1.eq_ignore_ascii_case("imap") {
+                super::folder_reconcile::reconcile_confirmed_imap_delete(pool, account_id, &refs)
+                    .await?;
+            }
+            Ok(())
+        }
         RemoteMutationPayload::Flags {
             refs,
             read,
@@ -733,11 +745,18 @@ pub async fn execute_remote_mutation(
             Ok(())
         }
         RemoteMutationPayload::DeleteDraft {
+            local_draft_id,
             remote_draft_id,
             remote_message_id,
             source_folder,
-            ..
+            discard_revision,
         } => {
+            let discard = local_draft_id.as_deref().zip(discard_revision);
+            if let Some((id, revision)) = discard {
+                if !crate::drafts::is_current_discard(pool, id, account_id, revision).await? {
+                    return Ok(());
+                }
+            }
             let resolved = match remote_draft_id {
                 Some(id) => Some(id),
                 None => match remote_message_id {
@@ -750,10 +769,18 @@ pub async fn execute_remote_mutation(
                 },
             };
             match resolved {
-                // Nothing on the server to remove — the local row was all of it.
-                None => Ok(()),
-                Some(draft_id) => provider.delete_draft(&draft_id).await,
+                Some(draft_id) => provider.delete_draft(&draft_id).await?,
+                None if discard.is_some() => {
+                    return Err(crate::sync::errors::SyncError::Permanent(
+                        "backend.errors.imapDraftDeleteUnverified".into(),
+                    ));
+                }
+                None => {}
             }
+            if let Some((id, revision)) = discard {
+                crate::drafts::finish_remote_discard(pool, id, account_id, revision).await?;
+            }
+            Ok(())
         }
         RemoteMutationPayload::CreateFolder { path } => provider.create_folder(&path).await,
         RemoteMutationPayload::RenameFolder { from_path, to_path } => {

@@ -25,10 +25,11 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::{define_class, msg_send, MainThreadMarker, MainThreadOnly};
 use objc2_foundation::{
-    NSArray, NSBundle, NSDictionary, NSObject, NSObjectProtocol, NSSet, NSString,
+    NSArray, NSBundle, NSDictionary, NSError, NSObject, NSObjectProtocol, NSSet, NSString,
 };
 use objc2_user_notifications::{
-    UNAuthorizationOptions, UNMutableNotificationContent, UNNotification, UNNotificationAction,
+    UNAuthorizationOptions, UNAuthorizationStatus, UNErrorCode, UNErrorDomain,
+    UNMutableNotificationContent, UNNotification, UNNotificationAction,
     UNNotificationActionOptions, UNNotificationCategory, UNNotificationCategoryOptions,
     UNNotificationPresentationOptions, UNNotificationRequest, UNNotificationResponse,
     UNNotificationSound, UNUserNotificationCenter, UNUserNotificationCenterDelegate,
@@ -49,14 +50,6 @@ const USER_INFO_THREAD_ID: &str = "thread_id";
 /// Set once the delegate is installed. Delivery before that point would drop
 /// clicks on the floor, so [`deliver`] refuses to run until it is true.
 static READY: AtomicBool = AtomicBool::new(false);
-
-/// Set when the authorization callback reported a refusal.
-///
-/// `addNotificationRequest` succeeds regardless — an unauthorized process hands
-/// its banner to a system that silently discards it. Without this flag a denied
-/// permission is indistinguishable from a delivered notification, which is the
-/// one failure mode a user reads as "Satchel does not notify me".
-static AUTHORIZATION_DENIED: AtomicBool = AtomicBool::new(false);
 
 /// The app handle the delegate routes actions through.
 static APP: OnceLock<AppHandle> = OnceLock::new();
@@ -158,7 +151,6 @@ pub fn init(app: AppHandle) {
             | UNAuthorizationOptions::Sound
             | UNAuthorizationOptions::Badge;
         let completion = RcBlock::new(|granted: objc2::runtime::Bool, _error: *mut _| {
-            AUTHORIZATION_DENIED.store(!granted.as_bool(), Ordering::Release);
             if !granted.as_bool() {
                 tracing::warn!(target: "notify", "notification authorization denied");
             }
@@ -217,7 +209,7 @@ fn mail_category() -> Retained<NSSet<UNNotificationCategory>> {
 /// Outcome of one native delivery attempt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NativeDelivery {
-    /// Handed to `UNUserNotificationCenter`.
+    /// The system accepted the request.
     Delivered,
     /// Not a bundled `.app`, so the framework is unavailable.
     NotBundled,
@@ -242,83 +234,177 @@ fn native_unavailable() -> Option<NativeDelivery> {
     if !is_bundled() {
         return Some(NativeDelivery::NotBundled);
     }
-    if AUTHORIZATION_DENIED.load(Ordering::Acquire) {
-        return Some(NativeDelivery::PermissionDenied);
-    }
     if !READY.load(Ordering::Acquire) {
         return Some(NativeDelivery::Unavailable);
     }
     None
 }
 
+fn submission_outcome(error: Option<&NSError>) -> Result<NativeDelivery, String> {
+    let Some(error) = error else {
+        return Ok(NativeDelivery::Delivered);
+    };
+    // SAFETY: the framework exports this constant for the life of the process.
+    let permission_denied = unsafe { UNErrorDomain }
+        .is_some_and(|domain| *error.domain() == *domain)
+        && error.code() == UNErrorCode::NotificationsNotAllowed.0;
+    if permission_denied {
+        Ok(NativeDelivery::PermissionDenied)
+    } else {
+        Err(format!(
+            "macOS rejected the notification: {}",
+            error.localizedDescription()
+        ))
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn native_completion_distinguishes_acceptance_from_permission_and_dispatch_errors() {
+    assert_eq!(submission_outcome(None), Ok(NativeDelivery::Delivered));
+    // SAFETY: the framework owns the error domain, and no user info is passed.
+    let denied = unsafe {
+        NSError::errorWithDomain_code_userInfo(
+            UNErrorDomain.unwrap(),
+            UNErrorCode::NotificationsNotAllowed.0,
+            None,
+        )
+    };
+    assert_eq!(
+        submission_outcome(Some(&denied)),
+        Ok(NativeDelivery::PermissionDenied)
+    );
+    // Same code in another domain is an ordinary error.
+    let failed = unsafe {
+        NSError::errorWithDomain_code_userInfo(
+            &NSString::from_str("test"),
+            UNErrorCode::NotificationsNotAllowed.0,
+            None,
+        )
+    };
+    assert!(submission_outcome(Some(&failed)).is_err());
+}
+
+/// Query live authorization, then wait for the system to accept the request.
+/// The callbacks retain the Objective-C objects. Only the result crosses await.
+fn submit(
+    request: Retained<UNNotificationRequest>,
+) -> impl std::future::Future<Output = Result<NativeDelivery, String>> {
+    use std::sync::{Arc, Mutex};
+    let (sender, result) = tokio::sync::oneshot::channel();
+    let sender = Arc::new(Mutex::new(Some(sender)));
+    let finish = move |outcome| {
+        if let Some(sender) = sender
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+        {
+            let _ = sender.send(outcome);
+        }
+    };
+    let center = UNUserNotificationCenter::currentNotificationCenter();
+    let delivery_center = center.clone();
+    let settings = RcBlock::new(
+        move |settings: std::ptr::NonNull<objc2_user_notifications::UNNotificationSettings>| {
+            // SAFETY: the framework keeps the settings alive during this callback.
+            match unsafe { settings.as_ref() }.authorizationStatus() {
+                // Without permission this delivery is suppressed. Retrying would show
+                // stale mail after the user eventually answers the system prompt.
+                UNAuthorizationStatus::Denied | UNAuthorizationStatus::NotDetermined => {
+                    finish(Ok(NativeDelivery::PermissionDenied));
+                }
+                _ => {
+                    let finish = finish.clone();
+                    let completion = RcBlock::new(move |error: *mut NSError| {
+                        // SAFETY: the framework owns a non-null error during the callback.
+                        finish(submission_outcome(unsafe { error.as_ref() }));
+                    });
+                    delivery_center
+                        .addNotificationRequest_withCompletionHandler(&request, Some(&completion));
+                }
+            }
+        },
+    );
+    center.getNotificationSettingsWithCompletionHandler(&settings);
+    async move {
+        tokio::time::timeout(std::time::Duration::from_secs(10), result)
+            .await
+            .map_err(|_| "macOS notification request timed out".to_string())?
+            .map_err(|_| "macOS notification callback was dropped".to_string())?
+    }
+}
+
 /// Summary identifier: a new summary replaces the one on screen.
 const SUMMARY_IDENTIFIER: &str = "satchel-mail-summary";
 
 /// The banner that stands in for the mails of a burst.
-pub fn deliver_summary(title: &str, sound: bool) -> NativeDelivery {
+pub async fn deliver_summary(title: &str, sound: bool) -> Result<NativeDelivery, String> {
     if let Some(unavailable) = native_unavailable() {
-        return unavailable;
+        return Ok(unavailable);
     }
-    let content = UNMutableNotificationContent::new();
-    content.setTitle(&NSString::from_str(title));
-    if sound {
-        content.setSound(Some(&UNNotificationSound::defaultSound()));
-    }
-    let request = UNNotificationRequest::requestWithIdentifier_content_trigger(
-        &NSString::from_str(SUMMARY_IDENTIFIER),
-        &content,
-        None,
-    );
-    UNUserNotificationCenter::currentNotificationCenter()
-        .addNotificationRequest_withCompletionHandler(&request, None);
-    NativeDelivery::Delivered
+    let completion = {
+        let content = UNMutableNotificationContent::new();
+        content.setTitle(&NSString::from_str(title));
+        if sound {
+            content.setSound(Some(&UNNotificationSound::defaultSound()));
+        }
+        let request = UNNotificationRequest::requestWithIdentifier_content_trigger(
+            &NSString::from_str(SUMMARY_IDENTIFIER),
+            &content,
+            None,
+        );
+        submit(request)
+    };
+    completion.await
 }
 
 /// Deliver a mail notification carrying `thread_id`, stacked with the other
 /// mail of `account_id`.
-pub fn deliver(
+pub async fn deliver(
+    event_id: &str,
     title: &str,
     body: &str,
     thread_id: &str,
     account_id: &str,
     account_label: &str,
     sound: bool,
-) -> NativeDelivery {
+) -> Result<NativeDelivery, String> {
     if let Some(unavailable) = native_unavailable() {
-        return unavailable;
+        return Ok(unavailable);
     }
 
-    let content = UNMutableNotificationContent::new();
-    content.setTitle(&NSString::from_str(title));
-    content.setBody(&NSString::from_str(body));
-    content.setCategoryIdentifier(&NSString::from_str(CATEGORY_MAIL));
-    // One stack per account, as on Android; per-thread stacks flood the notification centre.
-    content.setThreadIdentifier(&NSString::from_str(&format!("account:{account_id}")));
-    if !account_label.is_empty() {
-        content.setSubtitle(&NSString::from_str(account_label));
-    }
-    if sound {
-        content.setSound(Some(&UNNotificationSound::defaultSound()));
-    }
+    let completion = {
+        let content = UNMutableNotificationContent::new();
+        content.setTitle(&NSString::from_str(title));
+        content.setBody(&NSString::from_str(body));
+        content.setCategoryIdentifier(&NSString::from_str(CATEGORY_MAIL));
+        // One stack per account, as on Android; per-thread stacks flood the notification centre.
+        content.setThreadIdentifier(&NSString::from_str(&format!("account:{account_id}")));
+        if !account_label.is_empty() {
+            content.setSubtitle(&NSString::from_str(account_label));
+        }
+        if sound {
+            content.setSound(Some(&UNNotificationSound::defaultSound()));
+        }
 
-    let keys = [&*NSString::from_str(USER_INFO_THREAD_ID)];
-    let values = [&*NSString::from_str(thread_id)];
-    let user_info: Retained<NSDictionary> =
-        unsafe { Retained::cast_unchecked(NSDictionary::from_slices::<NSString>(&keys, &values)) };
-    // SAFETY: the dictionary holds only property-list types, as the framework
-    // requires for `userInfo`.
-    unsafe { content.setUserInfo(&user_info) };
+        let keys = [&*NSString::from_str(USER_INFO_THREAD_ID)];
+        let values = [&*NSString::from_str(thread_id)];
+        let user_info: Retained<NSDictionary> = unsafe {
+            Retained::cast_unchecked(NSDictionary::from_slices::<NSString>(&keys, &values))
+        };
+        // SAFETY: the dictionary holds only property-list types, as the framework
+        // requires for `userInfo`.
+        unsafe { content.setUserInfo(&user_info) };
 
-    // A fresh identifier per notification: reusing one replaces the notification
-    // already on screen, which would silently swallow a second new mail.
-    let request = UNNotificationRequest::requestWithIdentifier_content_trigger(
-        &NSString::from_str(&uuid::Uuid::new_v4().simple().to_string()),
-        &content,
-        None,
-    );
-    UNUserNotificationCenter::currentNotificationCenter()
-        .addNotificationRequest_withCompletionHandler(&request, None);
-    NativeDelivery::Delivered
+        // Each mail has its own ID. Retrying the same outbox event replaces its banner.
+        let request = UNNotificationRequest::requestWithIdentifier_content_trigger(
+            &NSString::from_str(&format!("satchel-mail:{event_id}")),
+            &content,
+            None,
+        );
+        submit(request)
+    };
+    completion.await
 }
 
 /// Remove every delivered mail notification belonging to one of the threads.

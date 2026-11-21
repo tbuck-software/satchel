@@ -368,11 +368,9 @@ before cutting a release, check that the fork is still current:
 SATCHEL_VENDOR_UPSTREAM_CHECK=1 cargo test -p satchel-core --test vendor_lettre
 ```
 
-The same test runs every Monday in the `Security audit` workflow. Reviewed drift
-through 0.11.23 is temporarily accepted until 2026-11-12 UTC; a later release or
-an expired exception turns the job red. If it fails, `vendor/lettre/SATCHEL_PATCH.md` says what deviates from the registry
-source, how it was verified, and under which upstream fix the fork can go away
-entirely.
+The same test runs every Monday in the `Security audit` workflow and fails when
+crates.io has a newer stable release. See `vendor/lettre/SATCHEL_PATCH.md` for
+the current patch and the conditions for removing the fork.
 
 ## Frontend bundle
 

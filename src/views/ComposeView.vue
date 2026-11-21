@@ -1392,7 +1392,9 @@ async function discardDraft(options: { close?: boolean } = {}) {
   if (discarding.value) return;
   discarding.value = true;
   try {
-    await discardPersistedDraft({ resumeAutosave: options.close === false });
+    if (await discardPersistedDraft({ resumeAutosave: options.close === false })) {
+      toast.info(t('drafts.deletionQueued'));
+    }
     localBackup.clear();
   } catch (err) {
     discarding.value = false;

@@ -3,13 +3,13 @@ use std::sync::Arc;
 use std::{fmt::Debug, time::Duration};
 
 #[cfg(feature = "pool")]
-use super::pool::sync_impl::Pool;
-#[cfg(feature = "pool")]
 use super::PoolConfig;
+#[cfg(feature = "pool")]
+use super::pool::sync_impl::Pool;
 use super::{ClientId, Credentials, Error, Mechanism, Response, SmtpConnection, SmtpInfo};
 #[cfg(any(feature = "native-tls", feature = "rustls", feature = "boring-tls"))]
-use super::{Tls, TlsParameters, SUBMISSIONS_PORT, SUBMISSION_PORT};
-use crate::{address::Envelope, Transport};
+use super::{SUBMISSION_PORT, SUBMISSIONS_PORT, Tls, TlsParameters};
+use crate::{Transport, address::Envelope};
 
 /// Synchronously send emails using the SMTP protocol
 ///
@@ -168,7 +168,7 @@ impl SmtpTransport {
     /// | `smtps` | unset                 | `smtps://user:pass@hostname:port`                  | 465          | SMTP over TLS, recommended method                                                                                                     |
     /// | `smtp`  | `required`            | `smtp://user:pass@hostname:port?tls=required`      | 587          | SMTP with STARTTLS required, when SMTP over TLS is not available                                                                      |
     /// | `smtp`  | `opportunistic`       | `smtp://user:pass@hostname:port?tls=opportunistic` | 587          | SMTP with optionally STARTTLS when supported by the server. Not suitable for production use: vulnerable to a man-in-the-middle attack |
-    /// | `smtp`  | unset                 | `smtp://user:pass@hostname:port`                   | 587          | Always unencrypted SMTP. Not suitable for production use: sends all data unencrypted                                                  |
+    /// | `smtp`  | unset                 | `smtp://user:pass@hostname:port`                   | 25           | Always unencrypted SMTP. Not suitable for production use: sends all data unencrypted                                                  |
     ///
     /// IMPORTANT: some parameters like `user` and `pass` cannot simply
     /// be concatenated to construct the final URL because special characters
@@ -213,8 +213,8 @@ impl SmtpTransport {
     ///
     /// ```rust,no_run
     /// use lettre::{
-    ///     message::header::ContentType, transport::smtp::authentication::Credentials, Message,
-    ///     SmtpTransport, Transport,
+    ///     Message, SmtpTransport, Transport, message::header::ContentType,
+    ///     transport::smtp::authentication::Credentials,
     /// };
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -358,6 +358,23 @@ impl SmtpTransportBuilder {
         self
     }
 
+    /// Allow the server to reject some recipients without failing the send
+    ///
+    /// When set to `true`, recipients rejected by the server (a 4xx or 5xx
+    /// reply to `RCPT`) are skipped and the message is still delivered to the
+    /// accepted recipients. Rejections are logged with `tracing` when the
+    /// `tracing` feature is enabled.
+    ///
+    /// When set to `false` (the default), any recipient rejection fails the
+    /// whole send, as before.
+    ///
+    /// Either way transport and protocol errors remain fatal, and an envelope
+    /// with no accepted recipient still fails without sending any message data.
+    pub fn allow_partial_recipients(mut self, allow: bool) -> Self {
+        self.info.allow_partial_recipients = allow;
+        self
+    }
+
     /// Build the transport
     ///
     /// If the `pool` feature is enabled, an `Arc` wrapped pool is created.
@@ -401,10 +418,8 @@ impl SmtpClient {
 
         #[cfg(any(feature = "native-tls", feature = "rustls", feature = "boring-tls"))]
         match &self.info.tls {
-            Tls::Opportunistic(tls_parameters) => {
-                if conn.can_starttls() {
-                    conn.starttls(tls_parameters, &self.info.hello_name)?;
-                }
+            Tls::Opportunistic(tls_parameters) if conn.can_starttls() => {
+                conn.starttls(tls_parameters, &self.info.hello_name)?;
             }
             Tls::Required(tls_parameters) => {
                 conn.starttls(tls_parameters, &self.info.hello_name)?;
@@ -415,6 +430,7 @@ impl SmtpClient {
         if let Some(credentials) = &self.info.credentials {
             conn.auth(&self.info.authentication, credentials)?;
         }
+        conn.set_allow_partial_recipients(self.info.allow_partial_recipients);
         Ok(conn)
     }
 }
@@ -422,8 +438,8 @@ impl SmtpClient {
 #[cfg(test)]
 mod tests {
     use crate::{
-        transport::smtp::{authentication::Credentials, client::Tls},
         SmtpTransport,
+        transport::smtp::{authentication::Credentials, client::Tls},
     };
 
     #[test]

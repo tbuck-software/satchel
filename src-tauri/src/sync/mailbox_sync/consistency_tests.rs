@@ -2460,9 +2460,8 @@ async fn gmail_failing_owed_lookups_are_capped_and_reported_once() {
         gmail_account(&pool).await;
         assert_eq!(ingest(&pool, delivery("X")).await.ingested, 1);
         let mut inbox_polls = 0;
-        // One Inbox poll: the lookups it made. Run 1 lists INBOX for the
-        // snapshot, run 2 once more for the backfill that expired history
-        // restarts; after that, nothing.
+        // The expiry poll lists INBOX twice: once for reconciliation and once
+        // to restart the backfill. Retrying an owed ID must never relist it.
         let mut inbox_poll = || {
             inbox_polls += 1;
             let run = inbox_polls;
@@ -2470,7 +2469,11 @@ async fn gmail_failing_owed_lookups_are_capped_and_reported_once() {
             async move {
                 requests.lock().unwrap().clear();
                 let summary = poll(&pool, FolderSelection::Inbox).await;
-                assert_eq!(listings(&requests), usize::from(run <= 2), "{status}");
+                assert_eq!(
+                    listings(&requests),
+                    if run == 1 { 2 } else { 0 },
+                    "{status}"
+                );
                 assert!(held_reports(&summary).is_empty(), "{status}: run {run}");
                 assert_eq!(
                     sqlx::query_scalar::<_, String>("SELECT sync_status FROM accounts")

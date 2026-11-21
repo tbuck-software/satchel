@@ -329,11 +329,16 @@ export function createThreadPersistence({
    * A move a later batch stopped filed only `applied`: the rest goes back
    * into the list, as if the backend had refused it.
    */
-  function keepRemoved(rollback: () => void, receipt: BackendTrashReceipt) {
+  function keepRemoved(
+    rollback: () => void,
+    receipt: BackendTrashReceipt,
+    requested: readonly string[],
+  ) {
     const stopped = receipt.stopped_early;
-    if (!stopped) return;
+    const queued = new Set(receipt.queued_deletions);
+    if (!stopped && queued.size === 0) return;
     rollback();
-    removeOptimistically(new Set(stopped.applied));
+    removeOptimistically(new Set((stopped?.applied ?? requested).filter((id) => !queued.has(id))));
   }
 
   async function setPriority(threadId: string, priority: Thread['priority']) {
@@ -448,7 +453,7 @@ export function createThreadPersistence({
       const rollback = removeOptimistically(targets);
       try {
         const filed = await backendMarkThreadsSpam(normalized);
-        keepRemoved(rollback, filed);
+        keepRemoved(rollback, filed, normalized);
         return filed;
       } catch (error) {
         if (!backendCommandsAvailable()) return empty;
@@ -589,7 +594,7 @@ export function createThreadPersistence({
       rollback();
       throw error;
     }
-    keepRemoved(rollback, receipt);
+    keepRemoved(rollback, receipt, normalized);
     const stopped = receipt.stopped_early;
     if (stopped) {
       // A sender none of whose mail moved stays in the new-sender stack.

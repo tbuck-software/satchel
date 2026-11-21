@@ -122,7 +122,9 @@ async fn an_interrupted_staging_copy_must_not_replace_the_live_database() {
         b"SQLite format 3\0",
     )
     .unwrap();
-    satchel_core::db::apply_pending_restore(profile.path()).unwrap();
+    satchel_core::db::apply_pending_restore(profile.path())
+        .await
+        .unwrap();
     assert_eq!(
         std::fs::metadata(&live).unwrap().len(),
         original.len() as u64,

@@ -4,12 +4,14 @@ import { defineComponent, nextTick, reactive } from 'vue';
 import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BackendOutboxItem } from '@/types/outbox';
+import { useConfirm } from '@/composables/useConfirm';
 
 type OutboxHarness = {
   items: BackendOutboxItem[];
   loading: boolean;
   error: string | null;
   load: ReturnType<typeof vi.fn>;
+  restoreDraft: ReturnType<typeof vi.fn>;
   retry: ReturnType<typeof vi.fn>;
   cancel: ReturnType<typeof vi.fn>;
 };
@@ -23,6 +25,8 @@ const harness = vi.hoisted(() => ({
   ui: null as UiHarness | null,
   outbox: null as OutboxHarness | null,
   composerOpen: vi.fn(),
+  composerOpenDraft: vi.fn(),
+  restoreDraft: vi.fn(),
   toast: {
     success: vi.fn(),
     info: vi.fn(),
@@ -37,7 +41,7 @@ vi.mock('@/stores/outbox', () => ({
 }));
 
 vi.mock('@/stores/composer', () => ({
-  useComposerStore: () => ({ open: harness.composerOpen }),
+  useComposerStore: () => ({ open: harness.composerOpen, openDraft: harness.composerOpenDraft }),
 }));
 
 vi.mock('@/composables/useToast', () => ({
@@ -175,6 +179,7 @@ function resetHarness(items: BackendOutboxItem[] = []) {
     registerBackNavigation: vi.fn((_entry: { isOpen: () => boolean; dismiss: () => void }) => vi.fn()),
   });
   harness.outbox = reactive({
+    restoreDraft: harness.restoreDraft,
     items,
     loading: false,
     error: null,
@@ -183,6 +188,8 @@ function resetHarness(items: BackendOutboxItem[] = []) {
     cancel: vi.fn().mockResolvedValue(undefined),
   });
   harness.composerOpen.mockReset();
+  harness.composerOpenDraft.mockReset();
+  harness.restoreDraft.mockReset();
   harness.toast.success.mockReset();
   harness.toast.info.mockReset();
   harness.toast.error.mockReset();
@@ -190,6 +197,7 @@ function resetHarness(items: BackendOutboxItem[] = []) {
 
 describe('OutboxView', () => {
   beforeEach(() => {
+    useConfirm().answer(false);
     resetHarness();
   });
 
@@ -343,6 +351,36 @@ describe('OutboxView', () => {
     expect(harness.outbox!.cancel).toHaveBeenCalledWith('delete');
   });
 
+  it('requires explicit confirmation to discard a held Sent copy and shows its prior failure', async () => {
+    harness.outbox!.items = [makeItem({
+      id: 'held-copy',
+      action_type: 'remote_mutation',
+      mutation_kind: 'append_sent',
+      status: 'failed',
+      last_error: 'backend.errors.sentCopyHeldAfterRestore',
+      pre_restore_error: 'Sent folder missing',
+    })];
+    const wrapper = render();
+    const confirm = useConfirm();
+    const detailDiscard = wrapper.findAll('.detail__actions .app-button').find((button) => button.text() === 'Discard')!;
+    const rowDiscard = wrapper.findAll('.row__fix .app-button').find((button) => button.text() === 'Discard')!;
+    expect(wrapper.get('.detail').text()).toContain('Sent folder missing');
+
+    await detailDiscard.trigger('click');
+    expect(confirm.state.pending?.body).toContain('the only copy');
+    expect(confirm.state.pending?.tone).toBe('danger');
+    expect(harness.outbox!.cancel).not.toHaveBeenCalled();
+    confirm.answer(false);
+    await flushPromises();
+    expect(harness.outbox!.cancel).not.toHaveBeenCalled();
+
+    await rowDiscard.trigger('click');
+    expect(confirm.state.pending?.body).toContain('permanently deletes');
+    confirm.answer(true);
+    await flushPromises();
+    expect(harness.outbox!.cancel).toHaveBeenCalledExactlyOnceWith('held-copy');
+  });
+
   it('retries a failed item once at a time and confirms success', async () => {
     harness.outbox!.items = [makeItem({ id: 'failed', status: 'failed', last_error: 'timeout' })];
     let resolveRetry!: () => void;
@@ -393,6 +431,25 @@ describe('OutboxView', () => {
 
     expect(harness.toast.error).toHaveBeenCalledWith('Could not discard it: Error: offline');
     expect(discardButton.attributes('disabled')).toBeUndefined();
+  });
+
+  it('reopens the full snapshot of a send held after restore', async () => {
+    harness.outbox!.items = [makeItem({
+      id: 'held',
+      status: 'failed',
+      last_error: 'backend.errors.outgoingSendHeldAfterRestore',
+      attachments: [{ filename: 'offer.pdf', mime_type: 'application/pdf', size: 12 }],
+    })];
+    harness.restoreDraft.mockResolvedValue({ id: 'restored-draft' });
+    const wrapper = render();
+
+    await wrapper.get('[data-test="outbox-open-as-draft"]').trigger('click');
+    await flushPromises();
+
+    expect(harness.restoreDraft).toHaveBeenCalledWith('held');
+    expect(harness.composerOpenDraft).toHaveBeenCalledWith('restored-draft');
+    expect(harness.composerOpen).not.toHaveBeenCalled();
+    expect(harness.outbox!.retry).not.toHaveBeenCalled();
   });
 
   it('rescues the text of an ambiguous mail into the composer', async () => {

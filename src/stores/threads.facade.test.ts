@@ -15,7 +15,7 @@ import { collidingKeys, type Overlap } from './threads/surface';
 const STORE_KEYS = [
   'activeContact', 'activeContactEmail', 'activeSimilarGroup', 'activeSimilarGroupId',
   'activeSmartBucket', 'activeSmartBucketId', 'activeThread', 'activeThreadId',
-  'allContactSummaries', 'applyWorkflowStates', 'beginThreadLeave',
+  'adoptListedThreads', 'allContactSummaries', 'applyWorkflowStates', 'beginThreadLeave',
   'categoryFilter', 'clearSelection', 'closeSimilarGroup', 'closeSmartBucket',
   'contactSummaries', 'deselectThreads', 'discardThread', 'endThreadLeave', 'ensureThreadLoaded', 'find',
   'focusNeighborThread', 'frequentContactSummaries', 'getSenderPreference', 'hasPreviousThreads', 'hasMoreThreads', 'leavingThreadIds',

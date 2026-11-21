@@ -30,6 +30,8 @@ export interface ThreadSelectionSurface {
    * loaded is taken in when selected, so the actions find it.
    */
   setSelectionList(rows: readonly Thread[] | null): void;
+  /** Make off-page rows from the current overlay list available to actions. */
+  adoptListedThreads(threadIds: readonly string[]): string[];
   focusNeighborThread(threadId: string): void;
   nextThread(): void;
   prevThread(): void;
@@ -108,7 +110,7 @@ export function createThreadSelection({
   }
 
   /** Rows of the drawn list the store does not hold yet join it. */
-  function adoptListed(threadIds: readonly string[]): string[] {
+  function adoptListedThreads(threadIds: readonly string[]): string[] {
     const rows = selectionList.value;
     if (!rows) return threadIds.filter((id) => Boolean(find(id)));
     const listed = new Map(rows.map((thread) => [thread.id, thread]));
@@ -166,7 +168,7 @@ export function createThreadSelection({
   }
 
   function setSelection(threadIds: string[]) {
-    selectedThreadIds.value = adoptListed(Array.from(new Set(threadIds)));
+    selectedThreadIds.value = adoptListedThreads(Array.from(new Set(threadIds)));
   }
 
   function selectAllVisibleThreads() {
@@ -180,7 +182,7 @@ export function createThreadSelection({
       selectedThreadIds.value = selectedThreadIds.value.filter((id) => id !== threadId);
       return;
     }
-    adoptListed([threadId]);
+    adoptListedThreads([threadId]);
     selectedThreadIds.value = [...selectedThreadIds.value, threadId];
   }
 
@@ -322,6 +324,7 @@ export function createThreadSelection({
       selectFromInteraction,
       toggleSelectionForThread,
       setSelectionList,
+      adoptListedThreads,
       focusNeighborThread,
       nextThread,
       prevThread,

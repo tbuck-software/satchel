@@ -1,134 +1,168 @@
-//! Provider rate-limit blocks that outlive the process.
-//!
-//! The pacer that enforces a block lives in the provider, next to the request
-//! it has to hold back, and has no database of its own. Persistence therefore
-//! lives here, in the sync layer, which owns the pool and brackets every piece
-//! of provider work: [`restore`] runs once at startup before any worker can
-//! issue a request, [`persist`] after work that may have earned a block.
-//!
-//! Forgetting a block is not a cosmetic loss. Gmail measures on a moving
-//! window, so a request sent while a block is still running renews it — an app
-//! that forgets on restart re-earns the penalty every launch instead of ever
-//! waiting one out.
+//! Provider rate-limit blocks shared across app restarts and Android processes.
 
-use sqlx::SqlitePool;
+use chrono::{DateTime, Utc};
+use sqlx::{SqliteConnection, SqlitePool};
 
 use crate::providers::gmail;
 
 const GMAIL_BLOCK_UNTIL: &str = "gmail_rate_limit_block_until";
 const GMAIL_BLOCK_STREAK: &str = "gmail_rate_limit_block_streak";
 
-async fn read_setting(pool: &SqlitePool, key: &str) -> Option<String> {
-    sqlx::query_scalar::<_, String>("SELECT value FROM app_settings WHERE key = ?")
-        .bind(key)
-        .fetch_optional(pool)
-        .await
-        .ok()
-        .flatten()
-}
-
-async fn write_setting(pool: &SqlitePool, key: &str, value: &str) {
-    let _ = sqlx::query(
-        "INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+async fn stored_block(db: &mut SqliteConnection) -> Result<(Option<String>, u32), sqlx::Error> {
+    let (until, streak): (Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT (SELECT value FROM app_settings WHERE key = ?),
+                (SELECT value FROM app_settings WHERE key = ?)",
     )
-    .bind(key)
-    .bind(value)
-    .bind(chrono::Utc::now().to_rfc3339())
-    .execute(pool)
-    .await;
-}
-
-/// Put back whatever is left of the block the last run recorded.
-pub async fn restore(pool: &SqlitePool) {
-    let Some(until) = read_setting(pool, GMAIL_BLOCK_UNTIL).await else {
-        return;
-    };
-    let streak = read_setting(pool, GMAIL_BLOCK_STREAK)
-        .await
-        .and_then(|value| value.trim().parse::<u32>().ok())
+    .bind(GMAIL_BLOCK_UNTIL)
+    .bind(GMAIL_BLOCK_STREAK)
+    .fetch_one(db)
+    .await?;
+    let streak = streak
+        .and_then(|value| value.trim().parse().ok())
         .unwrap_or(1);
-    let Some(remaining) = chrono::DateTime::parse_from_rfc3339(until.trim())
-        .ok()
-        .map(|until| until.signed_duration_since(chrono::Utc::now()))
-        .and_then(|delta| delta.to_std().ok())
-    else {
-        return;
-    };
-    gmail::restore_block(remaining, streak).await;
+    Ok((until, streak))
 }
 
-/// Record the current block, or clear the stored one once it has lapsed.
-///
-/// Cheap enough to call after every sync run: two upserts at most, and only
-/// when the state actually differs from what is on disk.
-pub async fn persist(pool: &SqlitePool) {
-    let stored = read_setting(pool, GMAIL_BLOCK_UNTIL).await;
-    match gmail::block_snapshot().await {
-        Some((remaining, streak)) => {
-            let until = chrono::Utc::now()
-                + chrono::Duration::from_std(remaining)
-                    .unwrap_or_else(|_| chrono::Duration::zero());
-            write_setting(pool, GMAIL_BLOCK_UNTIL, &until.to_rfc3339()).await;
-            write_setting(pool, GMAIL_BLOCK_STREAK, &streak.to_string()).await;
-        }
-        // Leaving a lapsed deadline behind would be harmless but confusing in
-        // the settings table, and a stale streak would make the next block
-        // start halfway up the escalation ladder.
-        None if stored.is_some() => {
-            write_setting(pool, GMAIL_BLOCK_UNTIL, "").await;
-            write_setting(pool, GMAIL_BLOCK_STREAK, "0").await;
-        }
-        None => {}
+fn parse_until(value: &str) -> Option<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(value.trim())
+        .ok()
+        .map(|until| until.to_utc())
+}
+
+/// Merge an active block before issuing provider requests.
+pub async fn restore(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    let mut db = pool.acquire().await?;
+    let (until, streak) = stored_block(&mut db).await?;
+    drop(db);
+    if let Some(remaining) = until
+        .as_deref()
+        .and_then(parse_until)
+        .and_then(|until| (until - Utc::now()).to_std().ok())
+    {
+        gmail::restore_block(remaining, streak).await;
     }
+    Ok(())
+}
+
+/// Persist local state without shortening or clearing another process's active block.
+pub async fn persist(pool: &SqlitePool) {
+    let sampled_at = Utc::now();
+    let local = gmail::block_snapshot()
+        .await
+        .and_then(|(remaining, streak)| {
+            let until =
+                sampled_at.checked_add_signed(chrono::Duration::from_std(remaining).ok()?)?;
+            Some((until, streak))
+        });
+    if let Err(error) = persist_snapshot(pool, local).await {
+        tracing::warn!(%error, "could not persist Gmail rate limit");
+    }
+}
+
+async fn persist_snapshot(
+    pool: &SqlitePool,
+    local: Option<(DateTime<Utc>, u32)>,
+) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let (stored_until, stored_streak) = stored_block(&mut tx).await?;
+    let now = Utc::now();
+    let active = stored_until
+        .as_deref()
+        .and_then(parse_until)
+        .filter(|until| *until > now);
+    let local = local.filter(|(until, _)| *until > now);
+    let (until, streak) = match (local, active) {
+        (Some((until, streak)), Some(stored)) => {
+            (until.max(stored).to_rfc3339(), streak.max(stored_streak))
+        }
+        (Some((until, streak)), None) => (until.to_rfc3339(), streak),
+        (None, None)
+            if stored_until
+                .as_deref()
+                .is_some_and(|until| !until.is_empty()) =>
+        {
+            (String::new(), 0)
+        }
+        (None, _) => return tx.commit().await,
+    };
+    if stored_until.as_deref() != Some(&until) || stored_streak != streak {
+        sqlx::query(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?), (?, ?, ?)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+        )
+        .bind(GMAIL_BLOCK_UNTIL)
+        .bind(until)
+        .bind(now.to_rfc3339())
+        .bind(GMAIL_BLOCK_STREAK)
+        .bind(streak.to_string())
+        .bind(now.to_rfc3339())
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use sqlx::sqlite::SqlitePoolOptions;
+    use std::time::Duration;
 
-    /// The round trip a restart makes: a block recorded by one run has to be
-    /// back in force in the next, streak included, so the escalation continues
-    /// instead of starting over at the server's shortest figure.
-    #[tokio::test]
-    async fn a_block_survives_a_restart() {
+    async fn pool() -> SqlitePool {
         let pool = SqlitePoolOptions::new()
-            .max_connections(1)
+            .max_connections(2)
             .connect("sqlite::memory:")
             .await
-            .expect("pool");
+            .unwrap();
         sqlx::migrate!("./src/db/migrations")
             .run(&pool)
             .await
-            .expect("migrations");
+            .unwrap();
+        pool
+    }
 
-        gmail::restore_block(std::time::Duration::from_secs(900), 3).await;
-        persist(&pool).await;
-        let stored = read_setting(&pool, GMAIL_BLOCK_UNTIL)
+    #[tokio::test]
+    async fn a_block_survives_a_restart_and_older_snapshots_cannot_shorten_it() {
+        let pool = pool().await;
+        let now = Utc::now();
+        let deadline = now + chrono::Duration::minutes(15);
+        persist_snapshot(&pool, Some((deadline, 3))).await.unwrap();
+        persist_snapshot(&pool, Some((now + chrono::Duration::minutes(5), 1)))
             .await
-            .expect("deadline stored");
-        assert!(chrono::DateTime::parse_from_rfc3339(stored.trim()).is_ok());
-        assert_eq!(
-            read_setting(&pool, GMAIL_BLOCK_STREAK).await.as_deref(),
-            Some("3")
-        );
+            .unwrap();
+        persist_snapshot(&pool, None).await.unwrap();
 
-        // A fresh process starts with an empty pacer.
         gmail::clear_block_for_test().await;
-        assert!(gmail::block_snapshot().await.is_none());
-
-        restore(&pool).await;
-        let (remaining, streak) = gmail::block_snapshot().await.expect("block back in force");
-        assert!(remaining > std::time::Duration::from_secs(880));
+        restore(&pool).await.unwrap();
+        gmail::restore_block(Duration::from_secs(30), 1).await;
+        let (remaining, streak) = gmail::block_snapshot().await.unwrap();
+        assert!(remaining > Duration::from_secs(880));
         assert_eq!(streak, 3);
-
+        assert!(gmail::as_background(gmail::await_quota(
+            1.0,
+            gmail::Priority::Background,
+            "labels.list"
+        ))
+        .await
+        .unwrap_err()
+        .is_rate_limited());
         gmail::clear_block_for_test().await;
-        persist(&pool).await;
+    }
+
+    #[tokio::test]
+    async fn an_expired_block_can_be_cleared() {
+        let pool = pool().await;
+        sqlx::query("INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, '')")
+            .bind(GMAIL_BLOCK_UNTIL)
+            .bind("2000-01-01T00:00:00Z")
+            .execute(&pool)
+            .await
+            .unwrap();
+        persist_snapshot(&pool, None).await.unwrap();
+        let mut db = pool.acquire().await.unwrap();
         assert_eq!(
-            read_setting(&pool, GMAIL_BLOCK_UNTIL).await.as_deref(),
-            Some(""),
-            "a lapsed block is cleared, not left to be restored again"
+            stored_block(&mut db).await.unwrap(),
+            (Some(String::new()), 0)
         );
     }
 }

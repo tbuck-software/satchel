@@ -19,6 +19,7 @@ const FOCUSABLE = [
   'input:not([disabled])',
   'select:not([disabled])',
   'textarea:not([disabled])',
+  'details > summary:first-of-type',
   '[contenteditable]:not([contenteditable="false"])',
   '[tabindex]:not([tabindex="-1"])',
 ].join(', ');
@@ -64,9 +65,10 @@ export function useFocusTrap(
         if (element.hasAttribute('tabindex') && element.tabIndex < 0) return false;
         const visibility = getComputedStyle(element).visibility;
         if (visibility === 'hidden' || visibility === 'collapse') return false;
-        // Layout geometry is unavailable in detached/test documents; inspect
-        // ancestors so controls inside v-show panels are excluded as well.
+        // Check ancestors for hidden panels and collapsed disclosures.
         for (let parent: HTMLElement | null = element; parent; parent = parent.parentElement) {
+          if (parent.matches('details:not([open])') && parent !== element
+            && !parent.querySelector(':scope > summary')?.contains(element)) return false;
           const style = getComputedStyle(parent);
           if (style.display === 'none' || style.contentVisibility === 'hidden') return false;
         }

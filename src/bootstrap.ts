@@ -657,6 +657,13 @@ export function useAppBootstrap(): void {
       };
     const registrations: { name: string; register: () => Promise<Disposer> }[] = [
       {
+        name: 'drafts:changed',
+        register: () => listen('drafts:changed', bufferStartupEvent(() => {
+          void draftsStore.load();
+          requestMailRefresh();
+        })),
+      },
+      {
         name: 'outbox:undo-window',
         register: () => listen<{
           queued_id: string;

@@ -515,10 +515,14 @@ mod tests {
         assert_eq!(folder, "inbox");
     }
     #[tokio::test]
-    async fn permanent_delete_returns_no_undo_capability() {
+    async fn imap_permanent_delete_waits_for_confirmation_and_retains_failures() {
         let pool = pool("imap").await;
         let queue = SyncQueue::new();
-        sqlx::query("UPDATE messages SET folder_id = 'trash'")
+        sqlx::query("UPDATE folders SET uidvalidity = 7 WHERE id = 'trash'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE messages SET folder_id = 'trash', remote_uidvalidity = 7")
             .execute(&pool)
             .await
             .unwrap();
@@ -527,14 +531,71 @@ mod tests {
             .expect("permanent delete");
         assert!(receipt.undo_token.is_none());
         assert!(receipt.undo_thread_ids.is_empty());
-        assert_eq!(receipt.permanently_deleted, ["thread"]);
+        assert!(receipt.permanently_deleted.is_empty());
+        assert_eq!(receipt.queued_deletions, ["thread"]);
         assert_eq!(
             sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM messages")
                 .fetch_one(&pool)
                 .await
                 .unwrap(),
-            0
+            1
         );
+        let action = queue.claim_next(&pool).await.unwrap().unwrap();
+        let key = crate::sync::errors::IMAP_UID_EXPUNGE_UNSUPPORTED;
+        crate::sync::worker::settle_action(
+            &pool,
+            &queue,
+            &action,
+            Err(crate::sync::errors::SyncError::Permanent(key.into())),
+        )
+        .await
+        .unwrap();
+        assert!(
+            !super::super::trash_threads(&pool, &queue, &["thread".into()])
+                .await
+                .unwrap()
+                .queued_deletions
+                .is_empty()
+        );
+        assert!(queue.claim_next(&pool).await.unwrap().is_none());
+        assert_eq!(
+            queue.list_failed_sync_actions(&pool).await.unwrap()[0]
+                .last_error
+                .as_deref(),
+            Some(key)
+        );
+        let retained: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM messages WHERE id = 'message')")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(retained);
+
+        let super::RemoteMutationPayload::Delete { refs } =
+            serde_json::from_value(action.payload).unwrap()
+        else {
+            panic!("expected queued delete");
+        };
+        let mut stale = refs.clone();
+        stale[0].source_uidvalidity = Some(6);
+        crate::sync::folder_reconcile::reconcile_confirmed_imap_delete(&pool, "acc", &stale)
+            .await
+            .unwrap();
+        assert!(sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM messages WHERE id = 'message')"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap());
+        crate::sync::folder_reconcile::reconcile_confirmed_imap_delete(&pool, "acc", &refs)
+            .await
+            .unwrap();
+        assert!(!sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM messages WHERE id = 'message')"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap());
     }
     #[tokio::test]
     async fn mixed_batch_undo_never_cancels_a_permanent_provider_delete() {
@@ -547,7 +608,7 @@ mod tests {
                 .await
                 .expect("mixed trash");
         assert_eq!(receipt.undo_thread_ids, ["thread"]);
-        assert_eq!(receipt.permanently_deleted, ["permanent"]);
+        assert_eq!(receipt.queued_deletions, ["permanent"]);
         undo_trash(&pool, &queue, receipt.undo_token.as_deref().unwrap())
             .await
             .expect("partial undo");
@@ -555,6 +616,47 @@ mod tests {
         assert_eq!(remaining.payload["kind"], "delete");
         assert_eq!(remaining.payload["refs"][0]["remote_id"], "84");
         assert_restored(&pool).await;
+    }
+
+    #[tokio::test]
+    async fn imap_failed_filing_rolls_back_pending_folder_and_keeps_the_failure() {
+        use crate::sync::{
+            errors::*,
+            worker::{settle_action, Outcome},
+        };
+
+        for key in [IMAP_UID_EXPUNGE_UNSUPPORTED, IMAP_MOVE_COPY_NEEDS_REVIEW] {
+            let pool = pool("imap").await;
+            let queue = SyncQueue::new();
+            trash(&pool, &queue).await;
+            let action = queue.claim_next(&pool).await.unwrap().unwrap();
+            assert_eq!(action.payload["kind"], "workflow_move");
+            let outcome = settle_action(
+                &pool,
+                &queue,
+                &action,
+                Err(SyncError::Permanent(key.into())),
+            )
+            .await
+            .unwrap();
+            assert!(matches!(outcome, Outcome::Failed { error } if error == key));
+            let folder: (String, Option<String>) = sqlx::query_as(
+                "SELECT folder_id, pending_folder_id FROM messages WHERE id = 'message'",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            assert_eq!(folder, ("inbox".into(), None));
+            assert_restored(&pool).await;
+            let failed = queue.list_failed_sync_actions(&pool).await.unwrap();
+            assert_eq!(failed[0].last_error.as_deref(), Some(key));
+            if key == IMAP_MOVE_COPY_NEEDS_REVIEW {
+                assert!(!queue
+                    .requeue_failed_sync_action(&pool, &action.id)
+                    .await
+                    .unwrap());
+            }
+        }
     }
 
     #[tokio::test]

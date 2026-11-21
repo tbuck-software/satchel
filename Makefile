@@ -1,4 +1,6 @@
-.PHONY: nightly stable help check icons dev dev-android dev-ios daily install install-android install-all all _install-android-after-mac release import-daily-data render-fidelity
+PYTHON ?= python3
+
+.PHONY: nightly stable help check test-push-device icons dev dev-android dev-ios daily install install-android install-all all _install-android-after-mac release import-daily-data render-fidelity
 
 help:
 	@printf '%s\n' \
@@ -15,11 +17,21 @@ help:
 		'  make dev          Run the desktop app with hot reload' \
 		'  make dev-android  Run the Android app with hot reload' \
 		'  make dev-ios      Run the iOS app with hot reload' \
-		'  make check    Run frontend and Rust tests' \
+		'  make check    Run frontend, Rust, and push-device tests' \
+		'  make test-push-device    Run push-device tests in a temporary Python environment' \
 		'  make icons    Render every app, tray, notification and web icon from public/branding'
 
-check:
+check: test-push-device
 	pnpm run check
+
+test-push-device:
+	@set -eu; \
+	venv=$$(mktemp -d); \
+	trap 'rm -rf "$$venv"' EXIT; \
+	$(PYTHON) -m venv "$$venv"; \
+	"$$venv/bin/python" -m pip --disable-pip-version-check install --quiet \
+		--require-hashes --only-binary=:all: -r tooling/push-device/requirements-test.txt; \
+	"$$venv/bin/python" -B -m unittest discover -v -s tooling/push-device
 
 icons:
 	pnpm run icons

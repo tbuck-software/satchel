@@ -1,113 +1,49 @@
 # Satchel lettre patches
 
-Satchel vendors Lettre 0.11.19 because its `rustls-platform-verifier` feature calls
-`Verifier::new_with_extra_roots` on Android, while that API is intentionally not
-available for Android's TrustManager-backed verifier.
+Satchel vendors Lettre 0.11.24. On 2026-11-21 the
+[crates.io API](https://crates.io/api/v1/crates/lettre) reported 0.11.24 as the
+latest stable release. The published archive has SHA-256
+`f294f3d7cdb313e578acef7d7727d4e8d897e0fcd0d6d58c19959cec95073f19`
+and names commit `a410c3949488b348b48ea82a63a83f970c56515d`.
 
-The local patch uses `Verifier::new` when the extra-root list is empty (Lettre's
-default path) and fails closed when custom SMTP roots are requested. Remove this
-vendor override once upstream Lettre provides an Android-compatible path.
+The previous 0.11.19 vendor source and manifest differed from the registry
+archive in the eight documented files. The 0.11.24 release replaces the local
+Android TLS patch and the response-limit backport. It also fixes STARTTLS reply
+handling, SMTP dot-stuffing, address parsing and other issues documented in the
+[release notes](https://github.com/lettre/lettre/releases/tag/v0.11.24).
+The dated exception for release drift has been removed. The weekly check in
+`crates/satchel-core/tests/vendor_lettre.rs` fails when crates.io has a newer
+stable release.
 
-## Upstream condition
+## Android TLS
 
-The missing piece is upstream of Lettre:
-[rustls/rustls-platform-verifier#58](https://github.com/rustls/rustls-platform-verifier/issues/58)
-— `new_with_extra_roots` exists for Apple and Windows, and the issue records that
-Android needs a `TrustManager` that combines certificates before it can follow.
-Once that lands and Lettre picks it up, this fork has no reason to exist:
-port the SMTP keepalive settings to an upstream socket option, then delete
-`vendor/lettre`, drop the `[patch.crates-io]` entry in the root
-`Cargo.toml`, and let the registry version back in.
+[Lettre #1178](https://github.com/lettre/lettre/pull/1178) uses
+`Verifier::new` with no custom roots and rejects custom roots on Android.
+The [verifier's Android implementation](https://github.com/rustls/rustls-platform-verifier/blob/252e25161a91af476cbea620e29d277592d27ec7/rustls-platform-verifier/src/verification/android.rs)
+still lacks `new_with_extra_roots`. Support for combining custom and system
+roots is tracked in [rustls/rustls-platform-verifier#58](https://github.com/rustls/rustls-platform-verifier/issues/58).
 
-## What deviates from the registry release
+The vendored manifest accepts verifier 0.6.2 so SMTP shares the same verifier
+as IMAP/POP and the JNI initialization in the Android app and notification
+worker. The upstream Lettre code uses constructors available in 0.6.2.
+[Verifier 0.7.1](https://github.com/rustls/rustls-platform-verifier/blob/252e25161a91af476cbea620e29d277592d27ec7/rustls-platform-verifier/Cargo.toml)
+uses JNI 0.22 and Android Maven artifact 0.2.0.
+Satchel's current initialization uses JNI 0.21 and artifact 0.1.1. Moving all
+callers to 0.7 together requires checking both Android processes on a device.
 
-Verified 2026-10-12 against the crates.io source of 0.11.19, with the response cap backported from [upstream PR #1143](https://github.com/lettre/lettre/pull/1143):
+## Local changes against the registry archive
 
-```sh
-curl -sSL -o lettre.crate https://static.crates.io/crates/lettre/lettre-0.11.19.crate
-tar xzf lettre.crate
-diff -r -q lettre-0.11.19 vendor/lettre
-```
-
-Eight files deviate, all deliberately (six in the table, plus the two keepalive files below):
-
-| File | Deviation |
+| File | Change |
 |---|---|
-| `src/transport/smtp/client/tls.rs` | The Android patch described above: the `new_with_extra_roots` branch is gated `not(target_os = "android")`, and a second `target_os = "android"` branch uses `Verifier::new` for the empty-root case and refuses custom roots. |
-| `Cargo.toml` | `[lints.rust] dead_code = "allow"`, so the fork's feature-gated dead code (`SpawnHandle::shutdown`, `Kind::TransportShutdown`, `transport_shutdown`) does not surface as three warnings in every build. The items exist upstream too; Satchel builds without the feature combination that uses them. |
-| `src/transport/smtp/error.rs` | `Error::is_connection()` and `Error::is_network()`, two predicates over the existing `Kind`. Upstream exposes `is_response`, `is_client`, `is_transient`, `is_permanent`, `is_tls` and `is_transport_shutdown`, but not these two, so "could not reach the server" is indistinguishable from "the connection died while carrying a message". Satchel needs the difference: the first is safe to retry, the second may have delivered the mail (see `sync::errors::smtp_submission_failure`). Additive and upstreamable. |
-| `src/transport/smtp/client/mod.rs` | The upstream response limits: 1,000 bytes per line and 100,000 bytes per complete reply. |
-| `src/transport/smtp/client/connection.rs` | Upstream #1143 rejects oversized lines and continuation replies before parsing in the synchronous reader. Each read is additionally limited to 1,001 bytes, so an unterminated line cannot bypass the cap. |
-| `src/transport/smtp/client/async_connection.rs` | The same reply limits and bounded reads in the asynchronous reader. |
+| `Cargo.toml` | Accept platform verifier 0.6.2 and allow dead code in disabled feature combinations. |
+| `src/transport/smtp/error.rs` | Expose `is_connection` and `is_network` so Satchel can distinguish a failed connection from a potentially delivered message. |
+| `src/transport/smtp/client/net.rs` and `src/transport/smtp/client/async_net.rs` | Set TCP keepalive before TLS, with a 60-second idle delay and 15-second probe interval. |
 
-The synchronous and Tokio SMTP connection paths also enable TCP keepalive
-with a 60-second idle delay and 15-second probe interval. Lettre's transport
-builder does not expose socket keepalive, so Satchel sets it before TLS in
-`src/transport/smtp/client/net.rs` and `async_net.rs`.
+The rest of the source matches the published archive. In particular, both
+SMTP readers use upstream's 100,000-byte total reply limit, including for
+unterminated lines. `crates/satchel-core/tests/smtp_response_caps.rs` exercises
+both readers over TCP.
 
-Nothing else in `src/` differs. The vendor tree carries source only — the
-release archive's `tests/`, `benches/`, `examples/`, `docs/`, CI configuration
-and changelog are not vendored, which `diff -r -q` reports as "Only in
-lettre-0.11.19".
-
-## Reviewed upstream drift as of 2026-10-12
-
-The check below found 0.11.23 released while this fork sits on 0.11.19 — the
-ageing this whole file exists to prevent. What Satchel is missing, read off
-upstream's changelog:
-
-| Release | Change | Reaches Satchel's build? |
-|---|---|---|
-| 0.11.20 | Email address parsing rewritten from `chumsky` to `nom` (#1099) | Yes — `builder` is enabled |
-| 0.11.20 | `Address::new_dangerous`; MSRV 1.85, Rust 2024 edition | Toolchain is 1.97, so no obstacle |
-| 0.11.21 | `rustls-no-provider`, `message_iter` on connections | Additive |
-| 0.11.22 | `read_response` buffer capped against unbounded memory growth (#1143) | Yes, backported on 2026-10-12 |
-| 0.11.22 | Inverted TLS hostname-verification flag in the `boring-tls` backend | No — Satchel builds rustls only |
-| 0.11.22 | `rustls-platform-verifier` to v0.7 (#1136) | Blocks the upgrade, see below |
-| 0.11.23 | Multiline SMTP error replies split into separate lines (#1153) | Yes |
-| 0.11.23 | `base64` to v0.23 (#1152) | Dependency update; retained with the older release |
-
-The upgrade is not just a re-vendor. 0.11.22 requires
-`rustls-platform-verifier` 0.7, and both `crates/satchel-core/Cargo.toml` and
-`src-tauri/Cargo.toml` pin `=0.6.2` because the Android JNI init call is taken
-from that exact version. Moving to 0.7 changes mobile TLS setup and needs a run
-on a real device, which is why it is not folded in here.
-
-The fork itself is still required: 0.11.23 calls `new_with_extra_roots`
-unconditionally under the `rustls-platform-verifier` feature, and 0.7 still
-implements that constructor for Apple, Windows and the generic backend only —
-not for Android.
-
-## What keeps this honest
-
-`crates/satchel-core/tests/vendor_lettre.rs` holds the version pinned in
-`vendor/lettre/Cargo.toml` against the one this file names, checks that the
-patch table still points at the vendor tree, and — when
-`SATCHEL_VENDOR_UPSTREAM_CHECK=1` is set — asks crates.io whether a newer
-release exists. The weekly `Security audit` workflow sets that variable. The reviewed drift through
-0.11.23 is temporarily accepted by `.cargo/lettre-upstream-exception.json` until
-2026-11-20 UTC. A newer release or an expired deadline fails the check.
-`crates/satchel-core/tests/smtp_response_caps.rs` exercises the response limits
-against a hostile peer in both readers.
-
-
-## Re-review on 2026-11-13
-
-Re-downloaded the crates.io archives for 0.11.19 and 0.11.23 and compared the
-local source and manifest against the pinned release. The same eight files
-listed above differ; no additional local patches were found. The upstream
-changelog through 0.11.23 still matches the reviewed drift table, and the
-[crates.io release list](https://crates.io/crates/lettre/versions) still names
-0.11.23 as the newest stable release.
-
-The upgrade blocker remains: Lettre 0.11.23 calls `new_with_extra_roots` in
-its platform-verifier branch. The current verifier, 0.7.1, still has no such
-constructor in its Android implementation, and
-[rustls-platform-verifier#58](https://github.com/rustls/rustls-platform-verifier/issues/58)
-is open. Satchel's mobile JNI integration is still pinned to 0.6.2. The
-existing response caps and bounded reads remain in both local SMTP readers;
-the hostile-peer regression tests cover them.
-
-The exception is renewed for one week, through 2026-11-20 UTC, to keep the
-mobile verifier upgrade and remaining upstream drift due for review. This
-review changes neither the vendored code nor the accepted upstream version.
+To remove the vendor override, move the verifier and its Android integration
+to upstream's supported version and find upstream equivalents for the SMTP
+error classification and keepalive settings.

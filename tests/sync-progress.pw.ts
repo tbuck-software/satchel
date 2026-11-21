@@ -1,19 +1,8 @@
 import { expect, test } from '@playwright/test';
 
 test('shows durable import progress, pauses offline and finishes without a permanent spinner', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/?mockImportPhase=folder&mockOutbox=0');
   await expect(page.getByText('Staging login 500 after deployment', { exact: true }).first()).toBeVisible();
-  await page.evaluate(async () => {
-    const connectionPath = '/src/stores/connection.ts';
-    const outboxPath = '/src/stores/outbox.ts';
-    const { useConnectionStore } = await import(connectionPath);
-    const { useOutboxStore } = await import(outboxPath);
-    useOutboxStore().items = [];
-    useConnectionStore().$patch({ syncing: true, failedOutbox: 0, failedSends: 0, failedRemoteMutations: 0,
-      syncProgress: [{ account_id: 'work', account_name: 'Work', email: 'alex@example.test',
-        phase: 'folder', folder: 'Archive', folder_index: 4, folder_total: 12,
-        backfill_remaining: 20000, backfill_total: 40000, updated_at: new Date().toISOString() }] });
-  });
   const status = page.locator('aside .sync-progress');
   await expect(status).toContainText('Loading older mail');
   await expect(status).toContainText('50%');
@@ -65,19 +54,8 @@ test('shows durable import progress, pauses offline and finishes without a perma
 
 test('keeps phone import progress beside the account and its details open through completion', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto('/');
+  await page.goto('/?mockImportPhase=waiting&mockOutbox=0');
   await expect(page.locator('.large-title')).toBeVisible();
-  await page.evaluate(async () => {
-    const connectionPath = '/src/stores/connection.ts';
-    const outboxPath = '/src/stores/outbox.ts';
-    const { useConnectionStore } = await import(connectionPath);
-    const { useOutboxStore } = await import(outboxPath);
-    useOutboxStore().items = [];
-    useConnectionStore().$patch({ syncing: false, failedOutbox: 0, failedSends: 0, failedRemoteMutations: 0,
-      syncProgress: [{ account_id: 'work', account_name: 'Work', email: 'alex@example.test',
-        phase: 'waiting', folder: 'Archive', folder_index: 4, folder_total: 12,
-        backfill_remaining: 20000, backfill_total: 40000, updated_at: new Date().toISOString() }] });
-  });
   const chip = page.locator('.large-title__meta .shell-status').getByRole('button');
   await expect(chip).toHaveText('Older mail 50%');
   await expect(page.locator('.mobile-sync-status')).toHaveCount(0);

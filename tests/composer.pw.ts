@@ -19,7 +19,8 @@ for (const theme of ['dark', 'light'] as const) {
           await page.getByRole('button', { name: 'Reply', exact: true }).first().click();
         }
         const composer = page.getByRole('dialog', { name: 'Compose email' });
-        await expect(composer).toBeVisible();
+        // The cold dev server transforms the lazy composer and editor after the click.
+        await expect(composer).toBeVisible({ timeout: 30_000 });
         const writer = composer.locator('.ProseMirror').first();
         await writer.fill(mode === 'new' ? 'Hi Ada,\n\nThe release is ready for review.' : 'Thanks for the update. I will review the deployment today.');
         if (mode === 'new') {
@@ -389,7 +390,7 @@ test('a thread dragged from the list onto the composer arrives as an .eml attach
   await page.getByRole('button', { name: 'New message', exact: true }).click();
   const composer = page.getByRole('dialog', { name: 'Compose email' });
   const writer = composer.locator('.ProseMirror').first();
-  await expect(writer).toBeVisible();
+  await expect(writer).toBeVisible({ timeout: 30_000 });
   // Dropped on the editor on purpose: the composer must take it before the
   // editor pastes the drag as text.
   await row.dragTo(writer);

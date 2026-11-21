@@ -143,6 +143,30 @@ describe('useListSearch', () => {
     expect(harness.search).toHaveBeenCalledWith('invoice', expect.objectContaining({ accountId: 'account-1' }));
   });
 
+  it('drops previous hits as soon as the query or scope changes', async () => {
+    const store = useListSearchStore();
+    const search = start();
+    store.setQuery('invoice');
+    await settle();
+    expect(search.resultThreads.value.map((row) => row.id)).toEqual(['a']);
+
+    harness.search.mockResolvedValue(page([]));
+    store.setQuery('receipt');
+    expect(search.resultThreads.value).toEqual([]);
+    await nextTick();
+    expect(search.loading.value).toBe(true);
+    expect(search.resultThreads.value).toEqual([]);
+    await settle();
+    expect(search.resultThreads.value).toEqual([]);
+
+    harness.search.mockResolvedValue(page(['a', 'b']));
+    store.setScope('all');
+    await settle();
+    expect(search.resultThreads.value.map((row) => row.id)).toEqual(['a', 'b']);
+    store.setScope('mailbox');
+    expect(search.resultThreads.value).toEqual([]);
+  });
+
   it('narrows to the mailbox by default and widens to all mail on request', async () => {
     const store = useListSearchStore();
     const search = start();

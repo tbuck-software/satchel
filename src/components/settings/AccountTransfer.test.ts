@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 import { flushPromises, mount } from '@vue/test-utils';
+import { h } from 'vue';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createPinia, setActivePinia } from 'pinia';
 import AccountTransfer from './AccountTransfer.vue';
+import ModalShell from '@/components/ui/ModalShell.vue';
 
 const transfer = vi.hoisted(() => vi.fn());
 const store = vi.hoisted(() => ({
@@ -20,6 +23,35 @@ beforeEach(() => { vi.clearAllMocks(); vi.useFakeTimers(); });
 afterEach(() => vi.useRealTimers());
 
 describe('setting up a second device', () => {
+  it('tabs to the manual disclosure and reaches its address field only when open', async () => {
+    setActivePinia(createPinia());
+    transfer.mockImplementation(async (action) => action === 'discover' ? { ...idle, phase: 'searching' } : idle);
+    const wrapper = mount(ModalShell, {
+      attachTo: document.body,
+      props: { label: 'Transfer accounts' },
+      slots: { default: () => h(AccountTransfer, { receive: false }) },
+    });
+    try {
+      await flushPromises();
+      const summary = wrapper.get('summary');
+      expect(summary.text()).toBe('Connect by address');
+      await wrapper.get('[role="dialog"]').trigger('keydown', { key: 'Tab' });
+      expect(document.activeElement).toBe(summary.element);
+
+      await summary.trigger('keydown', { key: 'Tab' });
+      expect(document.activeElement).toBe(wrapper.get('button').element);
+      await wrapper.get('button').trigger('keydown', { key: 'Tab', shiftKey: true });
+      expect(document.activeElement).toBe(summary.element);
+
+      (summary.element as HTMLElement).click();
+      expect(wrapper.get('details').element.open).toBe(true);
+      await summary.trigger('keydown', { key: 'Tab' });
+      expect(document.activeElement).toBe(wrapper.get('details input').element);
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
   it('sends only explicitly selected IDs after entering the destination code', async () => {
     const nearby = [{ name: 'Desktop', address: '192.0.2.1:1234' }];
     transfer.mockImplementation(async (action) => action === 'discover' ? { ...idle, phase: 'searching', nearby } : idle);

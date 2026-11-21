@@ -33,7 +33,7 @@ export type ComposerDraftTranslator = (
 
 export interface ComposerDraftPersistenceAdapter {
   save(input: BackendDraftInput): Promise<BackendDraft | null>;
-  remove(id: string): Promise<void>;
+  remove(id: string): Promise<boolean | void>;
 }
 
 export interface ComposerDraftPersistenceOptions {
@@ -248,14 +248,15 @@ export function useComposerDraftPersistence(options: ComposerDraftPersistenceOpt
   async function discard(discardOptions: { resumeAutosave: boolean }) {
     stopAutosave();
     await pause();
+    let queued = false;
     try {
-      changes.rebaseline();
-      dirty.value = false;
       if (draftId.value) {
-        await options.drafts.remove(draftId.value);
+        queued = (await options.drafts.remove(draftId.value)) === true;
         draftId.value = null;
         serverRevision.value = null;
       }
+      changes.rebaseline();
+      dirty.value = false;
       saveError.value = null;
     } catch (error) {
       resume();
@@ -266,6 +267,7 @@ export function useComposerDraftPersistence(options: ComposerDraftPersistenceOpt
       resume();
       startAutosave();
     }
+    return queued;
   }
 
   async function closeWithoutSaving() {

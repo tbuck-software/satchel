@@ -8,8 +8,8 @@
         "Trash",
         "trash",
         "Trash",
-        0,
-        0
+        1,
+        1
       ],
       [
         "fld-mail-v2-1fb2c47ccfa5a2f6fad04822bf3ea3f5dc433800bddcf896569a21b336c63c82",
@@ -841,6 +841,20 @@
         null,
         1,
         "t00027"
+      ],
+      [
+        "trashed-1-m0",
+        "fld-mail-v2-0a84c29585a25353105639ffaf5abba10b53ddd3f2ceb5e3b2aa1f4e25b18d42",
+        null,
+        0,
+        "trashed-1"
+      ],
+      [
+        "trashed-1-m1",
+        "fld-mail-v2-0a84c29585a25353105639ffaf5abba10b53ddd3f2ceb5e3b2aa1f4e25b18d42",
+        null,
+        0,
+        "trashed-1"
       ]
     ],
     "queue": [
@@ -2013,6 +2027,13 @@
     ],
     "thread_folders": [
       [
+        "fld-mail-v2-0a84c29585a25353105639ffaf5abba10b53ddd3f2ceb5e3b2aa1f4e25b18d42",
+        "trashed-1",
+        2,
+        2,
+        1
+      ],
+      [
         "fld-mail-v2-59876617403801961688094ee5f82742d8161d836ae19cd4dc16f2bcda534135",
         "t00003",
         2,
@@ -2818,6 +2839,20 @@
         null,
         "2026-01-01",
         false
+      ],
+      [
+        "trashed-1",
+        "inbox",
+        "inbox",
+        null,
+        2,
+        2,
+        0,
+        0,
+        "Other",
+        null,
+        "2026-01-02",
+        false
       ]
     ]
   },
@@ -2830,8 +2865,8 @@
         "Trash",
         "trash",
         "Trash",
-        2,
-        2
+        3,
+        3
       ],
       [
         "fld-mail-v2-1fb2c47ccfa5a2f6fad04822bf3ea3f5dc433800bddcf896569a21b336c63c82",
@@ -3663,6 +3698,20 @@
         null,
         1,
         "t00027"
+      ],
+      [
+        "trashed-1-m0",
+        "fld-mail-v2-0a84c29585a25353105639ffaf5abba10b53ddd3f2ceb5e3b2aa1f4e25b18d42",
+        null,
+        0,
+        "trashed-1"
+      ],
+      [
+        "trashed-1-m1",
+        "fld-mail-v2-0a84c29585a25353105639ffaf5abba10b53ddd3f2ceb5e3b2aa1f4e25b18d42",
+        null,
+        0,
+        "trashed-1"
       ]
     ],
     "queue": [
@@ -5059,6 +5108,13 @@
         1
       ],
       [
+        "fld-mail-v2-0a84c29585a25353105639ffaf5abba10b53ddd3f2ceb5e3b2aa1f4e25b18d42",
+        "trashed-1",
+        2,
+        2,
+        1
+      ],
+      [
         "fld-mail-v2-1fb2c47ccfa5a2f6fad04822bf3ea3f5dc433800bddcf896569a21b336c63c82",
         "t00013",
         3,
@@ -5787,6 +5843,20 @@
         null,
         "2026-01-01",
         false
+      ],
+      [
+        "trashed-1",
+        "inbox",
+        "inbox",
+        null,
+        2,
+        2,
+        0,
+        0,
+        "Other",
+        null,
+        "2026-01-02",
+        false
       ]
     ]
   },
@@ -5817,7 +5887,8 @@
       ]
     },
     {
-      "permanently_deleted": [
+      "permanently_deleted": [],
+      "queued_deletions": [
         "trashed-1"
       ],
       "undo_thread_ids": [
@@ -5832,6 +5903,7 @@
     },
     {
       "permanently_deleted": [],
+      "queued_deletions": [],
       "undo_thread_ids": [
         "t00018",
         "t00019"

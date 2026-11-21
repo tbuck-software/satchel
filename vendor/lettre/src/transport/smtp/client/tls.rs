@@ -12,15 +12,15 @@ use boring::{
 use native_tls::{Protocol, TlsConnector};
 #[cfg(feature = "rustls")]
 use rustls::{
-    client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
-    crypto::{verify_tls12_signature, verify_tls13_signature, CryptoProvider},
-    pki_types::{self, pem::PemObject, CertificateDer, PrivateKeyDer, ServerName, UnixTime},
-    server::ParsedCertificate,
     ClientConfig, DigitallySignedStruct, Error as TlsError, RootCertStore, SignatureScheme,
+    client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
+    crypto::{CryptoProvider, verify_tls12_signature, verify_tls13_signature},
+    pki_types::{self, CertificateDer, PrivateKeyDer, ServerName, UnixTime, pem::PemObject},
+    server::ParsedCertificate,
 };
 
 #[cfg(any(feature = "native-tls", feature = "rustls", feature = "boring-tls"))]
-use crate::transport::smtp::{error, Error};
+use crate::transport::smtp::{Error, error};
 
 /// TLS protocol versions.
 #[derive(Debug, Copy, Clone)]
@@ -245,6 +245,9 @@ impl TlsParametersBuilder {
     /// Add a custom root certificate
     ///
     /// Can be used to safely connect to a server using a self-signed certificate, for example.
+    ///
+    /// On Android, when using the `rustls-platform-verifier` with the default certificate store,
+    /// custom root certificates aren't supported and building the parameters will fail.
     pub fn add_root_certificate(mut self, cert: Certificate) -> Self {
         self.root_certs.push(cert);
         self
@@ -346,7 +349,7 @@ impl TlsParametersBuilder {
             other => {
                 return Err(error::tls(format!(
                     "{other:?} is not supported in native tls"
-                )))
+                )));
             }
         }
         for cert in self.root_certs {
@@ -362,7 +365,7 @@ impl TlsParametersBuilder {
             TlsVersion::Tlsv13 => {
                 return Err(error::tls(
                     "min tls version Tlsv13 not supported in native tls",
-                ))
+                ));
             }
         };
 
@@ -384,7 +387,7 @@ impl TlsParametersBuilder {
     pub fn build_boring(self) -> Result<TlsParameters, Error> {
         use boring::ssl::{SslMethod, SslVerifyMode};
 
-        let mut tls_builder = SslConnector::builder(SslMethod::tls_client()).map_err(error::tls)?;
+        let mut tls_builder = SslConnector::builder(SslMethod::tls()).map_err(error::tls)?;
 
         if self.accept_invalid_certs {
             tls_builder.set_verify(SslVerifyMode::NONE);
@@ -394,13 +397,13 @@ impl TlsParametersBuilder {
                 CertificateStore::None => {
                     // Replace the default store with an empty store.
                     tls_builder
-                        .set_cert_store(X509StoreBuilder::new().map_err(error::tls)?.build());
+                        .set_cert_store_builder(X509StoreBuilder::new().map_err(error::tls)?);
                 }
                 #[allow(unreachable_patterns)]
                 other => {
                     return Err(error::tls(format!(
                         "{other:?} is not supported in boring tls"
-                    )))
+                    )));
                 }
             }
 
@@ -447,10 +450,10 @@ impl TlsParametersBuilder {
         let just_version3 = &[&rustls::version::TLS13];
         let supported_versions = match self.min_tls_version {
             TlsVersion::Tlsv10 => {
-                return Err(error::tls("min tls version Tlsv10 not supported in rustls"))
+                return Err(error::tls("min tls version Tlsv10 not supported in rustls"));
             }
             TlsVersion::Tlsv11 => {
-                return Err(error::tls("min tls version Tlsv11 not supported in rustls"))
+                return Err(error::tls("min tls version Tlsv11 not supported in rustls"));
             }
             TlsVersion::Tlsv12 => rustls::ALL_VERSIONS,
             TlsVersion::Tlsv13 => just_version3,
@@ -537,33 +540,27 @@ impl TlsParametersBuilder {
             tls.dangerous()
                 .with_custom_certificate_verifier(Arc::new(verifier))
         } else {
-            #[cfg(all(feature = "rustls-platform-verifier", not(target_os = "android")))]
+            #[cfg(feature = "rustls-platform-verifier")]
             if let Some(extra_roots) = extra_roots {
-                tls.dangerous().with_custom_certificate_verifier(Arc::new(
+                let verifier = if extra_roots.is_empty() {
+                    rustls_platform_verifier::Verifier::new(crypto_provider)
+                } else {
+                    // Android only ever trusts the system certificate store
+                    #[cfg(target_os = "android")]
+                    return Err(error::tls(
+                        "custom root certificates aren't supported by rustls-platform-verifier on Android",
+                    ));
+
+                    #[cfg(not(target_os = "android"))]
                     rustls_platform_verifier::Verifier::new_with_extra_roots(
                         extra_roots,
                         crypto_provider,
                     )
-                    .map_err(error::tls)?,
-                ))
-            } else {
-                tls.with_root_certificates(root_cert_store)
-            }
-
-            // Android's TrustManager does not support augmenting the platform roots.
-            // The default path never adds custom roots, so use the native verifier
-            // directly and fail closed if a caller explicitly requests extra roots.
-            #[cfg(all(feature = "rustls-platform-verifier", target_os = "android"))]
-            if let Some(extra_roots) = extra_roots {
-                if !extra_roots.is_empty() {
-                    return Err(error::tls(
-                        "custom SMTP root certificates are unsupported by the Android platform verifier",
-                    ));
                 }
-                tls.dangerous().with_custom_certificate_verifier(Arc::new(
-                    rustls_platform_verifier::Verifier::new(crypto_provider)
-                        .map_err(error::tls)?,
-                ))
+                .map_err(error::tls)?;
+
+                tls.dangerous()
+                    .with_custom_certificate_verifier(Arc::new(verifier))
             } else {
                 tls.with_root_certificates(root_cert_store)
             }
@@ -788,7 +785,7 @@ impl Identity {
         let key = match PrivateKeyDer::from_pem_slice(key) {
             Ok(key) => key,
             Err(pki_types::pem::Error::NoItemsFound) => {
-                return Err(error::tls("no private key found"))
+                return Err(error::tls("no private key found"));
             }
             Err(err) => return Err(error::tls(err)),
         };

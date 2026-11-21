@@ -202,13 +202,13 @@ impl PluginRegistry {
     }
 
     pub fn discover_from_dir(root: &Path) -> Result<Self, String> {
-        Self::discover_from_dir_with(root, allow_unsigned_plugins())
+        Self::discover_from_dir_with(root, allow_unsigned_plugins(), false)
     }
 
     /// Release packaging gate. This never waives signatures, even in a debug build.
     /// Check the shipped resource directory, rather than a developer's source tree.
     pub fn verify_release_packages(root: &Path) -> Result<Vec<String>, String> {
-        let plugins = Self::discover_from_dir_with(root, false)?.list();
+        let plugins = Self::discover_from_dir_with(root, false, true)?.list();
         let expected = [
             "satchel-plugin-auto-unsubscribe",
             "satchel-plugin-calendar-sync",
@@ -235,14 +235,25 @@ impl PluginRegistry {
 
     /// `allow_unsigned` is a parameter so a debug test build can drive the
     /// release decision without touching the process environment.
-    fn discover_from_dir_with(root: &Path, allow_unsigned: bool) -> Result<Self, String> {
+    fn discover_from_dir_with(
+        root: &Path,
+        allow_unsigned: bool,
+        strict: bool,
+    ) -> Result<Self, String> {
         let mut registry = PluginRegistry::default();
         if !root.exists() {
             return Ok(registry);
         }
 
         for entry in fs::read_dir(root).map_err(|err| err.to_string())? {
-            let entry = entry.map_err(|err| err.to_string())?;
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) if strict => return Err(error.to_string()),
+                Err(error) => {
+                    tracing::warn!(path = %root.display(), %error, "could not read plugin directory entry");
+                    continue;
+                }
+            };
             let path = entry.path();
             if !path.is_dir() {
                 continue;
@@ -253,8 +264,20 @@ impl PluginRegistry {
                 continue;
             }
 
-            let manifest = fs::read_to_string(&manifest_path).map_err(|err| err.to_string())?;
-            let parsed: CargoManifest = toml::from_str(&manifest).map_err(|err| err.to_string())?;
+            let parsed: CargoManifest = match fs::read_to_string(&manifest_path)
+                .map_err(|error| error.to_string())
+                .and_then(|manifest| {
+                    toml::from_str(&manifest).map_err(|error| error.message().to_string())
+                }) {
+                Ok(parsed) => parsed,
+                Err(error) if strict => {
+                    return Err(format!("{}: {error}", manifest_path.display()))
+                }
+                Err(error) => {
+                    tracing::warn!(path = %manifest_path.display(), %error, "could not load plugin manifest");
+                    continue;
+                }
+            };
 
             let package_name = parsed.package.name;
             let package_version = parsed.package.version;
@@ -317,7 +340,14 @@ impl PluginRegistry {
     pub fn discover_from_dirs(roots: &[PathBuf]) -> Result<Self, String> {
         let mut merged = PluginRegistry::default();
         for root in roots {
-            for plugin in Self::discover_from_dir(root)?.list() {
+            let registry = match Self::discover_from_dir(root) {
+                Ok(registry) => registry,
+                Err(error) => {
+                    tracing::warn!(path = %root.display(), %error, "could not discover plugins");
+                    continue;
+                }
+            };
+            for plugin in registry.list() {
                 merged.plugins.entry(plugin.id.clone()).or_insert(plugin);
             }
         }
@@ -436,7 +466,7 @@ fn trusted_plugin_keys() -> Vec<Vec<u8>> {
 
 fn decode_hex(value: &str) -> Option<Vec<u8>> {
     let value = value.trim();
-    if !value.len().is_multiple_of(2) || value.is_empty() {
+    if !value.is_ascii() || !value.len().is_multiple_of(2) || value.is_empty() {
         return None;
     }
     (0..value.len())
@@ -842,7 +872,7 @@ mod tests {
         )
         .expect("write manifest");
 
-        let registry = PluginRegistry::discover_from_dir_with(root.path(), false)
+        let registry = PluginRegistry::discover_from_dir_with(root.path(), false, true)
             .expect("discovery should succeed");
         let plugin = registry
             .get("satchel-plugin-pgp")
@@ -888,6 +918,47 @@ mod tests {
         assert!(PluginRegistry::verify_release_packages(root.path())
             .expect_err("incomplete release")
             .contains("Missing bundled plugin"));
+    }
+
+    #[test]
+    fn broken_manifests_are_isolated_during_runtime_discovery() {
+        let root = tempfile::tempdir().unwrap();
+        let good = root.path().join("calendar");
+        fs::create_dir(&good).unwrap();
+        fs::write(
+            good.join("Cargo.toml"),
+            "[package]\nname = 'satchel-plugin-calendar-sync'\nversion = '1'",
+        )
+        .unwrap();
+        let calendar_enabled = PluginRegistry::discover_from_dir(root.path())
+            .unwrap()
+            .get("satchel-plugin-calendar-sync")
+            .unwrap()
+            .enabled;
+
+        for (name, manifest) in [
+            ("broken", "[package"),
+            ("bad-metadata", "[package]\nname = 'bad'\nversion = '1'\n[package.metadata.satchel]\ncapabilities = 42"),
+            ("bad-signature", "[package]\nname = 'bad-signature'\nversion = '1'\n[package.metadata.satchel]\ntrust = 'verified'\nsignature = 'ed25519:aéa'"),
+        ] {
+            let directory = root.path().join(name);
+            fs::create_dir(&directory).unwrap();
+            fs::write(directory.join("Cargo.toml"), manifest).unwrap();
+            fs::write(directory.join("component.wasm"), b"component").unwrap();
+        }
+        let registry = PluginRegistry::discover_from_dirs(&[root.path().to_path_buf()]).unwrap();
+        assert_eq!(registry.list().len(), 2);
+        assert!(!registry.get("bad-signature").unwrap().enabled);
+        assert_eq!(
+            registry
+                .get("satchel-plugin-calendar-sync")
+                .unwrap()
+                .enabled,
+            calendar_enabled
+        );
+        assert!(PluginRegistry::verify_release_packages(root.path())
+            .unwrap_err()
+            .contains("Cargo.toml"));
     }
 
     #[test]

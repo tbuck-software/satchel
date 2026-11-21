@@ -54,9 +54,17 @@ fn route(request_line: &str) -> (&'static str, String) {
         if request_line.contains("q=after") {
             return ("200 OK", r#"{"resultSizeEstimate":0}"#.to_string());
         }
+        if request_line.contains("pageToken=stale-page") {
+            // Gmail can still accept the old page token and return the end of
+            // the old list. That page cannot contain newly labelled mail.
+            return ("200 OK", r#"{"resultSizeEstimate":0}"#.to_string());
+        }
+        if request_line.contains("pageToken=recovery-page") {
+            return ("200 OK", r#"{"resultSizeEstimate":1}"#.to_string());
+        }
         return (
             "200 OK",
-            r#"{"messages":[{"id":"old-2019"}],"resultSizeEstimate":1}"#.to_string(),
+            r#"{"messages":[{"id":"old-2019"}],"nextPageToken":"recovery-page","resultSizeEstimate":2}"#.to_string(),
         );
     }
     ("404 Not Found", "{}".to_string())
@@ -114,68 +122,70 @@ async fn an_expired_history_id_relists_the_label_and_then_stops() {
             r#"{"oauth":{"access_token":"test-token"}}"#,
         ));
 
-    // Run 1: the stored history cursor is gone. The catch-up runs and finds
-    // nothing, because it can only ask for mail received after the cursor.
-    let first = provider
-        .sync_messages(
-            "Label_kunden",
-            SyncCheckpoint {
-                cursor: Some(format!(
-                    r#"{{"latest_ts":{RECENT_CURSOR_TS},"history_id":"100","format_version":3}}"#
-                )),
-            },
-        )
-        .await
-        .expect("first run succeeds");
-    assert!(first.messages.is_empty(), "catch-up cannot see 2019 mail");
-    let after_first: serde_json::Value =
-        serde_json::from_str(first.next.cursor.as_deref().expect("cursor persisted")).unwrap();
-    assert_eq!(after_first["history_expired"], serde_json::json!(true));
-    assert!(after_first["backfill_page_token"].is_null());
+    for pending_backfill in [Some("stale-page"), None] {
+        requests.lock().unwrap().clear();
+        let first = provider
+            .sync_messages(
+                "Label_kunden",
+                SyncCheckpoint {
+                    cursor: Some(
+                        serde_json::json!({
+                            "latest_ts": RECENT_CURSOR_TS,
+                            "history_id": "100",
+                            "format_version": 3,
+                            "backfill_page_token": pending_backfill,
+                            "backfill_remaining_messages": if pending_backfill.is_some() { 50 } else { 0 },
+                            "backfill_total_messages": if pending_backfill.is_some() { 101 } else { 0 },
+                        })
+                        .to_string(),
+                    ),
+                },
+            )
+            .await
+            .expect("expiry recovers");
+        assert!(first.snapshot_required);
+        assert_eq!(
+            first
+                .messages
+                .iter()
+                .map(|message| message.remote_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["old-2019"],
+            "recovery must find newly labelled mail with pending token {pending_backfill:?}"
+        );
+        let after_first: serde_json::Value =
+            serde_json::from_str(first.next.cursor.as_deref().expect("cursor persisted")).unwrap();
+        assert_eq!(after_first["history_id"], "999");
+        assert_eq!(after_first["history_expired"], true);
+        assert_eq!(after_first["backfill_page_token"], "recovery-page");
+        assert_eq!(after_first["backfill_remaining_messages"], 1);
+        assert_eq!(after_first["backfill_total_messages"], 2);
 
-    let lists_after_first = message_list_requests(&requests);
-    assert_eq!(lists_after_first.len(), 1);
-    assert!(
-        lists_after_first[0].contains("q=after"),
-        "run 1 only catches up: {lists_after_first:?}"
-    );
+        let lists_after_first = message_list_requests(&requests);
+        assert_eq!(lists_after_first.len(), 2);
+        assert!(lists_after_first[0].contains("q=after"));
+        assert!(!lists_after_first[1].contains("q=after"));
+        assert!(!lists_after_first[1].contains("pageToken="));
 
-    // Run 2: the flag forces a backfill bootstrap, which lists the label
-    // without `after:` and therefore sees the newly labelled 2019 message.
-    let second = provider
-        .sync_messages("Label_kunden", first.next)
-        .await
-        .expect("second run succeeds");
-    assert_eq!(
-        second
-            .messages
-            .iter()
-            .map(|message| message.remote_id.as_str())
-            .collect::<Vec<_>>(),
-        vec!["old-2019"]
-    );
-    let after_second: serde_json::Value =
-        serde_json::from_str(second.next.cursor.as_deref().expect("cursor persisted")).unwrap();
-    assert_eq!(after_second["history_expired"], serde_json::json!(false));
+        let second = provider
+            .sync_messages("Label_kunden", first.next)
+            .await
+            .expect("recovery continues with its own page token");
+        let after_second: serde_json::Value =
+            serde_json::from_str(second.next.cursor.as_deref().expect("cursor persisted")).unwrap();
+        assert_eq!(after_second["history_expired"], false);
+        assert!(after_second["backfill_page_token"].is_null());
+        let lists_after_second = message_list_requests(&requests);
+        assert_eq!(lists_after_second.len(), 3);
+        assert!(lists_after_second[2].contains("pageToken=recovery-page"));
 
-    let lists_after_second = message_list_requests(&requests);
-    assert_eq!(lists_after_second.len(), 2);
-    assert!(
-        !lists_after_second[1].contains("q=after"),
-        "the re-list must not be bounded by the receive timestamp: {lists_after_second:?}"
-    );
-
-    // Run 3: the gap is closed, so the label is not enumerated again.
-    let third = provider
-        .sync_messages("Label_kunden", second.next)
-        .await
-        .expect("third run succeeds");
-    assert!(third.messages.is_empty());
-    assert_eq!(
-        message_list_requests(&requests).len(),
-        2,
-        "a closed gap must not re-list the label on every run"
-    );
+        let third = provider
+            .sync_messages("Label_kunden", second.next)
+            .await
+            .expect("incremental sync resumes");
+        assert!(third.messages.is_empty());
+        assert_eq!(message_list_requests(&requests).len(), 3);
+    }
 
     std::env::remove_var("SATCHEL_GMAIL_API_BASE");
 }

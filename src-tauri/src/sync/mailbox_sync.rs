@@ -13,16 +13,17 @@ use crate::events::bus::{AppEvent, EventBus};
 use crate::providers::{
     cursor::{backfill_pending, backfill_stats},
     folder_mapping::{kind_folder_type, provider_folder_type},
-    imap::imap_checkpoint,
+    imap::{imap_checkpoint, imap_incremental_complete},
     pop3::POP3_FOLDER,
     provider_for_stored_account,
     traits::{MessageEnvelope, MessageRef, RemoteFolder, SyncCheckpoint},
 };
 use crate::sync::errors::SyncError;
 use crate::sync::folder_reconcile::{
-    folder_snapshot_due, pending_remote_message_refs, reconcile_external_workflow_states,
-    reconcile_imap_folder_rename, reconcile_imap_folder_snapshot, reconcile_missing_remote_folders,
-    reconcile_remote_message_removals, reset_local_provider_folder_with_generation,
+    finish_imap_generation_recovery, folder_snapshot_due, imap_generation_recovery_pending,
+    pending_remote_message_refs, reconcile_external_workflow_states, reconcile_imap_folder_rename,
+    reconcile_imap_folder_snapshot, reconcile_missing_remote_folders,
+    reconcile_remote_message_removals, reset_local_provider_folder_with_generation_tx,
     should_snapshot_folder, PendingMutations,
 };
 use crate::sync::gmail_reconcile::{
@@ -208,6 +209,23 @@ struct MailAccountRow {
     sync_state: Option<String>,
     outlook_immutable_ids_migrated: i64,
     ingest_cutoff: Option<String>,
+}
+
+impl MailAccountRow {
+    async fn load(pool: &SqlitePool, account_id: &str) -> sqlx::Result<Option<Self>> {
+        sqlx::query_as(
+            "SELECT id, display_name, email, provider, config, sync_state,
+                    outlook_immutable_ids_migrated,
+                    COALESCE(NULLIF(COALESCE(incoming_effects_cutoff, last_sync_at), ''),
+                             NULLIF(created_at, '')) AS ingest_cutoff
+             FROM accounts
+             WHERE provider IN ('imap', 'pop3', 'gmail', 'outlook')
+               AND is_active = 1 AND id = ?",
+        )
+        .bind(account_id)
+        .fetch_optional(pool)
+        .await
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -911,21 +929,44 @@ async fn persist_sync_cursors(
     Ok(())
 }
 
-async fn reset_folder_checkpoint(
+async fn reset_imap_folder(
     pool: &SqlitePool,
     account_id: &str,
     folder_id: &str,
-    folder_remote_id: &str,
+    remote_id: &str,
+    uidvalidity: u32,
     state: &mut ImapSyncState,
-    queue: &SyncQueue,
-) -> Result<(), String> {
-    SyncQuarantineRepository::new(pool)
-        .clear_folder(account_id, folder_id)
+    now: &str,
+) -> Result<HashSet<String>, String> {
+    let mut tx = pool
+        .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(|error| error.to_string())?;
-    state.cursors.remove(folder_remote_id);
-    state.folder_snapshot_at.remove(folder_remote_id);
-    persist_sync_cursors(pool, account_id, state, queue, None).await
+    let thread_ids = reset_local_provider_folder_with_generation_tx(
+        &mut tx,
+        account_id,
+        folder_id,
+        uidvalidity,
+        now,
+    )
+    .await?;
+    sqlx::query("DELETE FROM sync_quarantine WHERE account_id = ? AND folder_id = ?")
+        .bind(account_id)
+        .bind(folder_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| error.to_string())?;
+    state.cursors.remove(remote_id);
+    state.folder_snapshot_at.remove(remote_id);
+    sqlx::query("UPDATE accounts SET sync_state = ?, updated_at = ? WHERE id = ?")
+        .bind(serde_json::to_string(state).map_err(|error| error.to_string())?)
+        .bind(now)
+        .bind(account_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| error.to_string())?;
+    tx.commit().await.map_err(|error| error.to_string())?;
+    Ok(thread_ids)
 }
 
 /// Queue the server-side removal of exactly the UIDLs this run committed.
@@ -1092,15 +1133,61 @@ async fn stamp_inbox_fetch(
     pool: &SqlitePool,
     account_id: &str,
     started_at: &str,
+    advance_cutoff: bool,
 ) -> Result<(), String> {
-    sqlx::query("UPDATE accounts SET last_sync_at = ?, updated_at = ? WHERE id = ?")
-        .bind(started_at)
-        .bind(chrono::Utc::now().to_rfc3339())
-        .bind(account_id)
-        .execute(pool)
-        .await
-        .map_err(|error| error.to_string())?;
+    sqlx::query(
+        "UPDATE accounts
+         SET last_sync_at = ?1,
+             incoming_effects_cutoff = CASE
+                 WHEN ?2 AND (julianday(incoming_effects_cutoff) IS NULL
+                             OR julianday(?1) > julianday(incoming_effects_cutoff)
+                             OR julianday(incoming_effects_cutoff) > julianday(?3)) THEN ?1
+                 ELSE COALESCE(incoming_effects_cutoff, last_sync_at, '') END,
+             updated_at = ?3
+         WHERE id = ?4",
+    )
+    .bind(started_at)
+    .bind(advance_cutoff)
+    .bind(chrono::Utc::now().to_rfc3339())
+    .bind(account_id)
+    .execute(pool)
+    .await
+    .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+/// Record each committed Inbox fetch. Advance the incoming effects cutoff
+/// once deferred new mail and any generation recovery have caught up.
+async fn finalize_folder_ingest(
+    pool: &SqlitePool,
+    account: &MailAccountRow,
+    folder_id: &str,
+    ingest: &FolderIngestOutcome,
+    next_cursor: Option<&str>,
+    inbox_fetch_started_at: Option<&str>,
+    now: &str,
+) -> Result<Vec<String>, String> {
+    if !ingest.cursor_may_advance() {
+        return Ok(Vec::new());
+    }
+    let is_imap = account.provider.eq_ignore_ascii_case("imap");
+    let incremental_complete = !is_imap || next_cursor.is_some_and(imap_incremental_complete);
+    let recovery_complete = is_imap
+        && incremental_complete
+        && next_cursor.is_some_and(|cursor| !backfill_pending(cursor));
+    if let Some(started_at) = inbox_fetch_started_at {
+        // A reset can put recently received mail below the tail window. Keep its
+        // cutoff until those pages land, using the saved headers to identify replays.
+        let advance_cutoff = incremental_complete
+            && (recovery_complete
+                || !is_imap
+                || !imap_generation_recovery_pending(pool, folder_id).await?);
+        stamp_inbox_fetch(pool, &account.id, started_at, advance_cutoff).await?;
+    }
+    if recovery_complete {
+        return finish_imap_generation_recovery(pool, folder_id, now).await;
+    }
+    Ok(Vec::new())
 }
 
 /// Lists the account's folders; when the quota is due, reads it on the same
@@ -1224,20 +1311,20 @@ pub(crate) async fn sync_mailboxes(
 
         // Re-reading under the lock prevents a concurrent run from restoring a
         // stale cursor.
-        let Some(mut account) = sqlx::query_as::<_, MailAccountRow>(
-            "SELECT id, display_name, email, provider, config, sync_state, outlook_immutable_ids_migrated,
-                    COALESCE(NULLIF(last_sync_at, ''), NULLIF(created_at, '')) AS ingest_cutoff
-             FROM accounts
-             WHERE provider IN ('imap', 'pop3', 'gmail', 'outlook')
-               AND is_active = 1 AND id = ?",
-        )
-        .bind(&account_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|err| err.to_string())?
+        let Some(mut account) = MailAccountRow::load(pool, &account_id)
+            .await
+            .map_err(|err| err.to_string())?
         else {
             return Ok(());
         };
+        // Import the other Android process's block after acquiring the account
+        // lease and before this process can issue Gmail requests.
+        #[cfg(target_os = "android")]
+        if account.provider == "gmail" {
+            crate::sync::rate_limit_state::restore(pool)
+                .await
+                .map_err(|error| format!("could not read Gmail rate limit: {error}"))?;
+        }
         // Seeded local demo account should not block or pollute real sync runs.
         if crate::sync::is_seeded_demo_account(&account.id, &account.email) {
             return Ok(());
@@ -1578,21 +1665,14 @@ pub(crate) async fn sync_mailboxes(
                     .map_err(|err| err.to_string())?;
                 }
 
-                let reset_thread_ids = if batch.reset_folder {
+                if batch.reset_folder {
                     let uidvalidity = batch.remote_uidvalidity.ok_or_else(|| {
                         format!("IMAP reset for {} has no UIDVALIDITY", folder.id)
                     })?;
-                    let thread_ids = reset_local_provider_folder_with_generation(
-                        pool, &account.id, &folder_id, uidvalidity, &now,
-                    ).await?;
-                    // Retrying a failed ingest must not reset this generation again.
-                    reset_folder_checkpoint(pool, &account.id, &folder_id, &folder.id,
-                        &mut state, queue.as_ref()).await?;
-                    thread_ids
-                } else {
-                    HashSet::new()
-                };
-                externally_changed_threads.extend(reset_thread_ids.iter().cloned());
+                    externally_changed_threads.extend(reset_imap_folder(
+                        pool, &account.id, &folder_id, &folder.id, uidvalidity, &mut state, &now,
+                    ).await?);
+                }
 
                 if state.snapshot_after_batch(&folder.id, batch.reset_folder, snapshot_due, batch.snapshot_required) {
                     snapshot_folders.push((folder_id.clone(), folder.id.clone(), folder.name.clone()));
@@ -1638,15 +1718,15 @@ pub(crate) async fn sync_mailboxes(
                     .then(|| pop3_delete_mutation(&account.id, &ingest.persisted))
                     .transpose()?;
                 if ingest.cursor_may_advance() {
-                    if let Some(cursor) = next_cursor {
-                        if let Some((remaining, total)) = backfill_stats(&cursor) {
+                    if let Some(cursor) = next_cursor.as_ref() {
+                        if let Some((remaining, total)) = backfill_stats(cursor) {
                             backfill_remaining_messages += remaining;
                             backfill_total_messages += total;
                         }
-                        if backfill_pending(&cursor) {
+                        if backfill_pending(cursor) {
                             has_backfill_pending = true;
                         }
-                        state.cursors.insert(folder.id.clone(), cursor);
+                        state.cursors.insert(folder.id.clone(), cursor.clone());
                     }
                 } else {
                     blocked_folders.push(folder.name.clone());
@@ -1657,10 +1737,10 @@ pub(crate) async fn sync_mailboxes(
                 persist_sync_cursors(
                     pool, &account.id, &state, queue.as_ref(), pop3_delete.as_ref(),
                 ).await?;
-                if let Some(started_at) = inbox_fetch_started_at.as_deref()
-                    .filter(|_| ingest.cursor_may_advance()) {
-                    stamp_inbox_fetch(pool, &account.id, started_at).await?;
-                }
+                externally_changed_threads.extend(finalize_folder_ingest(
+                    pool, &account, &folder_id, &ingest, next_cursor.as_deref(),
+                    inbox_fetch_started_at.as_deref(), &now,
+                ).await?);
                 if ingest.failed > ingest.exhausted {
                     summary.failures.push(encoded_quarantined_messages(
                         &account.email,
@@ -1683,15 +1763,6 @@ pub(crate) async fn sync_mailboxes(
                         "quarantined messages were not ingested again"
                     );
                 }
-
-                // Defer projection cleanup until the fresh batch has landed.
-                // Threads whose real Message-ID survives keep their workflow,
-                // tags and other local organization across UIDVALIDITY resets.
-                refresh_provider_thread_projections(
-                    pool,
-                    &reset_thread_ids.iter().cloned().collect::<Vec<_>>(),
-                )
-                .await?;
 
                 folders_synced += 1;
             }
@@ -1907,7 +1978,12 @@ pub(crate) async fn sync_mailboxes(
         }
 
         #[cfg(target_os = "android")]
-        cross_process_lease.release().await;
+        {
+            if account.provider == "gmail" {
+                crate::sync::rate_limit_state::persist(pool).await;
+            }
+            cross_process_lease.release().await;
+        }
         Ok(())
         }).await;
         if let Err(error) = result {
@@ -1993,6 +2069,7 @@ mod tests {
         MailAccountRow,
     };
     use crate::providers::traits::{MessageEnvelope, RemoteFolder};
+    use satchel_core::db::connection_state::ConnectionStateRepository;
     use satchel_core::db::sync_quarantine::MAX_INGEST_ATTEMPTS;
     use sqlx::sqlite::SqlitePoolOptions;
     use std::collections::{HashMap, HashSet};
@@ -2036,8 +2113,13 @@ mod tests {
             .connect("sqlite::memory:")
             .await
             .expect("pool");
+        seed_sync_pool(&pool).await;
+        pool
+    }
+
+    async fn seed_sync_pool(pool: &sqlx::SqlitePool) {
         sqlx::migrate!("../crates/satchel-core/src/db/migrations")
-            .run(&pool)
+            .run(pool)
             .await
             .expect("migrations");
         sqlx::query(
@@ -2045,7 +2127,7 @@ mod tests {
              (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
              VALUES ('account', 'Account', 'account@example.com', 'imap', '{}', '', '', '')",
         )
-        .execute(&pool)
+        .execute(pool)
         .await
         .expect("account");
         for (id, name) in [("inbox", "INBOX"), ("archive", "Archive")] {
@@ -2058,11 +2140,10 @@ mod tests {
             .bind(name)
             .bind(name)
             .bind(name)
-            .execute(&pool)
+            .execute(pool)
             .await
             .expect("folder");
         }
-        pool
     }
 
     #[tokio::test]
@@ -2318,7 +2399,9 @@ mod tests {
         let server = Pop3Fake::spawn(vec![(1, "fail-listing")]).await;
         let pool = pop3_pool(server.port, true).await;
         let cutoff = "2026-01-01T00:00:00Z";
-        sqlx::query("UPDATE accounts SET last_sync_at = ?")
+        let last_sync = "2026-01-01T00:01:00Z";
+        sqlx::query("UPDATE accounts SET last_sync_at = ?, incoming_effects_cutoff = ?")
+            .bind(last_sync)
             .bind(cutoff)
             .execute(&pool)
             .await
@@ -2326,11 +2409,12 @@ mod tests {
         let summary = sync_pop3_account(&pool).await;
         assert!(!summary.failures.is_empty());
         assert_eq!(summary.accounts_failed, 1);
-        let actual: String = sqlx::query_scalar("SELECT last_sync_at FROM accounts")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(actual, cutoff);
+        let actual: (String, String) =
+            sqlx::query_as("SELECT last_sync_at, incoming_effects_cutoff FROM accounts")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(actual, (last_sync.into(), cutoff.into()));
     }
 
     #[tokio::test]
@@ -2396,15 +2480,50 @@ mod tests {
     async fn successful_inbox_fetch_uses_its_start_time_as_the_cutoff() {
         let pool = sync_pool().await;
         let started_at = "2026-10-12T10:00:00Z";
-        super::stamp_inbox_fetch(&pool, "account", started_at)
+        super::stamp_inbox_fetch(&pool, "account", started_at, true)
             .await
             .unwrap();
-        let actual: String =
-            sqlx::query_scalar("SELECT last_sync_at FROM accounts WHERE id = 'account'")
+        let actual: (String, String) =
+            sqlx::query_as("SELECT last_sync_at, incoming_effects_cutoff FROM accounts")
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        assert_eq!(actual, started_at);
+        assert_eq!(actual, (started_at.into(), started_at.into()));
+    }
+
+    #[tokio::test]
+    async fn successful_inbox_fetch_preserves_a_later_cutoff() {
+        let pool = sync_pool().await;
+        let later = "2020-01-01T01:00:00+01:00";
+        sqlx::query("UPDATE accounts SET incoming_effects_cutoff = ?")
+            .bind(later)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let started_at = "2019-12-31T23:59:00Z";
+        super::stamp_inbox_fetch(&pool, "account", started_at, true)
+            .await
+            .unwrap();
+        let actual: (String, String) =
+            sqlx::query_as("SELECT last_sync_at, incoming_effects_cutoff FROM accounts")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(actual, (started_at.into(), later.into()));
+
+        // The clock was set far ahead on a previous run and has been corrected.
+        sqlx::query("UPDATE accounts SET incoming_effects_cutoff = '2999-01-01'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        super::stamp_inbox_fetch(&pool, "account", started_at, true)
+            .await
+            .unwrap();
+        let cutoff: String = sqlx::query_scalar("SELECT incoming_effects_cutoff FROM accounts")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(cutoff, started_at);
     }
 
     #[tokio::test]
@@ -2458,8 +2577,7 @@ mod tests {
             .record_failure("account", "inbox", "42", "busy")
             .await
             .unwrap();
-        let queue = super::SyncQueue::new();
-        super::reset_folder_checkpoint(&pool, "account", "inbox", "INBOX", &mut state, &queue)
+        super::reset_imap_folder(&pool, "account", "inbox", "INBOX", 2, &mut state, "now")
             .await
             .unwrap();
         let stored = stored_cursors(&pool).await;
@@ -2474,6 +2592,280 @@ mod tests {
             .await
             .unwrap()
             .contains("42"));
+    }
+
+    #[tokio::test]
+    async fn imap_generation_recovery_keeps_late_page_thread_metadata_after_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let options = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(dir.path().join("satchel.db"))
+            .create_if_missing(true);
+        let pool = SqlitePoolOptions::new()
+            .connect_with(options.clone())
+            .await
+            .unwrap();
+        seed_sync_pool(&pool).await;
+
+        let account = account_row();
+        let old_cutoff = (chrono::Utc::now() - chrono::TimeDelta::minutes(5)).to_rfc3339();
+        sqlx::query("UPDATE accounts SET last_sync_at = ?")
+            .bind(&old_cutoff)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let mut late = envelope("42");
+        late.message_id_header = Some("<survives@example.test>".into());
+        late.remote_uidvalidity = Some(7);
+        late.received_at_rfc3339 = Some(chrono::Utc::now().to_rfc3339());
+        let mut vanished = envelope("43");
+        vanished.message_id_header = Some("<vanishes@example.test>".into());
+        vanished.remote_uidvalidity = Some(7);
+        ingest(&pool, &account, "inbox", vec![late.clone(), vanished]).await;
+        sqlx::raw_sql(
+            "INSERT INTO threads (id,account_id,subject,last_message_date,created_at,updated_at)
+             VALUES ('legacy-thread','account','Subject','','','');
+             UPDATE messages SET thread_id = 'legacy-thread' WHERE remote_id = '42';
+             INSERT INTO tags (id,name) VALUES ('saved','Saved');
+             INSERT INTO topics (id,name,created_at,updated_at) VALUES ('topic','Topic','','');
+             INSERT INTO thread_tags (thread_id,tag_id)
+                SELECT thread_id,'saved' FROM messages;
+             INSERT INTO workflow_events (id,thread_id,from_state,to_state,reason,created_at)
+                SELECT 'event-' || remote_id,thread_id,'inbox','todo','user','' FROM messages;
+             INSERT INTO topic_items (topic_id,item_type,item_id,added_at)
+                SELECT 'topic','thread',thread_id,'' FROM messages;",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let account = MailAccountRow::load(&pool, "account")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(account.ingest_cutoff.as_deref(), Some(old_cutoff.as_str()));
+        let mut state = ImapSyncState::default();
+        super::reset_imap_folder(&pool, "account", "inbox", "INBOX", 8, &mut state, "now")
+            .await
+            .unwrap();
+        let mut first = envelope("42"); // This UID now belongs to a different message.
+        first.remote_uidvalidity = Some(8);
+        let first = ingest(&pool, &account, "inbox", vec![first]).await;
+        let partial = r#"{"high_uid":42,"uidvalidity":8,"backfill_next_seq":2}"#;
+        let queue = super::SyncQueue::new();
+        state.cursors.insert("INBOX".into(), partial.into());
+        persist_sync_cursors(&pool, "account", &state, &queue, None)
+            .await
+            .unwrap();
+        let partial_started_at = "2099-01-01T00:00:00Z";
+        super::finalize_folder_ingest(
+            &pool,
+            &account,
+            "inbox",
+            &first,
+            Some(partial),
+            Some(partial_started_at),
+            "now",
+        )
+        .await
+        .unwrap();
+        pool.close().await;
+
+        let pool = SqlitePoolOptions::new()
+            .connect_with(options)
+            .await
+            .unwrap();
+        let account = MailAccountRow::load(&pool, "account")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(account.ingest_cutoff.as_deref(), Some(old_cutoff.as_str()));
+        let status = ConnectionStateRepository::new(&pool)
+            .snapshot()
+            .await
+            .unwrap();
+        assert_eq!(status.last_sync_at.as_deref(), Some(partial_started_at));
+        assert_eq!(
+            stored_cursors(&pool).await.get("INBOX").map(String::as_str),
+            Some(partial)
+        );
+        let reused_uid_thread: String =
+            sqlx::query_scalar("SELECT thread_id FROM messages WHERE remote_id = '42'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_ne!(reused_uid_thread, "legacy-thread");
+        late.remote_id = "2".into();
+        late.remote_uidvalidity = Some(8);
+        let outcome = ingest(&pool, &account, "inbox", vec![late]).await;
+        let complete = r#"{"high_uid":42,"uidvalidity":8,"backfill_next_seq":0}"#;
+        state.cursors.insert("INBOX".into(), complete.into());
+        persist_sync_cursors(&pool, "account", &state, &queue, None)
+            .await
+            .unwrap();
+        let complete_started_at = "2099-01-01T00:01:00Z";
+        super::finalize_folder_ingest(
+            &pool,
+            &account,
+            "inbox",
+            &outcome,
+            Some(complete),
+            Some(complete_started_at),
+            "now",
+        )
+        .await
+        .unwrap();
+        let account = MailAccountRow::load(&pool, "account")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(account.ingest_cutoff.as_deref(), Some(complete_started_at));
+        let restored: (String, String, String, String) = sqlx::query_as(
+            "SELECT m.thread_id, e.id, i.topic_id, n.state FROM messages m
+             JOIN thread_tags t ON t.thread_id = m.thread_id AND t.tag_id = 'saved'
+             JOIN workflow_events e ON e.thread_id = m.thread_id
+             JOIN topic_items i ON i.item_id = m.thread_id AND i.item_type = 'thread'
+             JOIN notification_outbox n ON n.message_id = m.id WHERE m.remote_id = '2'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            restored,
+            (
+                "legacy-thread".into(),
+                "event-42".into(),
+                "topic".into(),
+                "dismissed".into()
+            )
+        );
+        let remaining: (i64, i64, i64, i64) = sqlx::query_as(
+            "SELECT (SELECT COUNT(*) FROM imap_generation_recovery),
+                    (SELECT COUNT(*) FROM thread_tags),
+                    (SELECT COUNT(*) FROM workflow_events),
+                    (SELECT COUNT(*) FROM topic_items)",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(remaining, (0, 1, 1, 1));
+    }
+
+    #[tokio::test]
+    async fn imap_incremental_pages_keep_deferred_mail_eligible_for_rules_and_notifications() {
+        let pool = sync_pool().await;
+        let cutoff = "2026-01-01T00:00:00Z";
+        let started_at = "2026-01-01T00:10:00Z";
+        sqlx::query("UPDATE accounts SET last_sync_at = ?")
+            .bind(cutoff)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            r#"INSERT INTO rules (id,name,trigger_type,trigger_config,actions,is_active,created_at,updated_at)
+             VALUES ('rule','Tag','on_receive','{"from_contains":"sender"}','["add_tag:incoming"]',1,'','')"#,
+        ).execute(&pool).await.unwrap();
+        let account = MailAccountRow::load(&pool, "account")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(account.ingest_cutoff.as_deref(), Some(cutoff));
+        let pending = r#"{"high_uid":1,"incremental_pending":1,"backfill_next_seq":2}"#;
+        let mut early = envelope("1");
+        early.from_address = "other@example.test".into();
+        let first = ingest(&pool, &account, "inbox", vec![early]).await;
+        super::finalize_folder_ingest(
+            &pool,
+            &account,
+            "inbox",
+            &first,
+            Some(pending),
+            Some(started_at),
+            started_at,
+        )
+        .await
+        .unwrap();
+
+        let status = ConnectionStateRepository::new(&pool)
+            .snapshot()
+            .await
+            .unwrap();
+        assert_eq!(status.last_sync_at.as_deref(), Some(started_at));
+        let account = MailAccountRow::load(&pool, "account")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(account.ingest_cutoff.as_deref(), Some(cutoff));
+        let mut deferred = envelope("2");
+        deferred.received_at_rfc3339 = Some("2026-01-01T00:05:00Z".into());
+        let outcome = ingest(&pool, &account, "inbox", vec![deferred]).await;
+        let (rule_tagged, notification): (bool, String) = sqlx::query_as(
+            "SELECT EXISTS(SELECT 1 FROM thread_tags tt JOIN tags t ON t.id = tt.tag_id
+                           WHERE tt.thread_id = m.thread_id AND t.name = 'incoming'), n.state
+             FROM messages m JOIN notification_outbox n ON n.message_id = m.id WHERE m.remote_id = '2'",
+        ).fetch_one(&pool).await.unwrap();
+        assert_eq!((rule_tagged, notification.as_str()), (true, "pending"));
+
+        let caught_up = r#"{"high_uid":2,"incremental_pending":0,"backfill_next_seq":2}"#;
+        let caught_up_at = "2026-01-01T00:11:00Z";
+        super::finalize_folder_ingest(
+            &pool,
+            &account,
+            "inbox",
+            &outcome,
+            Some(caught_up),
+            Some(caught_up_at),
+            caught_up_at,
+        )
+        .await
+        .unwrap();
+        let account = MailAccountRow::load(&pool, "account")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(account.ingest_cutoff.as_deref(), Some(caught_up_at));
+    }
+
+    #[tokio::test]
+    async fn an_initial_partial_inbox_sync_preserves_first_sync_cutoff_fallbacks() {
+        let pool = sync_pool().await;
+        let now = chrono::Utc::now();
+        let created_at = (now - chrono::TimeDelta::minutes(10)).to_rfc3339();
+        sqlx::query("UPDATE accounts SET created_at = ?")
+            .bind(&created_at)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let account = MailAccountRow::load(&pool, "account")
+            .await
+            .unwrap()
+            .unwrap();
+        let started_at = now.to_rfc3339();
+        super::finalize_folder_ingest(
+            &pool,
+            &account,
+            "inbox",
+            &super::FolderIngestOutcome::default(),
+            Some(r#"{"high_uid":1,"incremental_pending":1}"#),
+            Some(&started_at),
+            &started_at,
+        )
+        .await
+        .unwrap();
+
+        let account = MailAccountRow::load(&pool, "account")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(account.ingest_cutoff.as_deref(), Some(created_at.as_str()));
+        let mut deferred = envelope("2");
+        // The notification trigger's first-sync fallback is fifteen minutes.
+        deferred.received_at_rfc3339 = Some((now - chrono::TimeDelta::minutes(12)).to_rfc3339());
+        ingest(&pool, &account, "inbox", vec![deferred]).await;
+        let state: String = sqlx::query_scalar("SELECT state FROM notification_outbox")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(state, "pending");
     }
 
     #[tokio::test]

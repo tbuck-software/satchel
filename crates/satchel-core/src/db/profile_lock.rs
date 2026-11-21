@@ -72,7 +72,14 @@ pub async fn hold_open(profile: &Path) -> Result<DatabaseOpenLock, String> {
     let file = lock_file(&profile.join(OPEN_LOCK_FILE)).map_err(|err| err.to_string())?;
     loop {
         match try_file_lock(&file, true) {
-            Ok(()) => return Ok(DatabaseOpenLock { _file: file }),
+            Ok(()) => {
+                // An opener may have waited for recovery in another process.
+                // If that process failed, the incomplete swap still owns the DB.
+                if crate::backup::recovery_in_progress(profile) {
+                    return Err("backend.errors.restoreRecoveryInProgress".into());
+                }
+                return Ok(DatabaseOpenLock { _file: file });
+            }
             Err(TryLockError::WouldBlock) => tokio::time::sleep(POLL).await,
             Err(TryLockError::Error(err)) => return Err(err.to_string()),
         }
@@ -163,5 +170,22 @@ mod tests {
         let second = tokio::time::timeout(Duration::from_secs(1), hold_open(profile.path())).await;
 
         assert!(second.is_ok());
+    }
+
+    #[tokio::test]
+    async fn shared_open_is_refused_if_exclusive_recovery_left_the_manifest() {
+        let profile = tempfile::tempdir().unwrap();
+        let exclusive = try_exclusive(profile.path()).unwrap().unwrap();
+        std::fs::write(profile.path().join("satchel.restore-applying.json"), b"{}").unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), hold_open(profile.path()))
+                .await
+                .is_err()
+        );
+        drop(exclusive);
+        assert_eq!(
+            hold_open(profile.path()).await.unwrap_err(),
+            "backend.errors.restoreRecoveryInProgress"
+        );
     }
 }

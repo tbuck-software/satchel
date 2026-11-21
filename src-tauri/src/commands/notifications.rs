@@ -243,20 +243,38 @@ pub fn decide_mail_burst() -> BurstDecision {
 }
 
 /// One banner for the mails of a burst; each call replaces the previous one.
-pub fn show_mail_summary(app: &AppHandle, count: u32, sound: bool) {
+pub async fn show_mail_summary(app: &AppHandle, count: u32, sound: bool) -> Result<(), String> {
     let text = crate::commands::ui_strings::current()
         .notification_summary
         .replace("{count}", &count.to_string());
     #[cfg(target_os = "macos")]
     {
         use crate::utils::mac_notify::NativeDelivery;
-        match crate::utils::mac_notify::deliver_summary(&text, sound) {
-            NativeDelivery::Delivered | NativeDelivery::PermissionDenied => return,
-            NativeDelivery::NotBundled | NativeDelivery::Unavailable => {}
+        match crate::utils::mac_notify::deliver_summary(&text, sound).await {
+            Ok(NativeDelivery::Delivered) => return Ok(()),
+            Ok(NativeDelivery::PermissionDenied) => return Err(mac_permission_denied()),
+            Ok(NativeDelivery::NotBundled | NativeDelivery::Unavailable) => {}
+            Err(error) => return Err(reason_note(reason::DISPATCH_ERROR, error)),
         }
     }
-    let _ = sound;
-    show_notification(app, &text, "");
+    let mut builder = app
+        .notification()
+        .builder()
+        .title(decode_html_entities(&text));
+    if sound {
+        builder = builder.sound("default");
+    }
+    builder
+        .show()
+        .map_err(|error| reason_note(reason::DISPATCH_ERROR, error))
+}
+
+#[cfg(target_os = "macos")]
+fn mac_permission_denied() -> String {
+    reason_note(
+        reason::PERMISSION_DENIED,
+        "macOS notification authorization denied",
+    )
 }
 
 /// `<reason_code>: <detail>` — the one format the Diagnose pane parses.
@@ -467,19 +485,19 @@ pub async fn show_mail_notification(
         let fallback_reason: Option<String> = {
             use crate::utils::mac_notify::NativeDelivery;
             match crate::utils::mac_notify::deliver(
+                event_id,
                 &sender,
                 &body,
                 thread_id,
                 account_id,
                 account_label,
                 sound,
-            ) {
+            )
+            .await?
+            {
                 NativeDelivery::Delivered => return Ok(MailDeliveryOutcome::Native),
                 NativeDelivery::PermissionDenied => {
-                    return Ok(MailDeliveryOutcome::Suppressed(reason_note(
-                        reason::PERMISSION_DENIED,
-                        "UNUserNotificationCenter authorization refused",
-                    )))
+                    return Ok(MailDeliveryOutcome::Suppressed(mac_permission_denied()))
                 }
                 NativeDelivery::NotBundled => Some(reason_note(
                     reason::NOT_BUNDLED_FALLBACK,

@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use sqlx::{Executor, Sqlite, SqlitePool};
+use sqlx::{Executor, Sqlite, SqlitePool, Transaction};
 
 use crate::providers::gmail::gmail_label_is_state_view;
 use crate::providers::traits::{MessageRef, RemoteMessageRemoval, RemoteMessageState};
@@ -54,9 +54,16 @@ where
          FROM sync_queue
          WHERE account_id = ?
            AND action_type = 'remote_mutation'
-           AND status IN ('pending', 'sending', 'scheduled', 'failed')",
+           AND status IN ('pending', 'sending', 'scheduled', 'failed')
+           AND NOT (status = 'failed' AND COALESCE(last_error, '') IN (?, ?, ?, ?))",
     )
     .bind(account_id)
+    // These operations have stopped owning the optimistic projection. Partial
+    // successes and changes made in webmail should reconcile normally.
+    .bind(super::errors::IMAP_UID_EXPUNGE_UNSUPPORTED)
+    .bind(super::errors::IMAP_MOVE_COPY_REFUSED)
+    .bind(super::errors::IMAP_MOVE_COPY_NEEDS_REVIEW)
+    .bind("backend.errors.imapDeleteRefused")
     .fetch_all(executor)
     .await
     .map_err(|err| err.to_string())?;
@@ -346,6 +353,9 @@ pub async fn reconcile_missing_remote_folders(
             .execute(&mut *tx)
             .await
             .map_err(|err| err.to_string())?;
+        retained_threads.extend(
+            finish_imap_generation_recovery_tx(&mut tx, &folder_id, sync_started_at).await?,
+        );
         sqlx::query("DELETE FROM folders WHERE id = ?")
             .bind(&folder_id)
             .execute(&mut *tx)
@@ -435,6 +445,15 @@ pub async fn reconcile_imap_folder_rename(
             .await
             .map_err(|err| err.to_string())?;
     }
+    sqlx::query(
+        "INSERT OR IGNORE INTO imap_generation_recovery (folder_id, message_id_header, thread_id)
+         SELECT ?, message_id_header, thread_id FROM imap_generation_recovery WHERE folder_id = ?",
+    )
+    .bind(folder_id)
+    .bind(old)
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| err.to_string())?;
     sqlx::query("UPDATE folders SET uidvalidity = ? WHERE id = ?")
         .bind(i64::from(generation))
         .bind(folder_id)
@@ -626,6 +645,30 @@ async fn reset_local_provider_folder_inner(
         .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(|err| err.to_string())?;
+    let thread_ids =
+        reset_local_provider_folder_tx(&mut tx, account_id, folder_id, generation).await?;
+    tx.commit().await.map_err(|err| err.to_string())?;
+    Ok(thread_ids)
+}
+
+/// Reset inside the caller's transaction so cursor invalidation and the new
+/// folder generation become visible together.
+pub async fn reset_local_provider_folder_with_generation_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    account_id: &str,
+    folder_id: &str,
+    uidvalidity: u32,
+    now: &str,
+) -> Result<HashSet<String>, String> {
+    reset_local_provider_folder_tx(tx, account_id, folder_id, Some((uidvalidity, now))).await
+}
+
+async fn reset_local_provider_folder_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    account_id: &str,
+    folder_id: &str,
+    generation: Option<(u32, &str)>,
+) -> Result<HashSet<String>, String> {
     // A local Sent copy or a draft without a server UID does not belong to
     // the obsolete generation. An edited draft keeps its content and its
     // stable draft ID (the IMAP Message-ID) while losing only the invalid UID.
@@ -645,7 +688,7 @@ async fn reset_local_provider_folder_inner(
     .bind(folder_id)
     .bind(account_id)
     .bind(crate::sync::queue::ACTION_SYNC_DRAFT)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await
     .map_err(|err| err.to_string())?;
     let thread_ids = sqlx::query_scalar::<_, String>(
@@ -655,11 +698,27 @@ async fn reset_local_provider_folder_inner(
     )
     .bind(account_id)
     .bind(folder_id)
-    .fetch_all(&mut *tx)
+    .fetch_all(&mut **tx)
     .await
     .map_err(|err| err.to_string())?;
 
     if let Some((uidvalidity, now)) = generation {
+        sqlx::query(
+            "INSERT OR IGNORE INTO imap_generation_recovery (folder_id, message_id_header, thread_id)
+             SELECT m.folder_id,
+                    CASE WHEN LOWER(m.message_id_header) LIKE '%@%.satchel.local>'
+                           OR LOWER(m.message_id_header) LIKE '%@%.flowmail.local>' THEN ''
+                         ELSE COALESCE(TRIM(m.message_id_header), '') END,
+                    m.thread_id
+             FROM messages m JOIN threads t ON t.id = m.thread_id
+             WHERE m.account_id = ? AND m.folder_id = ?
+               AND (m.remote_id IS NOT NULL OR m.remote_uid IS NOT NULL)",
+        )
+        .bind(account_id)
+        .bind(folder_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(|err| err.to_string())?;
         sqlx::query(
             "UPDATE folders SET uidvalidity = ?, updated_at = ? WHERE id = ? AND account_id = ?",
         )
@@ -667,7 +726,7 @@ async fn reset_local_provider_folder_inner(
         .bind(now)
         .bind(folder_id)
         .bind(account_id)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(|err| err.to_string())?;
     }
@@ -678,7 +737,7 @@ async fn reset_local_provider_folder_inner(
     )
     .bind(account_id)
     .bind(folder_id)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await
     .map_err(|err| err.to_string())?;
     sqlx::query(
@@ -687,18 +746,114 @@ async fn reset_local_provider_folder_inner(
     )
     .bind(account_id)
     .bind(folder_id)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await
     .map_err(|err| err.to_string())?;
-    tx.commit().await.map_err(|err| err.to_string())?;
-
+    if let Some((_, now)) = generation {
+        refresh_thread_projections_batch_tx(tx, &thread_ids, now)
+            .await
+            .map_err(|err| err.to_string())?;
+    }
     Ok(thread_ids.into_iter().collect())
+}
+
+pub async fn imap_generation_recovery_pending(
+    pool: &SqlitePool,
+    folder_id: &str,
+) -> Result<bool, String> {
+    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM imap_generation_recovery WHERE folder_id = ?)")
+        .bind(folder_id)
+        .fetch_one(pool)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Release a folder's holds only after its replacement cursor is durable.
+/// If another folder is still recovering the same thread, its hold survives.
+pub async fn finish_imap_generation_recovery(
+    pool: &SqlitePool,
+    folder_id: &str,
+    now: &str,
+) -> Result<Vec<String>, String> {
+    if !imap_generation_recovery_pending(pool, folder_id).await? {
+        return Ok(Vec::new());
+    }
+    let mut tx = pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(|err| err.to_string())?;
+    let thread_ids = finish_imap_generation_recovery_tx(&mut tx, folder_id, now).await?;
+    tx.commit().await.map_err(|err| err.to_string())?;
+    Ok(thread_ids)
+}
+
+async fn finish_imap_generation_recovery_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    folder_id: &str,
+    now: &str,
+) -> Result<Vec<String>, String> {
+    let thread_ids: HashSet<String> = sqlx::query_scalar(
+        "DELETE FROM imap_generation_recovery WHERE folder_id = ? RETURNING thread_id",
+    )
+    .bind(folder_id)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|err| err.to_string())?
+    .into_iter()
+    .collect();
+    let thread_ids: Vec<_> = thread_ids.into_iter().collect();
+    refresh_thread_projections_batch_tx(tx, &thread_ids, now)
+        .await
+        .map_err(|err| err.to_string())?;
+    Ok(thread_ids)
 }
 
 pub async fn reconcile_remote_message_removals(
     pool: &SqlitePool,
     account_id: &str,
     removals: &[RemoteMessageRemoval],
+) -> Result<HashSet<String>, String> {
+    reconcile_confirmed_removals(
+        pool,
+        account_id,
+        removals
+            .iter()
+            .map(|removal| {
+                (
+                    removal.remote_id.as_str(),
+                    removal.source_folder.as_deref(),
+                    None,
+                )
+            })
+            .collect(),
+    )
+    .await
+}
+
+/// Apply a confirmed IMAP delete only to the same folder and UID generation.
+pub(crate) async fn reconcile_confirmed_imap_delete(
+    pool: &SqlitePool,
+    account_id: &str,
+    refs: &[MessageRef],
+) -> Result<HashSet<String>, String> {
+    reconcile_confirmed_removals(
+        pool,
+        account_id,
+        refs.iter()
+            .filter_map(|reference| {
+                let folder = reference.source_folder.as_deref()?.trim();
+                let generation = reference.source_uidvalidity.filter(|uid| *uid != 0)?;
+                Some((reference.remote_id.as_str(), Some(folder), Some(generation)))
+            })
+            .collect(),
+    )
+    .await
+}
+
+async fn reconcile_confirmed_removals<'a>(
+    pool: &SqlitePool,
+    account_id: &str,
+    removals: Vec<(&'a str, Option<&'a str>, Option<u32>)>,
 ) -> Result<HashSet<String>, String> {
     if removals.is_empty() {
         return Ok(HashSet::new());
@@ -709,21 +864,29 @@ pub async fn reconcile_remote_message_removals(
         .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(|err| err.to_string())?;
-    for removal in removals {
+    for (remote_id, folder, generation) in removals {
         let rows = sqlx::query_as::<_, (String, String, bool)>(
             "SELECT m.id, m.thread_id, COALESCE(m.is_draft, 0)
              FROM messages m
              JOIN folders f ON f.id = m.folder_id
              WHERE m.account_id = ? AND m.remote_id = ?
-               AND (? IS NULL
-                    OR LOWER(TRIM(f.remote_id)) = LOWER(TRIM(?))
-                    OR LOWER(TRIM(f.id)) = LOWER(TRIM(?)))",
+               AND (
+                    (? IS NULL AND (? IS NULL
+                        OR LOWER(TRIM(f.remote_id)) = LOWER(TRIM(?))
+                        OR LOWER(TRIM(f.id)) = LOWER(TRIM(?))))
+                    OR (m.remote_uidvalidity = ? AND f.uidvalidity = ?
+                        AND TRIM(COALESCE(f.remote_id, f.full_path)) = ?)
+               )",
         )
         .bind(account_id)
-        .bind(&removal.remote_id)
-        .bind(removal.source_folder.as_deref())
-        .bind(removal.source_folder.as_deref())
-        .bind(removal.source_folder.as_deref())
+        .bind(remote_id)
+        .bind(generation)
+        .bind(folder)
+        .bind(folder)
+        .bind(folder)
+        .bind(generation)
+        .bind(generation)
+        .bind(folder)
         .fetch_all(&mut *tx)
         .await
         .map_err(|err| err.to_string())?;
@@ -1744,7 +1907,8 @@ mod tests {
                account_id TEXT,
                action_type TEXT,
                payload TEXT,
-               status TEXT
+               status TEXT,
+               last_error TEXT
              )",
         ] {
             sqlx::query(statement).execute(&pool).await.expect("schema");

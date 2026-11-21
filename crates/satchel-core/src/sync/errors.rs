@@ -9,6 +9,9 @@ use thiserror::Error;
 
 pub type SyncResult<T> = Result<T, SyncError>;
 
+pub const IMAP_UID_EXPUNGE_UNSUPPORTED: &str = "backend.errors.imapUidExpungeUnsupported";
+pub const IMAP_MOVE_COPY_REFUSED: &str = "backend.errors.imapMoveCopyRefused";
+
 /// Replaying an IMAP COPY may duplicate messages in the destination.
 pub const IMAP_MOVE_COPY_NEEDS_REVIEW: &str = "backend.errors.imapMoveCopyNeedsReview";
 

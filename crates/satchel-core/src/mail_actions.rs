@@ -21,6 +21,8 @@ use crate::sync::{
     },
 };
 
+pub const IMAP_TRASH_DELETE_ID_PREFIX: &str = "imap-trash-delete:";
+
 #[derive(Debug, Clone, Default, serde::Serialize)]
 #[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ipc-types", ts(export, export_to = "core/mail_actions/"))]
@@ -28,6 +30,10 @@ pub struct TrashReceipt {
     pub undo_token: Option<String>,
     pub undo_thread_ids: Vec<String>,
     pub permanently_deleted: Vec<String>,
+    /// IMAP deletes remain visible until the server confirms scoped expunge.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "ipc-types", ts(optional = nullable))]
+    pub queued_deletions: Vec<String>,
     /// Set when a later batch failed: the receipt covers the threads before it.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ipc-types", ts(optional))]
@@ -162,8 +168,8 @@ async fn ensure_no_pending_move_except_receipt(
 
 /// Give up a failed remote mutation or draft upload. The provider keeps its
 /// state. Already removed local messages are not restored; a move returns its
-/// thread to the confirmed folder. A Sent copy is never discarded: its payload may be
-/// the only copy of the delivered mail.
+/// thread to the confirmed folder. A Sent copy held after restore can be
+/// discarded individually after warning that its payload may be the only copy.
 pub async fn discard_failed_sync_action(pool: &SqlitePool, id: &str) -> Result<bool, String> {
     let mut tx = pool
         .begin_with("BEGIN IMMEDIATE")
@@ -171,12 +177,16 @@ pub async fn discard_failed_sync_action(pool: &SqlitePool, id: &str) -> Result<b
         .map_err(|e| e.to_string())?;
     let row: Option<(String, String, String)> = sqlx::query_as(
         "DELETE FROM sync_queue WHERE id = ? AND status = 'failed'
-           AND (action_type = 'sync_draft' OR (action_type = 'remote_mutation'
-                AND CASE WHEN json_valid(payload) THEN json_extract(payload, '$.kind') END
-                    IS NOT 'append_sent'))
+           AND (action_type = 'sync_draft' OR (action_type = ? AND last_error = ?)
+                OR (action_type = 'remote_mutation'
+                    AND (CASE WHEN json_valid(payload) THEN json_extract(payload, '$.kind') END
+                         IS NOT 'append_sent' OR last_error = ?)))
          RETURNING account_id, action_type, payload",
     )
     .bind(id)
+    .bind(crate::sync::queue::ACTION_RULE_FORWARD)
+    .bind(crate::sync::queue::OUTGOING_SEND_HELD_ERROR_KEY)
+    .bind(crate::sync::queue::SENT_COPY_HELD_ERROR_KEY)
     .fetch_optional(&mut *tx)
     .await
     .map_err(|e| e.to_string())?;
@@ -209,6 +219,42 @@ pub async fn discard_failed_sync_action(pool: &SqlitePool, id: &str) -> Result<b
     }
     tx.commit().await.map_err(|e| e.to_string())?;
     Ok(true)
+}
+
+/// Return the failed filing to its confirmed source while retaining the failed
+/// action for inspection. Only revert workflow state set by this filing.
+pub(crate) async fn rollback_failed_imap_move(
+    tx: &mut Transaction<'_, Sqlite>,
+    action_id: &str,
+    account_id: &str,
+    payload: &str,
+) -> Result<(), String> {
+    let Ok(RemoteMutationPayload::WorkflowMove {
+        workflow_thread_id, ..
+    }) = serde_json::from_str(payload)
+    else {
+        return Ok(());
+    };
+    release_move_destination(tx, account_id, &workflow_thread_id).await?;
+    sqlx::query(
+        "UPDATE threads
+         SET (workflow_state, board_column, snooze_until) =
+             (snapshot.workflow_state, snapshot.board_column, snapshot.snooze_until)
+         FROM mail_action_queue link
+         JOIN mail_action_threads snapshot ON snapshot.receipt_id = link.receipt_id
+         WHERE link.action_id = ? AND threads.id = ? AND threads.account_id = ?
+           AND snapshot.thread_id = threads.id AND snapshot.account_id = threads.account_id
+           AND snapshot.action_at = threads.workflow_changed_at",
+    )
+    .bind(action_id)
+    .bind(&workflow_thread_id)
+    .bind(account_id)
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| error.to_string())?;
+    crate::db::threads::refresh_thread_projections_tx(tx, &[workflow_thread_id])
+        .await
+        .map_err(|error| error.to_string())
 }
 
 /// Return a thread whose move will not run to its confirmed provider folder.
@@ -725,6 +771,7 @@ async fn move_threads_with_receipt(
             run.queued.len(),
             run.receipt.undo_thread_ids.len(),
             run.receipt.permanently_deleted.len(),
+            run.receipt.queued_deletions.len(),
         );
         match run.batch(pool, queue, &unique, batch, position, last).await {
             Ok(()) => applied += batch.len(),
@@ -733,6 +780,7 @@ async fn move_threads_with_receipt(
                 run.queued.truncate(noted.0);
                 run.receipt.undo_thread_ids.truncate(noted.1);
                 run.receipt.permanently_deleted.truncate(noted.2);
+                run.receipt.queued_deletions.truncate(noted.3);
                 tracing::warn!(
                     applied,
                     remaining = unique.len() - applied,
@@ -1018,16 +1066,33 @@ impl<'a> BulkMove<'a> {
                 if provider.eq_ignore_ascii_case("gmail") {
                     return Err(GMAIL_PERMANENT_DELETE_UNAVAILABLE.into());
                 }
-                self.receipt.permanently_deleted.push(id.clone());
                 let refs = rows
                     .iter()
                     .filter_map(Message::remote_ref)
                     .collect::<Vec<_>>();
+                if !refs.is_empty() && provider.eq_ignore_ascii_case("imap") {
+                    let mut action =
+                        remote_mutation(account, RemoteMutationPayload::Delete { refs })?;
+                    action.id = format!("{IMAP_TRASH_DELETE_ID_PREFIX}{id}");
+                    let already_queued: bool =
+                        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM sync_queue WHERE id = ?)")
+                            .bind(&action.id)
+                            .fetch_one(&mut **tx)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                    self.queued.push(action.id.clone());
+                    if !already_queued {
+                        actions.push(action);
+                    }
+                    self.receipt.queued_deletions.push(id.clone());
+                    continue;
+                }
                 if !refs.is_empty() {
                     let action = remote_mutation(account, RemoteMutationPayload::Delete { refs })?;
                     self.queued.push(action.id.clone());
                     actions.push(action);
                 }
+                self.receipt.permanently_deleted.push(id.clone());
                 removed.push(id.clone());
                 continue;
             }

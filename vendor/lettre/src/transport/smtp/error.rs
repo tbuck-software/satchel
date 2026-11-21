@@ -3,8 +3,8 @@
 use std::{error::Error as StdError, fmt};
 
 use crate::{
-    transport::smtp::response::{Code, Severity},
     BoxError,
+    transport::smtp::response::{Code, Response, Severity},
 };
 
 // Inspired by https://github.com/seanmonstar/reqwest/blob/a8566383168c0ef06c21f38cbc9213af6ff6db31/src/error.rs
@@ -193,6 +193,11 @@ pub(crate) fn code(c: Code, s: Option<String>) -> Error {
         Severity::PermanentNegativeCompletion => Error::new(Kind::Permanent(c), s),
         _ => client("Unknown error code"),
     }
+}
+
+/// Builds the error for a negative reply, keeping every line of the response.
+pub(crate) fn code_from_response(response: &Response) -> Error {
+    code(response.code(), Some(response.message_joined()))
 }
 
 pub(crate) fn response<E: Into<BoxError>>(e: E) -> Error {

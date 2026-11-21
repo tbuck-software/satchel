@@ -53,6 +53,7 @@ const ACTION_KEYS: Record<string, string> = {
   send_message: 'outbox.action.sendMessage',
   remote_mutation: 'outbox.action.remoteMutation',
   sync_draft: 'outbox.action.syncDraft',
+  rule_forward: 'outbox.action.ruleForward',
 };
 
 /** Remote mutation `kind`s, so a failed change says what it was. */
@@ -72,8 +73,10 @@ const MUTATION_KEYS: Record<string, string> = {
 
 /** Failed background work, as opposed to a mail send. */
 export function isSyncAction(actionType: string): boolean {
-  return actionType === 'remote_mutation' || actionType === 'sync_draft';
+  return actionType === 'remote_mutation' || actionType === 'sync_draft' || actionType === 'rule_forward';
 }
+
+const HELD_SENT_COPY_ERROR = 'backend.errors.sentCopyHeldAfterRestore';
 
 const OVERDUE_KEY = 'outbox.time.overdueSince';
 
@@ -96,18 +99,26 @@ export function outboxActionCanBeCancelled(
   actionType: string,
   status: string,
   mutationKind?: string | null,
+  lastError?: string | null,
 ): boolean {
-  // A queued Sent copy may hold the only bytes of a delivered mail.
-  if (isSyncAction(actionType)) return status === 'failed' && mutationKind !== 'append_sent';
+  if (isSyncAction(actionType)) {
+    return status === 'failed' && (mutationKind !== 'append_sent' || lastError === HELD_SENT_COPY_ERROR);
+  }
   // Only mail that is known not to have reached the provider may be discarded.
   return actionType === 'send_message' && ['pending', 'scheduled', 'failed'].includes(status);
 }
 
 /** What discarding a failed background action leaves behind. */
-export function syncActionDiscardHintKey(actionType: string, mutationKind?: string | null): string | null {
+export function syncActionDiscardHintKey(
+  actionType: string,
+  mutationKind?: string | null,
+  lastError?: string | null,
+): string | null {
   if (actionType === 'sync_draft') return 'outbox.draftDiscardHint';
   if (actionType !== 'remote_mutation') return null;
-  if (mutationKind === 'append_sent') return 'outbox.sentCopyHint';
+  if (mutationKind === 'append_sent') {
+    return lastError === HELD_SENT_COPY_ERROR ? 'outbox.heldSentCopyDiscardBody' : 'outbox.sentCopyHint';
+  }
   if (mutationKind === 'delete' || mutationKind === 'delete_draft') return 'outbox.deleteDiscardHint';
   if (mutationKind === 'workflow_move' || mutationKind === 'blocked_move') return 'outbox.moveDiscardHint';
   return 'outbox.changeDiscardHint';

@@ -335,6 +335,7 @@
         "sendMessage": "Send",
         "remoteMutation": "Server sync",
         "syncDraft": "Save draft on server",
+        "ruleForward": "Forward by mail rule",
         "flags": "Read or star status",
         "move": "Move",
         "delete": "Delete",
@@ -360,6 +361,7 @@
       },
       "attemptCount": "Attempts",
       "error": {
+        "preRestore": "Error before restore or import",
         "heading": "What happened",
         "technical": "Technical details",
         "rateLimit": "{provider} is not accepting more mail right now (send limit). Satchel will retry automatically.",
@@ -381,6 +383,8 @@
       "changeDiscardHint": "Discard stops retrying this change. The server keeps its current state.",
       "deleteDiscardHint": "Discard stops retrying this deletion. Messages already removed from this device are not restored. Any remaining server copies are kept.",
       "draftDiscardHint": "Discard stops uploading this draft. The draft stays on this device.",
+      "heldSentCopyDiscardTitle": "Discard the held Sent copy?",
+      "heldSentCopyDiscardBody": "This outbox entry may contain the only copy of the sent email. Discarding it permanently deletes that copy from the Outbox.",
       "sentCopyHint": "This sent email may exist only in this entry, so it can be retried but not discarded."
     }
   },
@@ -720,6 +724,7 @@
         "sendMessage": "Senden",
         "remoteMutation": "Serverabgleich",
         "syncDraft": "Entwurf auf dem Server speichern",
+        "ruleForward": "Per Mail-Regel weiterleiten",
         "flags": "Gelesen- oder Stern-Status",
         "move": "Verschieben",
         "delete": "Löschen",
@@ -745,6 +750,7 @@
       },
       "attemptCount": "Versuche",
       "error": {
+        "preRestore": "Fehler vor der Wiederherstellung oder dem Import",
         "heading": "Was passiert ist",
         "technical": "Technische Details",
         "rateLimit": "{provider} nimmt gerade keine weiteren Mails an (Sendelimit). Satchel versucht es automatisch erneut.",
@@ -766,6 +772,8 @@
       "changeDiscardHint": "Verwerfen beendet die Wiederholungen dieser Änderung. Der Server behält seinen Stand.",
       "deleteDiscardHint": "Verwerfen beendet die Löschversuche. Bereits von diesem Gerät entfernte Mails werden dabei nicht wiederhergestellt. Noch vorhandene Serverkopien bleiben erhalten.",
       "draftDiscardHint": "Verwerfen beendet das Hochladen dieses Entwurfs. Der Entwurf bleibt auf diesem Gerät.",
+      "heldSentCopyDiscardTitle": "Angehaltene Kopie der gesendeten E-Mail verwerfen?",
+      "heldSentCopyDiscardBody": "Dieser Eintrag enthält möglicherweise die einzige Kopie der gesendeten E-Mail. Beim Verwerfen wird sie unwiderruflich aus dem Postausgang gelöscht.",
       "sentCopyHint": "Diese gesendete E-Mail liegt womöglich nur in diesem Eintrag vor. Deshalb lässt sich der Eintrag erneut versuchen, aber nicht verwerfen."
     }
   }

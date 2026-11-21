@@ -120,7 +120,7 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
  * with the JavaScript dependency refresh, main measures 218.8 KiB, viewer
  * 124.0 and tray 69.0 KiB; no application feature moved into startup. */
 const budgets = {
-  'index.html': { entryGzip: 108 * 1024, initialGzip: 219 * 1024, locales: ['src/i18n/startup.en.json', 'src/i18n/startup.de.json'] },
+  'index.html': { entryGzip: 108 * 1024, initialGzip: 219.5 * 1024, locales: ['src/i18n/startup.en.json', 'src/i18n/startup.de.json'] },
   'tray.html': { entryGzip: 5 * 1024, initialGzip: 75 * 1024, locales: ['src/i18n/tray.en.json', 'src/i18n/tray.de.json'] },
   'viewer.html': { entryGzip: 5 * 1024, initialGzip: 130 * 1024, locales: ['src/i18n/viewer.en.json', 'src/i18n/viewer.de.json'] },
 };
@@ -131,7 +131,10 @@ const budgets = {
  * startup catalogue (every backend.* key ships there) and the rest of its
  * copy into its lazy chunks: German 32.9 → 33.1 KiB after prefetch, initial
  * JS 211.3 → 211.4 KiB, entry unchanged at 105.1 KiB. */
-const CATALOGUE_AFTER_PREFETCH_GZIP = 35 * 1024;
+// IMAP draft and deletion recovery and held Outbox actions share startup
+// error messages. With both locales the largest initial load is 219.3 KiB
+// gzip, and the German catalogue reaches 35.3 KiB after idle prefetch.
+const CATALOGUE_AFTER_PREFETCH_GZIP = 35.5 * 1024;
 
 /**
  * @param {string} entry
@@ -180,7 +183,7 @@ for (const [entry, budget] of Object.entries(budgets)) {
     failed = true;
     process.stderr.write(
       `${entry} exceeds its budget: entry <= ${(budget.entryGzip / 1024).toFixed(0)} KiB, `
-        + `initial JS <= ${(budget.initialGzip / 1024).toFixed(0)} KiB gzip\n`,
+        + `initial JS <= ${budget.initialGzip / 1024} KiB gzip\n`,
     );
   }
 }
@@ -222,7 +225,7 @@ for (const [entry, budget] of Object.entries(budgets)) {
   if (largest > CATALOGUE_AFTER_PREFETCH_GZIP) {
     failed = true;
     process.stderr.write(
-      `index.html catalogue after idle prefetch exceeds ${(CATALOGUE_AFTER_PREFETCH_GZIP / 1024).toFixed(0)} KiB gzip\n`,
+      `index.html catalogue after idle prefetch exceeds ${CATALOGUE_AFTER_PREFETCH_GZIP / 1024} KiB gzip\n`,
     );
   }
 }

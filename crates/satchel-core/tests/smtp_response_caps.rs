@@ -30,8 +30,12 @@ fn hostile_peer(
     (address, server, release)
 }
 
-fn oversized_line() -> Vec<u8> {
-    format!("220 {}\r\n", "x".repeat(1000)).into_bytes()
+fn oversized_replies() -> [Vec<u8>; 3] {
+    [
+        format!("220 {}\r\n", "x".repeat(100_000)).into_bytes(),
+        oversized_response(),
+        format!("220 {}", "x".repeat(100_000)).into_bytes(),
+    ]
 }
 
 fn oversized_response() -> Vec<u8> {
@@ -42,14 +46,7 @@ fn oversized_response() -> Vec<u8> {
 
 #[test]
 fn synchronous_reader_rejects_oversized_replies() {
-    for (reply, message) in [
-        (oversized_line(), "SMTP response line too long"),
-        (oversized_response(), "SMTP response too large"),
-        (
-            format!("220 {}", "x".repeat(1000)).into_bytes(),
-            "SMTP response line too long",
-        ),
-    ] {
+    for reply in oversized_replies() {
         let (address, server, release) = hostile_peer(reply);
         let result = SmtpConnection::connect(
             address,
@@ -62,20 +59,16 @@ fn synchronous_reader_rejects_oversized_replies() {
         server.join().unwrap();
         let error = result.err().expect("oversized reply must fail");
         assert!(error.is_response(), "{error:?}");
-        assert!(error.to_string().contains(message), "{error}");
+        assert!(
+            error.to_string().contains("SMTP response too large"),
+            "{error}"
+        );
     }
 }
 
 #[tokio::test]
 async fn asynchronous_reader_rejects_oversized_replies() {
-    for (reply, message) in [
-        (oversized_line(), "SMTP response line too long"),
-        (oversized_response(), "SMTP response too large"),
-        (
-            format!("220 {}", "x".repeat(1000)).into_bytes(),
-            "SMTP response line too long",
-        ),
-    ] {
+    for reply in oversized_replies() {
         let (address, server, release) = hostile_peer(reply);
         let result = tokio::time::timeout(
             Duration::from_secs(10),
@@ -93,6 +86,9 @@ async fn asynchronous_reader_rejects_oversized_replies() {
         server.join().unwrap();
         let error = result.err().expect("oversized reply must fail");
         assert!(error.is_response(), "{error:?}");
-        assert!(error.to_string().contains(message), "{error}");
+        assert!(
+            error.to_string().contains("SMTP response too large"),
+            "{error}"
+        );
     }
 }
