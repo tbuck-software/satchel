@@ -19,7 +19,7 @@ test-support = []
 test-hooks = []
 
 [dependencies]
-aes-gcm = "0.10"
+aes-gcm = "0.11"
 ammonia = "4.2.4"
 argon2 = "0.6"
 async-imap = { version = "0.11.2", default-features = false, features = ["runtime-tokio"] }
