@@ -65,8 +65,8 @@ hickory-resolver = "0.26"
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
 mdns-sd = "0.17.1"
 whoami = "1.6"
-wasmtime = { version = "48.0.9", features = ["component-model"] }
-wasmtime-wasi = "48.0.9"
+wasmtime = { version = "48.0.10", features = ["component-model"] }
+wasmtime-wasi = "48.0.10"
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-autostart = "2"
 # Releases use raw NSIS/AppImage payloads. Legacy ZIP support adds an unused,

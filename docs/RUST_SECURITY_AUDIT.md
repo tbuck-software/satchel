@@ -123,14 +123,15 @@ remove the warnings by updating their parents when compatible releases exist.
 
 ## Wasmtime and vendored dependencies
 
-The desktop plugin runtime uses Wasmtime and wasmtime-wasi 48.0.9. This
-release fixes RUSTSEC-2026-0566, RUSTSEC-2026-0567, RUSTSEC-2026-0569,
+The desktop plugin runtime uses Wasmtime and wasmtime-wasi 48.0.10. This
+release fixes the Windows WASI filesystem issue RUSTSEC-2026-0587 and retains
+the fixes for RUSTSEC-2026-0566, RUSTSEC-2026-0567, RUSTSEC-2026-0569,
 RUSTSEC-2026-0571 and RUSTSEC-2026-0573. Version 36.0.21 still falls
 within the affected range for RUSTSEC-2026-0567 and RUSTSEC-2026-0573.
 Plugin runtime tests run with built components required.
 
 The plugin compilation cache remains enabled. Satchel vendors
-`wasmtime-internal-cache` 48.0.9 with only its zstd dependency requirement
+`wasmtime-internal-cache` 48.0.10 with only its zstd dependency requirement
 changed to 0.14.3. The root lockfile now uses zstd 0.14.3, zstd-safe 8.2.0 and
 zstd-sys 2.1.2, fixing RUSTSEC-2026-0391, RUSTSEC-2026-0398,
 RUSTSEC-2026-0403 and RUSTSEC-2026-0410 and removing the zstd-safe unsoundness
