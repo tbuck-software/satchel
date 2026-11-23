@@ -1218,7 +1218,9 @@ async function send() {
       announceAfterClose('success', t('app.mail.sent'));
       await Promise.all([
         accountsStore.load(),
-        threadsStore.load(),
+        // The send may have filed the thread as Done (ADR 0022). The list
+        // page no longer carries it, so its own row is read back as well.
+        threadsStore.load().then(() => threadsStore.refreshThreads([result.thread_id])),
         messagesStore.loadByThread(result.thread_id),
       ]);
       emit('sent');

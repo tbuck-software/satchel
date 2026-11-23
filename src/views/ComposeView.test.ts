@@ -15,6 +15,7 @@ const harness = vi.hoisted(() => ({
   sendMessage: vi.fn(),
   fetchDraft: vi.fn(),
   draftsLoad: vi.fn(),
+  refreshThreads: vi.fn(),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
   resume: vi.fn(),
@@ -74,7 +75,11 @@ vi.mock('@/stores/templates', () => ({
   useTemplatesStore: () => ({ load: harness.templatesLoad, get loadFailed() { return harness.templatesLoadFailed; }, items: [] }),
 }));
 vi.mock('@/stores/threads', () => ({
-  useThreadsStore: () => ({ threads: [], load: vi.fn().mockResolvedValue(undefined) }),
+  useThreadsStore: () => ({
+    threads: [],
+    load: vi.fn().mockResolvedValue(undefined),
+    refreshThreads: harness.refreshThreads,
+  }),
 }));
 
 vi.mock('@/composables/useAttachmentActions', () => ({
@@ -231,6 +236,7 @@ beforeEach(() => {
   harness.fetchDraft.mockResolvedValue(null);
   harness.initialDraftIdentity = 'draft-1';
   harness.draftsLoad.mockResolvedValue(undefined);
+  harness.refreshThreads.mockResolvedValue(undefined);
   harness.isPopout.mockReturnValue(false);
   harness.getByThread.mockReturnValue([]);
   harness.loadAttachmentsForMessages.mockResolvedValue(undefined);
@@ -704,6 +710,20 @@ describe('composer send failure', () => {
     // Reply on the thread picks its draft from this list; a stale entry
     // would reopen the sent draft and fail with "no longer available".
     expect(harness.draftsLoad).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads back the answered thread, which the list page may no longer carry', async () => {
+    harness.sendMessage.mockResolvedValue({
+      status: 'sent',
+      thread_id: 'thread-1',
+      message_id: 'message-1',
+    } as BackendSendMessageResult);
+    const wrapper = render();
+    await flushPromises();
+
+    await send(wrapper);
+
+    expect(harness.refreshThreads).toHaveBeenCalledWith(['thread-1']);
   });
 
   it('leaves the drafts list alone when the send fails', async () => {

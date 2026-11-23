@@ -108,6 +108,8 @@ export interface ThreadFilterBucketsSurface {
 
 export interface ThreadFilterBuckets extends ThreadFilterBucketsSurface {
   compareThreads(a: Thread, b: Thread): number;
+  /** The row the open reader holds; a list load keeps it (ADR 0022). */
+  heldThreadId(): string;
 }
 
 export interface ThreadFilterBucketsModule {
@@ -703,7 +705,7 @@ export function createThreadFilterBuckets({
 
   return {
     surface,
-    filter: { ...surface, compareThreads },
+    filter: { ...surface, compareThreads, heldThreadId: () => heldThreadId.value },
     onScopeChange(listener) {
       scopeListeners.push(listener);
     },

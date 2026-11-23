@@ -52,6 +52,7 @@ type PersistenceFilter = Pick<
   | 'visibleThreads'
   | 'newSenderStack'
   | 'compareThreads'
+  | 'heldThreadId'
 >;
 
 interface PersistenceSelectionBridge {
@@ -661,6 +662,13 @@ export function createThreadPersistence({
     // the explicitly retained detail avoids leaking stale rows into the list.
     if (retainedDetail && !nextThreads.some((thread) => thread.id === retainedDetail.id)) {
       nextThreads.push(retainedDetail);
+    }
+    // The open reader's row stays too, or a reload right after a send would
+    // drop the thread it just filed from under the reader (ADR 0022).
+    const heldId = filter.heldThreadId();
+    const held = heldId ? collection.find(heldId) : undefined;
+    if (held && !nextThreads.some((thread) => thread.id === held.id)) {
+      nextThreads.push(held);
     }
     collection.replaceAll(nextThreads);
     cursorInputKey = threadListInputKey(input);
