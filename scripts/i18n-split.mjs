@@ -45,6 +45,9 @@ export const MAIN_ENTRY = 'src/main.ts';
 /** The other windows' entries. Keys only they mention stay out of main. */
 export const OTHER_ENTRIES = ['src/viewer/main.ts', 'src/tray/main.ts'];
 
+// The production graph cannot see tray-only strings in the swapped transport.
+export const TRAY_MOCK_MESSAGE_PREFIX = 'tray.demo';
+
 export const STARTUP = {
   /*
    * Command errors arrive from Rust as `{ key, params }`, and any command,
@@ -218,6 +221,7 @@ export function computeSplit(allKeys, options = {}) {
   const startupModules = staticClosure(roots);
   const mainMentions = mentions(modules);
   const elsewhere = mentions([...windowGraph(OTHER_ENTRIES.map(abs)).modules]);
+  for (const key of index.expand(TRAY_MOCK_MESSAGE_PREFIX, false)) elsewhere.add(key);
 
   const startup = mentions(startupModules);
   const rust = rustKeys(index);

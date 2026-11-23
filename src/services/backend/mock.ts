@@ -1,3 +1,5 @@
+import { t } from '@/i18n/runtime';
+import type { BackendTraySnapshot } from './system';
 import { MOCK_PDF_BASE64 } from './mockPdf';
 import { createPersistedSlot, persistence } from '@/persistence';
 import type { BackendAccountQuota, BackendAccountVisibilityPolicy } from './accounts';
@@ -1650,6 +1652,45 @@ let relayPhase = 'idle';
 let relayChanged = 0;
 const relayPeers = new Map<string, string>();
 const setupOffers = new Map<string, 'waiting' | 'searching' | 'sent'>();
+const dismissedTrayThreads = new Set<string>();
+
+function mockTraySnapshot(): BackendTraySnapshot {
+  const now = Date.now();
+  const nextStart = new Date(now);
+  nextStart.setDate(nextStart.getDate() + 3);
+  nextStart.setHours(10, 0, 0, 0);
+  const nextEnd = new Date(nextStart.getTime() + 60 * 60_000);
+  return {
+    new_threads: [
+      {
+        id: 'tray-demo-1',
+        sender_name: 'Mara Hoffmann',
+        sender_address: 'mara@example.com',
+        subject: t('tray.demo.releaseApproval'),
+        received_at: new Date(now - 4 * 60_000).toISOString(),
+        is_unread: true,
+      },
+      {
+        id: 'tray-demo-2',
+        sender_name: 'Jonas Weber',
+        sender_address: 'jonas@example.com',
+        subject: t('tray.demo.workshopNotes'),
+        received_at: new Date(now - 18 * 60_000).toISOString(),
+        is_unread: true,
+      },
+    ].filter((thread) => !dismissedTrayThreads.has(thread.id)),
+    upcoming_events: [
+      {
+        title: t('tray.demo.projectMeeting'),
+        starts_at: nextStart.toISOString(),
+        ends_at: nextEnd.toISOString(),
+        all_day: false,
+        location: 'Google Meet',
+      },
+    ],
+  };
+}
+
 const handlers: Record<string, Handler> = {
   account_transfer: ({ action, session }) => {
     const id = String(session);
@@ -1768,6 +1809,13 @@ const handlers: Record<string, Handler> = {
     return { ...notificationPreferences };
   },
   set_background_sync: () => null,
+  tray_snapshot: mockTraySnapshot,
+  open_tray_thread: () => null,
+  open_tray_destination: () => null,
+  act_on_tray_thread: ({ input }) => {
+    const { thread_id: threadId } = input as { thread_id: string };
+    dismissedTrayThreads.add(threadId);
+  },
   // The shell answers for itself; the mock answers for the device it runs on,
   // so a phone-sized run hides the tray and keyboard settings as a phone does.
   runtime_capabilities: () => {

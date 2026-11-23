@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { buildBundles, keyPaths, pick, sortDeep } from './i18n-catalogue.mjs';
 import { messageKeys, moduleGraph } from './i18n-graph.mjs';
-import { computeSplit, unanchoredKeyCalls } from './i18n-split.mjs';
+import { computeSplit, TRAY_MOCK_MESSAGE_PREFIX, unanchoredKeyCalls } from './i18n-split.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -98,7 +98,8 @@ export const SUBSETS = {
     // Command errors arrive as backend-provided keys. Only the tray commands'
     // own keys ship; anything else falls back to `unexpected` at runtime.
     extraKeys: ['backend.errors.unexpected', 'backend.errors.calendarPersistenceFailed'],
-    extraPrefixes: [],
+    // The swapped mock transport supplies these strings to the tray.
+    extraPrefixes: [TRAY_MOCK_MESSAGE_PREFIX],
     // Rust sources scanned for `backend.errors.*` literals.
     backendSources: ['src-tauri/src/commands/tray.rs'],
   },

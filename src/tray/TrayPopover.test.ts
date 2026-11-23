@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia } from 'pinia';
-import { flushPromises, mount } from '@vue/test-utils';
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 
 const { traySnapshot, openThread, openDestination, actOnThread } = vi.hoisted(() => ({
   traySnapshot: vi.fn(),
@@ -14,9 +14,13 @@ const tauriWindow = vi.hoisted(() => ({
   hide: vi.fn(),
 }));
 
-vi.mock('@/services/backend', () => ({
-  backendCommandsAvailable: vi.fn(() => true),
-  backendSupportsNativeCommands: vi.fn(() => true),
+const supportsNative = vi.hoisted(() => vi.fn(() => true));
+vi.mock('@/services/backend/core', () => ({
+  backendCommandsAvailable: () => true,
+  backendSupportsNativeCommands: supportsNative,
+}));
+
+vi.mock('@/services/backend/system', () => ({
   backendTraySnapshot: traySnapshot,
   backendOpenTrayThread: openThread,
   backendOpenTrayDestination: openDestination,
@@ -32,6 +36,8 @@ vi.mock('@/components/common/Avatar.vue', () => ({
 }));
 
 import TrayPopover from './TrayPopover.vue';
+
+enableAutoUnmount(afterEach);
 
 function mountPopover() {
   return mount(TrayPopover, { global: { plugins: [createPinia()] } });
@@ -171,5 +177,31 @@ describe('tray briefing', () => {
     expect(wrapper.text()).toContain('All clear');
     expect(wrapper.text()).toContain('No upcoming events found.');
     expect(wrapper.text()).not.toMatch(/\b\d+ unread\b/i);
+  });
+
+  it('loads and updates the briefing through the mock transport outside Tauri', async () => {
+    const { sendCommand } = await import('@/services/backend/mock');
+    supportsNative.mockReturnValue(false);
+    traySnapshot.mockImplementation(() => sendCommand('tray_snapshot'));
+    actOnThread.mockImplementation((threadId, action) =>
+      sendCommand('act_on_tray_thread', { input: { thread_id: threadId, action } }),
+    );
+    const wrapper = mountPopover();
+    try {
+      await flushPromises();
+      expect(wrapper.findAll('.mail-card')).toHaveLength(2);
+      expect(wrapper.get('.event-card').text()).toContain('Project meeting');
+      await wrapper.get('button[aria-label="Mark as done"]').trigger('click');
+      await flushPromises();
+      expect(wrapper.findAll('.mail-card')).toHaveLength(1);
+
+      window.dispatchEvent(new Event('focus'));
+      await flushPromises();
+      expect(wrapper.findAll('.mail-card')).toHaveLength(1);
+      expect(wrapper.get('.mail-card').text()).toContain('Jonas Weber');
+    } finally {
+      supportsNative.mockReturnValue(true);
+      wrapper.unmount();
+    }
   });
 });

@@ -94,7 +94,7 @@ async function run(job: BackendMergeJob, action: BackendMergeJobAction) {
 }
 
 async function toggleDetail(job: BackendMergeJob) {
-  if (store.detail?.job.id === job.id) {
+  if (store.detailJobId === job.id) {
     store.closeDetail();
     return;
   }
@@ -107,10 +107,14 @@ async function toggleDetail(job: BackendMergeJob) {
 </script>
 
 <template>
-  <section v-if="jobs.length > 0" class="merge-jobs" data-testid="mail-merge-jobs">
+  <section v-if="jobs.length > 0 || store.error" class="merge-jobs" data-testid="mail-merge-jobs">
     <SectionHeading :label="$t('mailMerge.jobs.title')" :count="jobs.length" />
-    <AppBanner v-if="store.error" tone="danger" :title="$t('mailMerge.jobs.loadFailed')" :detail="backendErrorLabel(store.error)" />
-    <ul class="merge-jobs__list">
+    <AppBanner v-if="store.error" tone="danger" variant="card" :title="$t('mailMerge.jobs.loadFailed')" :detail="backendErrorLabel(store.error)">
+      <template #actions>
+        <AppButton size="sm" variant="soft" @click="store.load()">{{ $t('common.retry') }}</AppButton>
+      </template>
+    </AppBanner>
+    <ul v-if="jobs.length > 0" class="merge-jobs__list">
       <li v-for="job in jobs" :key="job.id" class="merge-job" :data-status="job.status">
         <div class="merge-job__head">
           <div class="merge-job__titles">
@@ -139,7 +143,7 @@ async function toggleDetail(job: BackendMergeJob) {
           {{ $t('mailMerge.jobs.next', { time: formatTimestamp(job.next_send_at) }) }}
         </p>
         <AppButton size="sm" variant="link" :aria-expanded="store.detail?.job.id === job.id" @click="toggleDetail(job)">
-          {{ store.detail?.job.id === job.id ? $t('mailMerge.jobs.hideRecipients') : $t('mailMerge.jobs.showRecipients') }}
+          {{ store.detailJobId === job.id ? $t('mailMerge.jobs.hideRecipients') : $t('mailMerge.jobs.showRecipients') }}
         </AppButton>
         <ol v-if="store.detail?.job.id === job.id" class="merge-job__rows" data-testid="mail-merge-job-rows">
           <li v-for="row in store.detail.recipients" :key="row.id" class="merge-job__row" :data-status="row.status">

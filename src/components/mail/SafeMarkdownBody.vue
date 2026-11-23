@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { computed, nextTick, provide, ref } from 'vue';
+import { computed, provide, ref } from 'vue';
 import { X } from 'lucide';
 import { parseSafeMarkdown } from '@/utils/safeMarkdown';
 import type { LinkInteraction } from '@/utils/externalLinks';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import IconButton from '@/components/ui/IconButton.vue';
+import { useDismissableOnTop } from '@/composables/useDismissable';
+import { useFocusTrap } from '@/composables/useFocusTrap';
+import { useUiStore } from '@/stores/ui';
 import SafeMarkdownNode from './SafeMarkdownNode.vue';
 
 const props = withDefaults(defineProps<{
@@ -22,6 +25,10 @@ const emit = defineEmits<{
 const document = computed(() => parseSafeMarkdown(props.text));
 const previewImage = ref<{ src: string; alt: string } | null>(null);
 const lightbox = ref<HTMLElement | null>(null);
+const ui = useUiStore();
+const isLightboxOpen = () => previewImage.value !== null;
+const { onTab } = useFocusTrap(lightbox, { isOpen: isLightboxOpen, restingFocus: 'container' });
+useDismissableOnTop(isLightboxOpen, closeImagePreview);
 
 provide('satchel-allow-markdown-images', computed(() => props.allowRemoteImages));
 provide('satchel-open-markdown-link', (payload: LinkInteraction) => {
@@ -30,10 +37,8 @@ provide('satchel-open-markdown-link', (payload: LinkInteraction) => {
 provide('satchel-hover-markdown-link', (payload: LinkInteraction | null) => {
   emit('link-hover', payload);
 });
-provide('satchel-open-markdown-image', async (payload: { src: string; alt: string }) => {
+provide('satchel-open-markdown-image', (payload: { src: string; alt: string }) => {
   previewImage.value = payload;
-  await nextTick();
-  lightbox.value?.focus();
 });
 
 function closeImagePreview() {
@@ -60,7 +65,8 @@ function closeImagePreview() {
         :aria-label="$t('mail.markdown.imagePreview')"
         tabindex="-1"
         @click.self="closeImagePreview"
-        @keydown.esc="closeImagePreview"
+        @keydown.tab="onTab"
+        @keydown.esc.stop.prevent="ui.dismissTopmostOverlay()"
       >
         <figure class="md-lightbox__figure">
           <img
@@ -150,9 +156,9 @@ function closeImagePreview() {
 .safe-markdown :deep(.md-inline-code) {
   border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
   border-radius: var(--radius-xs);
-  background: color-mix(in srgb, var(--bg-overlay) 62%, transparent);
+  background: var(--bg-overlay);
   padding: 0.08em 0.34em;
-  color: color-mix(in srgb, var(--accent-cyan) 72%, var(--text-primary));
+  color: color-mix(in srgb, var(--accent-cyan) 50%, var(--text-primary));
   font-family: var(--font-mono);
   font-size: 0.9em;
 }
@@ -272,7 +278,7 @@ function closeImagePreview() {
   gap: 0.35em;
   margin: 0.35em 0;
   border-radius: var(--radius-xs);
-  background: color-mix(in srgb, var(--bg-inset) 68%, transparent);
+  background: var(--bg-inset);
   padding: 0.38em 0.58em;
   color: var(--text-tertiary);
   font-family: var(--font-sans);

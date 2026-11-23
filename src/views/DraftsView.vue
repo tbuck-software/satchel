@@ -474,7 +474,7 @@ async function discardDraft(id: string) {
   border: 1px solid color-mix(in srgb, var(--text-tertiary) 72%, transparent);
   border-radius: 50%;
   color: var(--text-secondary);
-  background: color-mix(in srgb, var(--bg-overlay) 56%, transparent);
+  background: var(--bg-overlay);
   overflow: hidden;
 }
 

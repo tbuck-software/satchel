@@ -9,16 +9,16 @@ import { Check, ChevronRight, Clock, Settings, SquarePen } from 'lucide';
 import IconButton from '@/components/ui/IconButton.vue';
 import SectionHeading from '@/components/ui/SectionHeading.vue';
 import SkeletonRow from '@/components/ui/SkeletonRow.vue';
+import { backendCommandsAvailable, backendSupportsNativeCommands } from '@/services/backend/core';
+import type { BackendTrayCalendarEvent } from '@/types/calendar';
 import {
   backendActOnTrayThread,
   backendOpenTrayDestination,
   backendOpenTrayThread,
-  backendSupportsNativeCommands,
   backendTraySnapshot,
-  type BackendTrayCalendarEvent,
   type BackendTraySnapshot,
   type BackendTrayThread,
-} from '@/services/backend';
+} from '@/services/backend/system';
 
 const { locale, t } = useI18n();
 const snapshot = ref<BackendTraySnapshot | null>(null);
@@ -28,7 +28,6 @@ const actingThreadId = ref<string | null>(null);
 const actionError = ref('');
 let loadPromise: Promise<void> | null = null;
 
-const native = backendSupportsNativeCommands();
 const now = ref(Date.now());
 const todayLabel = computed(() =>
   new Intl.DateTimeFormat(locale.value, {
@@ -37,43 +36,6 @@ const todayLabel = computed(() =>
     month: 'long',
   }).format(new Date(now.value)),
 );
-
-const mockSnapshot = (): BackendTraySnapshot => {
-  const now = Date.now();
-  const nextStart = new Date(now);
-  nextStart.setDate(nextStart.getDate() + 3);
-  nextStart.setHours(10, 0, 0, 0);
-  const nextEnd = new Date(nextStart.getTime() + 60 * 60_000);
-  return {
-    new_threads: [
-      {
-        id: 'tray-demo-1',
-        sender_name: 'Mara Hoffmann',
-        sender_address: 'mara@example.com',
-        subject: t('tray.demo.releaseApproval'),
-        received_at: new Date(now - 4 * 60_000).toISOString(),
-        is_unread: true,
-      },
-      {
-        id: 'tray-demo-2',
-        sender_name: 'Jonas Weber',
-        sender_address: 'jonas@example.com',
-        subject: t('tray.demo.workshopNotes'),
-        received_at: new Date(now - 18 * 60_000).toISOString(),
-        is_unread: true,
-      },
-    ],
-    upcoming_events: [
-      {
-        title: t('tray.demo.projectMeeting'),
-        starts_at: nextStart.toISOString(),
-        ends_at: nextEnd.toISOString(),
-        all_day: false,
-        location: 'Google Meet',
-      },
-    ],
-  };
-};
 
 const threads = computed(() => snapshot.value?.new_threads ?? []);
 const upcomingEvents = computed(() => snapshot.value?.upcoming_events ?? []);
@@ -176,7 +138,8 @@ async function loadSnapshot() {
   loadError.value = '';
   loadPromise = (async () => {
     try {
-      snapshot.value = native ? await backendTraySnapshot() : mockSnapshot();
+      if (backendCommandsAvailable()) snapshot.value = await backendTraySnapshot();
+      else loadError.value = t('backend.errors.desktopUnavailable');
     } catch (error) {
       loadError.value = error instanceof Error ? error.message : String(error);
     } finally {
@@ -191,13 +154,13 @@ async function loadSnapshot() {
 }
 
 async function hidePopover() {
-  if (!native) return;
+  if (!backendSupportsNativeCommands()) return;
   const { getCurrentWindow } = await import('@tauri-apps/api/window');
   await getCurrentWindow().hide();
 }
 
 async function openThread(threadId: string) {
-  if (native) await backendOpenTrayThread(threadId);
+  await backendOpenTrayThread(threadId);
 }
 
 async function actOnThread(
@@ -210,7 +173,7 @@ async function actOnThread(
   actingThreadId.value = threadId;
   actionError.value = '';
   try {
-    if (native) await backendActOnTrayThread(threadId, action);
+    await backendActOnTrayThread(threadId, action);
     if (snapshot.value) {
       snapshot.value = {
         ...snapshot.value,
@@ -228,7 +191,7 @@ async function actOnThread(
 async function openDestination(
   destination: 'inbox' | 'calendar' | 'compose' | 'settings' | 'calendar_settings',
 ) {
-  if (native) await backendOpenTrayDestination(destination);
+  if (backendCommandsAvailable()) await backendOpenTrayDestination(destination);
 }
 
 function onKeydown(event: KeyboardEvent) {
@@ -249,14 +212,11 @@ function onVisibilityChange() {
 
 onMounted(async () => {
   window.addEventListener('keydown', onKeydown);
-  if (native) {
-    window.addEventListener('focus', onFocus);
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    // The webview is created hidden; if it was shown before mounting, load now.
-    if (document.hasFocus()) await loadSnapshot();
-  } else {
-    await loadSnapshot();
-  }
+  window.addEventListener('focus', onFocus);
+  document.addEventListener('visibilitychange', onVisibilityChange);
+  // Taking a snapshot acknowledges the briefed mail, so wait for the tray
+  // to be shown if its webview was created hidden.
+  if (document.hasFocus()) await loadSnapshot();
 });
 
 onBeforeUnmount(() => {

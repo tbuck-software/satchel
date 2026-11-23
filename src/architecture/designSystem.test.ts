@@ -360,38 +360,12 @@ const MAX_KNOWN_FOCUS_SUPPRESSIONS = 9;
 /*
  * Where one rule sets both its own background and a --text-* colour, the pair
  * is resolved against tokens.css for dark and light and measured: 4.5:1 for
- * every text token (WCAG 2.1 AA). These are the pairs that miss it today.
+ * every text token (WCAG 2.1 AA).
  */
-const KNOWN_CONTRAST_MISSES: KnownViolation[] = [
-  {
-    file: 'src/components/mail/EmailRenderer.vue',
-    count: 1,
-    reason: 'Raw PGP segment on a 55% overlay, 2.99:1 light.',
-  },
-  {
-    file: 'src/components/mail/SafeMarkdownBody.vue',
-    count: 2,
-    reason: 'Inline code and image-error fills, 4.34:1 and 2.95:1 light.',
-  },
-  {
-    file: 'src/components/onboarding/OnboardingFlow.vue',
-    count: 1,
-    reason: 'Close button: --text-tertiary on an 86% raised fill, 3.67:1 light.',
-  },
-  {
-    file: 'src/components/settings/KeybindingEditor.vue',
-    count: 1,
-    reason: 'Table head on a 66% raised fill, 2.90:1 light.',
-  },
-  {
-    file: 'src/views/DraftsView.vue',
-    count: 1,
-    reason: 'Draft avatar: --text-secondary on a 56% overlay fill, 4.49:1 light.',
-  },
-];
+const KNOWN_CONTRAST_MISSES: KnownViolation[] = [];
 
 // Only ever lower this. See KNOWN_CONTRAST_MISSES.
-const MAX_KNOWN_CONTRAST_MISSES = 6;
+const MAX_KNOWN_CONTRAST_MISSES = 0;
 
 // ---------------------------------------------------------------------------
 // Source model

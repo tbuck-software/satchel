@@ -90,7 +90,7 @@ export interface SettingsSectionGroup {
  */
 const shellCapabilities = ref<BackendRuntimeCapabilities | null>(null);
 const mobileSyncPlatform = ref<'android' | null>(null);
-let capabilityLoaded = false;
+let capabilityLoad: Promise<void> | null = null;
 
 /** Sections whose backing feature the shell has to actually have. */
 function sectionIsSupported(
@@ -164,19 +164,23 @@ export function resolveSettingsSection(value: unknown): SettingsSection {
     : 'general';
 }
 
-async function loadShellCapabilities() {
-  if (capabilityLoaded || !backendCommandsAvailable()) return;
-  capabilityLoaded = true;
-  try {
-    const capabilities = await backendRuntimeCapabilities();
-    shellCapabilities.value = capabilities;
-    // Only Android has a foreground service whose health is worth a page.
-    if (capabilities.platform === 'android') {
-      mobileSyncPlatform.value = capabilities.platform;
-    }
-  } catch {
-    // Older shells simply do not expose background sync settings.
-  }
+function loadShellCapabilities() {
+  if (shellCapabilities.value || !backendCommandsAvailable()) return;
+  capabilityLoad ??= backendRuntimeCapabilities()
+    .then((capabilities) => {
+      shellCapabilities.value = capabilities;
+      // Only Android has a foreground service whose health is worth a page.
+      if (capabilities.platform === 'android') {
+        mobileSyncPlatform.value = capabilities.platform;
+      }
+    })
+    .catch(() => {
+      // Keep capabilities unknown and allow the next caller to retry.
+    })
+    .finally(() => {
+      capabilityLoad = null;
+    });
+  return capabilityLoad;
 }
 
 /** The sections this shell offers, grouped in sidebar order. Usable outside a component. */

@@ -2,6 +2,7 @@
   "backend": {
     "errors": {
       "calendarPersistenceFailed": "Calendar data is currently unavailable. Please try again.",
+      "desktopUnavailable": "The desktop backend is unavailable. Start Satchel with `pnpm tauri:dev`.",
       "trayDestinationInvalid": "This tray destination is not available.",
       "trayMessageNotFound": "This email is no longer available.",
       "trayThreadInvalid": "This tray email reference is invalid.",
