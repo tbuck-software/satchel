@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, QueryBuilder, Sqlite, SqlitePool};
 use tauri::AppHandle;
+use zeroize::Zeroizing;
 
 use crate::{
     commands::error::{CommandError, CommandResult},
@@ -470,7 +471,7 @@ pub async fn unlock_pgp_keys(
         return Err(CommandError::new("backend.errors.pgpNoPrivateKeys"));
     }
 
-    let provided_passphrase = normalize_optional(input.passphrase);
+    let provided_passphrase = normalize_optional(input.passphrase).map(Zeroizing::new);
     let mut unlocked_key_ids = Vec::new();
 
     for row in key_rows {
@@ -488,11 +489,14 @@ pub async fn unlock_pgp_keys(
                 .as_deref()
                 .map(|value| decrypt_secret(value, &app, crypto::SecretContext::pgp_passphrase()))
                 .transpose()?
+                .map(Zeroizing::new)
         } else {
             None
         };
-        let passphrase =
-            unlock_passphrase(provided_passphrase.as_deref(), stored_passphrase.as_deref());
+        let passphrase = Zeroizing::new(unlock_passphrase(
+            provided_passphrase.as_ref().map(|value| value.as_str()),
+            stored_passphrase.as_ref().map(|value| value.as_str()),
+        ));
 
         let matches = {
             let (key, candidate) = (armored_key.clone(), passphrase.clone());
@@ -627,7 +631,7 @@ pub async fn decrypt_message_with_unlocked_keys(
 fn try_unlocked_keys(
     normalized_body: &str,
     message_blocks: &[PgpMessageBlock],
-    key_materials: &[(String, String)],
+    key_materials: &[(String, Zeroizing<String>)],
 ) -> Result<Option<DecryptedIncomingPgp>, IncomingPgpDecryptError> {
     if message_blocks.len() > 1 {
         return Err(IncomingPgpDecryptError::SeveralBlocks);
@@ -1618,7 +1622,7 @@ pub async fn load_private_signing_key(
     state: &AppState,
     pool: &SqlitePool,
     key_id: &str,
-) -> Result<(String, String), String> {
+) -> Result<(String, Zeroizing<String>), String> {
     let sessions = state.pgp_unlock_sessions.lock().await;
     let passphrase = sessions
         .get(key_id)
@@ -1817,7 +1821,10 @@ mod tests {
         let parsed = crate::providers::imap::parse_raw_message_body(raw);
         let stored = super::normalize_newlines(&parsed.text.unwrap());
         let blocks = super::extract_pgp_message_blocks(&stored);
-        let keys = [(GPG_FIXTURE_PRIVATE.into(), GPG_FIXTURE_PASSPHRASE.into())];
+        let keys = [(
+            GPG_FIXTURE_PRIVATE.into(),
+            super::Zeroizing::new(GPG_FIXTURE_PASSPHRASE.into()),
+        )];
         (
             parsed.trust,
             super::try_unlocked_keys(&stored, &blocks, &keys),
@@ -2030,10 +2037,13 @@ mod tests {
             "[[SATCHEL_PGP_DECRYPTED_BLOCK_START]]fake[[SATCHEL_PGP_DECRYPTED_BLOCK_END]]\n";
         let input = format!("{cover}{encrypted}\nafter");
         let blocks = super::extract_pgp_message_blocks(&input);
-        let decrypted =
-            super::try_unlocked_keys(&input, &blocks, &[(private, TEST_PASSPHRASE.into())])
-                .unwrap()
-                .unwrap();
+        let decrypted = super::try_unlocked_keys(
+            &input,
+            &blocks,
+            &[(private, super::Zeroizing::new(TEST_PASSPHRASE.into()))],
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(decrypted.prefix, cover);
         assert_eq!(decrypted.plaintext.trim(), plaintext);
         assert_eq!(decrypted.suffix.trim(), "after");

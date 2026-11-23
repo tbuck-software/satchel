@@ -47,9 +47,9 @@ fallback, which is four declarations nobody would miss by looking.
 the type and spacing scales has to reach Tailwind, or a class and its token
 drift apart again.
 
-Not machine-checked, and therefore only as good as review: spacing (`--space-*`),
-the motion tokens, and everything under *Perceived Performance* and
-*Error States*.
+The transition timing rule (`motion-literal`) has zero known violations and a
+budget of zero. Spacing (`--space-*`), *Perceived Performance* and
+*Error States* are checked in review.
 
 ---
 
@@ -415,7 +415,7 @@ the text instead. Repeating the fallback in a component is not that, and
 - Workflow navigation: Inbox, Snoozed, Set aside, Outbox, Done
 - Native macOS places the brand in the traffic-light row with a clear control
   inset. Browser and other platforms keep a separate brand header.
-- Active state: solid accent-primary pill with white text (NavItem)
+- NavItem marks the active row with a raised `--bg-surface` sheet.
 
 ### Thread List (center column)
 - Width: 320–760px, resizable, background `--bg-list`

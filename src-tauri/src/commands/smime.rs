@@ -8,6 +8,7 @@ use satchel_core::db::smime::{
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use tauri::AppHandle;
+use zeroize::Zeroizing;
 
 use crate::{
     commands::error::{CommandError, CommandResult},
@@ -296,7 +297,8 @@ pub async fn unlock_smime_certificates(
             "no private S/MIME certificates available to unlock",
         ));
     }
-    let provided_passphrase = normalize_optional(input.passphrase);
+    let provided_passphrase = normalize_optional(input.passphrase).map(Zeroizing::new);
+    let provided = provided_passphrase.as_ref().map(|value| value.as_str());
     let mut unlocked = Vec::new();
     for row in rows {
         let Some(encrypted_key) = row.pem_private_key_encrypted.as_deref() else {
@@ -308,14 +310,18 @@ pub async fn unlock_smime_certificates(
             SecretContext::smime_private_key(),
         )?;
         let candidate = if row.has_passphrase {
-            provided_passphrase.as_deref()
+            provided
         } else {
-            provided_passphrase.as_deref().or(Some(""))
+            provided.or(Some(""))
         };
         let unlocks = {
-            let (key, candidate) = (pem_private_key.clone(), candidate.map(str::to_string));
+            let key = pem_private_key.clone();
+            let candidate = candidate.map(|value| Zeroizing::new(value.to_owned()));
             tokio::task::spawn_blocking(move || {
-                smime_engine::verify_private_key_passphrase(&key, candidate.as_deref())
+                smime_engine::verify_private_key_passphrase(
+                    &key,
+                    candidate.as_ref().map(|value| value.as_str()),
+                )
             })
             .await
             .map_err(|error| format!("S/MIME passphrase check failed: {error}"))??
@@ -327,8 +333,8 @@ pub async fn unlock_smime_certificates(
                 UnlockedSmimeSession {
                     cert_id: row.id.clone(),
                     passphrase: candidate
-                        .map(str::to_string)
-                        .filter(|value| !value.trim().is_empty()),
+                        .filter(|value| !value.trim().is_empty())
+                        .map(|value| Zeroizing::new(value.to_owned())),
                     unlocked_at: chrono::Utc::now(),
                 },
             );
@@ -408,14 +414,14 @@ pub async fn decrypt_message_with_unlocked_smime_certs(
 ///
 /// Owned and free of `AppHandle`, so it runs on a blocking thread.
 fn try_unlocked_certificates(
-    materials: &[(String, String, Option<String>)],
+    materials: &[(String, String, Option<Zeroizing<String>>)],
     ciphertext: &[u8],
 ) -> Result<Option<Vec<u8>>, String> {
     for (pem_private_key, pem_certificate, passphrase) in materials {
         if let Ok(decrypted) = smime_engine::decrypt(
             pem_private_key,
             pem_certificate,
-            passphrase.as_deref(),
+            passphrase.as_ref().map(|value| value.as_str()),
             ciphertext,
         ) {
             if !decrypted.is_empty() {
@@ -579,7 +585,7 @@ pub async fn load_private_signing_material(
     state: &AppState,
     pool: &SqlitePool,
     cert_id: &str,
-) -> Result<(String, String, Option<String>), String> {
+) -> Result<(String, String, Option<Zeroizing<String>>), String> {
     let sessions = state.smime_unlock_sessions.lock().await;
     let passphrase = sessions
         .get(cert_id)

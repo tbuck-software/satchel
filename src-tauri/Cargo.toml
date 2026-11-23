@@ -57,6 +57,7 @@ webbrowser = "1.2.2"
 scraper = "0.27.0"
 dns-lookup = "3.0.1"
 hickory-resolver = "0.26"
+zeroize = "1.8"
 
 # Desktop-only. The tray, autostart and single-instance plugins have no mobile
 # implementation, and the WASM plugin runtime would drag wasmtime onto a phone

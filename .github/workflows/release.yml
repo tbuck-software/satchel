@@ -104,6 +104,7 @@ jobs:
         env:
           SATCHEL_REQUIRE_PLUGIN_ARTIFACTS: '1'
         run: |
+          node scripts/check-release-features.mjs
           make check
           pnpm audit --audit-level=moderate
           python3 scripts/check-rust-audit-exceptions.py

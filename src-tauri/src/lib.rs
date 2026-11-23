@@ -25,7 +25,7 @@ pub mod plugins;
 pub mod sync;
 pub mod utils;
 
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 
 use events::bus::EventBus;
 use plugins::runtime::PluginRuntime;
@@ -34,19 +34,71 @@ use sync::delivery_reconciliation::DeliveryReconciler;
 use sync::queue::SyncQueue;
 use tauri::{Emitter, Manager};
 use tokio::sync::Mutex;
+use zeroize::Zeroizing;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct UnlockedPgpSession {
     pub key_id: String,
-    pub passphrase: String,
+    pub passphrase: Zeroizing<String>,
     pub unlocked_at: chrono::DateTime<chrono::Utc>,
 }
 
-#[derive(Clone, Debug)]
+impl fmt::Debug for UnlockedPgpSession {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("UnlockedPgpSession")
+            .field("key_id", &self.key_id)
+            .field("passphrase", &"[redacted]")
+            .field("unlocked_at", &self.unlocked_at)
+            .finish()
+    }
+}
+
+#[derive(Clone)]
 pub struct UnlockedSmimeSession {
     pub cert_id: String,
-    pub passphrase: Option<String>,
+    pub passphrase: Option<Zeroizing<String>>,
     pub unlocked_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl fmt::Debug for UnlockedSmimeSession {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("UnlockedSmimeSession")
+            .field("cert_id", &self.cert_id)
+            .field("passphrase", &"[redacted]")
+            .field("unlocked_at", &self.unlocked_at)
+            .finish()
+    }
+}
+
+#[cfg(test)]
+mod unlock_session_tests {
+    use super::{UnlockedPgpSession, UnlockedSmimeSession, Zeroizing};
+
+    #[test]
+    fn pgp_session_debug_redacts_passphrase() {
+        let passphrase = "synthetic-openpgp-passphrase";
+        let session = UnlockedPgpSession {
+            key_id: "fixture-key".into(),
+            passphrase: Zeroizing::new(passphrase.into()),
+            unlocked_at: chrono::Utc::now(),
+        };
+        let debug = format!("{session:?}");
+        assert!(!debug.contains(passphrase));
+        assert!(debug.contains("[redacted]"));
+    }
+
+    #[test]
+    fn smime_session_debug_redacts_passphrase() {
+        let passphrase = "synthetic-smime-passphrase";
+        let session = UnlockedSmimeSession {
+            cert_id: "fixture-cert".into(),
+            passphrase: Some(Zeroizing::new(passphrase.into())),
+            unlocked_at: chrono::Utc::now(),
+        };
+        let debug = format!("{session:?}");
+        assert!(!debug.contains(passphrase));
+        assert!(debug.contains("[redacted]"));
+    }
 }
 
 #[derive(Clone)]

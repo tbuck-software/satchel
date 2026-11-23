@@ -93,11 +93,9 @@ right version by itself inside this checkout.
 Run `make check` before committing; `make help` lists the build and install
 targets. `pnpm run lint` runs Oxlint correctness rules, including the Vue
 plugin's script checks. Intentional exceptions carry reasons at the affected
-lines. `pnpm run scripts:any:check` rejects growth or stale entries in
-`scripts/implicit-any-allowlist.json`; the existing 250 diagnostics across 21
-scripts remain until those scripts gain type annotations. Both checks run in
-CI and `pnpm run check`. Parser fuzzing uses a separate nightly toolchain;
-see [the fuzzing guide](docs/FUZZING.md).
+lines. `pnpm run scripts:any:check` typechecks `scripts/**/*.mjs` using
+`tsconfig.scripts.json`. Both checks run in CI and `pnpm run check`.
+Parser fuzzing uses a separate nightly toolchain. See [the fuzzing guide](docs/FUZZING.md).
 
 ## IMAP and POP3 accounts
 

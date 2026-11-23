@@ -3,6 +3,7 @@
 use super::{failed, CommandResult};
 use ring::{aead, hkdf};
 use spake2::{Ed25519Group, Identity, Password, Spake2};
+use std::collections::HashSet;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -10,9 +11,22 @@ const LIMIT: usize = 128 * 1024;
 const SENDER: &[u8] = b"satchel/setup/v1/sender";
 const RECEIVER: &[u8] = b"satchel/setup/v1/receiver";
 
+// Both peers derive the same key for a purpose. Only its assigned peer may
+// seal a message with that key.
+fn sent_by_sender(purpose: &[u8]) -> CommandResult<bool> {
+    match purpose {
+        b"accounts" => Ok(true),
+        b"receiver confirmation" | b"staged" => Ok(false),
+        _ => Err(failed()),
+    }
+}
+
 pub(super) struct Channel {
     socket: TcpStream,
     secret: hkdf::Prk,
+    sender: bool,
+    written_purposes: HashSet<&'static [u8]>,
+    read_purposes: HashSet<&'static [u8]>,
 }
 
 impl Channel {
@@ -38,7 +52,13 @@ impl Channel {
         let key = pake.finish(&incoming).map_err(|_| failed())?;
         let secret =
             hkdf::Salt::new(hkdf::HKDF_SHA256, b"satchel/account-transfer/v1").extract(&key);
-        let mut channel = Self { socket, secret };
+        let mut channel = Self {
+            socket,
+            secret,
+            sender,
+            written_purposes: HashSet::new(),
+            read_purposes: HashSet::new(),
+        };
         if sender {
             if !channel.read(b"receiver confirmation").await?.is_empty() {
                 return Err(failed());
@@ -58,8 +78,15 @@ impl Channel {
         Ok(aead::LessSafeKey::new(aead::UnboundKey::from(okm)))
     }
 
-    pub(super) async fn write(&mut self, purpose: &[u8], mut body: Vec<u8>) -> CommandResult<()> {
-        if body.len() + aead::AES_256_GCM.tag_len() > LIMIT {
+    pub(super) async fn write(
+        &mut self,
+        purpose: &'static [u8],
+        mut body: Vec<u8>,
+    ) -> CommandResult<()> {
+        if body.len() + aead::AES_256_GCM.tag_len() > LIMIT
+            || sent_by_sender(purpose)? != self.sender
+            || !self.written_purposes.insert(purpose)
+        {
             return Err(failed());
         }
         self.key(purpose)?
@@ -76,7 +103,10 @@ impl Channel {
         self.socket.write_all(&body).await.map_err(|_| failed())
     }
 
-    pub(super) async fn read(&mut self, purpose: &[u8]) -> CommandResult<Vec<u8>> {
+    pub(super) async fn read(&mut self, purpose: &'static [u8]) -> CommandResult<Vec<u8>> {
+        if sent_by_sender(purpose)? == self.sender || !self.read_purposes.insert(purpose) {
+            return Err(failed());
+        }
         let len = self.socket.read_u32().await.map_err(|_| failed())? as usize;
         if !(aead::AES_256_GCM.tag_len()..=LIMIT).contains(&len) {
             return Err(failed());
@@ -104,6 +134,36 @@ impl Channel {
 mod tests {
     use super::*;
     use tokio::net::TcpListener;
+    use tokio::time::{timeout, Duration};
+
+    #[tokio::test]
+    async fn each_purpose_can_only_be_used_once_in_its_assigned_direction() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let receiver = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            Channel::open(socket, "012345", false).await.unwrap()
+        });
+        let socket = TcpStream::connect(address).await.unwrap();
+        let mut sender = Channel::open(socket, "012345", true).await.unwrap();
+        let mut receiver = receiver.await.unwrap();
+
+        assert!(receiver.write(b"accounts", Vec::new()).await.is_err());
+        let invalid_read = timeout(Duration::from_secs(1), sender.read(b"accounts")).await;
+        assert!(invalid_read.unwrap().is_err());
+
+        sender
+            .write(b"accounts", b"fixture".to_vec())
+            .await
+            .unwrap();
+        assert!(sender.write(b"accounts", Vec::new()).await.is_err());
+        assert_eq!(receiver.read(b"accounts").await.unwrap(), b"fixture");
+        let duplicate_read = timeout(Duration::from_secs(1), receiver.read(b"accounts")).await;
+        assert!(duplicate_read.unwrap().is_err());
+
+        receiver.write(b"staged", Vec::new()).await.unwrap();
+        assert!(sender.read(b"staged").await.unwrap().is_empty());
+    }
 
     #[tokio::test]
     async fn credentials_require_the_receivers_code() {

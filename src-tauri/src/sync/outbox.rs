@@ -612,9 +612,13 @@ async fn apply_smime_send_transform(
     };
     let crypto_payload = crate::email::smime::protect_message(
         original.as_bytes(),
-        signing
-            .as_ref()
-            .map(|(key, cert, passphrase)| (key.as_str(), cert.as_str(), passphrase.as_deref())),
+        signing.as_ref().map(|(key, cert, passphrase)| {
+            (
+                key.as_str(),
+                cert.as_str(),
+                passphrase.as_ref().map(|value| value.as_str()),
+            )
+        }),
         recipients.as_deref(),
     )?;
 
