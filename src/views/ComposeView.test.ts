@@ -14,6 +14,7 @@ import { COMPOSER_BACKUP_STORAGE_KEY, composerBackupPersistence } from '@/persis
 const harness = vi.hoisted(() => ({
   sendMessage: vi.fn(),
   fetchDraft: vi.fn(),
+  draftsLoad: vi.fn(),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
   resume: vi.fn(),
@@ -56,7 +57,7 @@ vi.mock('@/stores/aliases', () => ({
   }),
 }));
 vi.mock('@/stores/drafts', () => ({
-  useDraftsStore: () => ({ save: vi.fn(), remove: vi.fn(), fetchOne: harness.fetchDraft }),
+  useDraftsStore: () => ({ save: vi.fn(), remove: vi.fn(), fetchOne: harness.fetchDraft, load: harness.draftsLoad }),
 }));
 vi.mock('@/stores/messages', () => ({
   bodyHtmlWithInlineImages: (message: { bodyHtml?: string }) => message.bodyHtml,
@@ -229,6 +230,7 @@ beforeEach(() => {
   harness.templatesLoadFailed = false;
   harness.fetchDraft.mockResolvedValue(null);
   harness.initialDraftIdentity = 'draft-1';
+  harness.draftsLoad.mockResolvedValue(undefined);
   harness.isPopout.mockReturnValue(false);
   harness.getByThread.mockReturnValue([]);
   harness.loadAttachmentsForMessages.mockResolvedValue(undefined);
@@ -685,6 +687,33 @@ describe('composer send failure', () => {
     expect(wrapper.find('[role="alert"]').exists()).toBe(false);
     expect(harness.toastError).not.toHaveBeenCalled();
     expect(wrapper.emitted('sent')).toHaveLength(1);
+  });
+
+  it.each(['sent', 'queued'] as const)('rereads the drafts list once a %s send took the draft', async (status) => {
+    harness.sendMessage.mockResolvedValue({
+      status,
+      thread_id: 'thread-1',
+      message_id: 'message-1',
+    } as BackendSendMessageResult);
+    const wrapper = render();
+    await flushPromises();
+    expect(harness.draftsLoad).not.toHaveBeenCalled();
+
+    await send(wrapper);
+
+    // Reply on the thread picks its draft from this list; a stale entry
+    // would reopen the sent draft and fail with "no longer available".
+    expect(harness.draftsLoad).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the drafts list alone when the send fails', async () => {
+    harness.sendMessage.mockRejectedValue(new Error('backend.errors.smtpFailed'));
+    const wrapper = render();
+    await flushPromises();
+
+    await send(wrapper);
+
+    expect(harness.draftsLoad).not.toHaveBeenCalled();
   });
 
   it('confirms the send after the docked composer closes', async () => {

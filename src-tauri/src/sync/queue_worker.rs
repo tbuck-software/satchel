@@ -155,9 +155,14 @@ impl ActionExecutor for TauriExecutor {
     async fn execute(&self, action: &QueuedAction) -> SyncResult<()> {
         let _work = self.state.sync_activity.start_work();
         match action.action_type.as_str() {
-            ACTION_SEND_MESSAGE => execute_send_action(&self.pool, &self.app, &self.state, action)
-                .await
-                .map(|_| ()),
+            ACTION_SEND_MESSAGE => {
+                let sent = execute_send_action(&self.pool, &self.app, &self.state, action).await?;
+                announce_sent_thread(&self.state.events, sent.thread_id);
+                // The send deleted the draft it came from; Reply picks drafts
+                // from the frontend's list and would reopen the gone one.
+                let _ = self.app.emit("drafts:changed", ());
+                Ok(())
+            }
             ACTION_REMOTE_MUTATION => {
                 execute_queued_remote_mutation(&self.pool, Some(&self.app), &self.state, action)
                     .await
@@ -261,6 +266,14 @@ impl ActionExecutor for TauriExecutor {
     }
 }
 
+/// A send through the worker (every send with an Undo window) took the sent
+/// copy into its thread and moved the thread to Waiting. Nothing else tells
+/// the open window: without this it keeps the draft card and the Inbox row
+/// until the next mail sync happens to bring the Sent copy.
+fn announce_sent_thread(events: &crate::events::bus::EventBus, thread_id: String) {
+    events.publish(AppEvent::ThreadsUpdated(vec![thread_id]));
+}
+
 async fn queued_action_needs_sync_permit(
     pool: &SqlitePool,
     action: &crate::sync::queue::QueuedAction,
@@ -318,6 +331,19 @@ fn should_notify_failure(action_type: &str, error: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_finished_send_names_its_thread_to_the_window() {
+        let bus = crate::events::bus::EventBus::new(4);
+        let mut received = bus.subscribe();
+
+        announce_sent_thread(&bus, "thread-1".into());
+
+        assert!(matches!(
+            received.try_recv(),
+            Ok(AppEvent::ThreadsUpdated(ids)) if ids == ["thread-1"]
+        ));
+    }
 
     #[test]
     fn autosave_only_quiets_persistent_draft_sync_errors() {
