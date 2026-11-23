@@ -45,6 +45,8 @@ vi.mock('@/stores/mailboxes', () => ({
 }));
 vi.mock('@/stores/threads', () => ({
   useThreadsStore: () => ({
+    showInReader: vi.fn(),
+    closeReader: vi.fn(),
     threads: [{
       id: 'thread-1', accountId: 'account-1', subject: 'Staging', mailboxNames: ['Inbox'],
       unreadCount: 0, isStarred: false, isMuted: false, tags: [], workflowState: 'inbox',

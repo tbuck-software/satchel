@@ -4464,6 +4464,10 @@
       "scheduled": "Follow-up set for {date}",
       "set": "Follow up…"
     },
+    "leftList": {
+      "comesBack": "It comes back to the inbox when someone replies.",
+      "staysUntilYouMoveOn": "It leaves this list once you move on."
+    },
     "link": {
       "copied": "Link copied.",
       "copy": "Copy link",

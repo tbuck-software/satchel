@@ -2657,6 +2657,7 @@ pub async fn persist_sent_message_record(
                     inline: attachment.inline,
                 })
                 .collect(),
+            awaits_reply: input.follow_up_at.is_some(),
         })
         .await
         .map_err(|error| {
@@ -2694,6 +2695,20 @@ pub async fn persist_sent_message_record(
             tracing::error!(error = ?error, "sent-message follow-up creation failed");
             CommandError::new("backend.errors.sentMessagePostProcessingFailed")
         })?;
+    // A reply with no follow-up is done with (ADR 0022). Mail Satchel sends
+    // on its own, such as a rule's forward, is nobody's answer. The mail is
+    // out either way, so a refused filing only leaves the thread where it was.
+    if input.follow_up_at.is_none() && input.auto_submitted.is_none() {
+        if let Err(error) = satchel_core::workflow::transitions::file_answered_thread(
+            pool,
+            &crate::sync::queue_worker::app_queue(),
+            &persisted.thread_id,
+        )
+        .await
+        {
+            tracing::warn!(%error, "could not file an answered thread as done");
+        }
+    }
     if let Err(error) =
         crate::commands::contacts::touch_contact(pool, from_address, Some(from_name)).await
     {

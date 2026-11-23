@@ -269,6 +269,44 @@ pub async fn transition_thread_inner(
         .map(|(transition, _)| transition)
 }
 
+/// Files a thread the user just answered without asking to follow up (ADR
+/// 0022): the ball is in the other court, so it leaves the Inbox as Done and
+/// comes back with the next incoming reply. It takes the Done button's
+/// transition, keyword and Undo window included, so other clients see the
+/// same thing.
+///
+/// Only an Inbox or To-do thread moves. Waiting, Snoozed and Aside are
+/// places the user picked, and Done needs nothing. `Ok(false)` says nothing
+/// changed.
+pub async fn file_answered_thread(
+    pool: &SqlitePool,
+    queue: &SyncQueue,
+    thread_id: &str,
+) -> Result<bool, String> {
+    let state: Option<String> =
+        sqlx::query_scalar("SELECT workflow_state FROM threads WHERE id = ?")
+            .bind(thread_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|error| error.to_string())?;
+    let from = match state.as_deref().and_then(WorkflowState::from_db_value) {
+        Some(state @ (WorkflowState::Inbox | WorkflowState::Todo)) => state,
+        _ => return Ok(false),
+    };
+    transition_thread_inner(
+        pool,
+        queue,
+        TransitionInput {
+            thread_id: thread_id.to_string(),
+            from,
+            to: WorkflowState::Done,
+            snooze_until: None,
+        },
+    )
+    .await?;
+    Ok(true)
+}
+
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 pub async fn transition_thread_for_notification(
     pool: &SqlitePool,
@@ -663,6 +701,71 @@ mod tests {
         let kinds = queued_kinds(&pool).await;
         assert!(!kinds.iter().any(|(kind, _)| kind == "workflow_move"));
         assert!(!kinds.iter().any(|(kind, _)| kind == "workflow_marker"));
+    }
+
+    #[tokio::test]
+    async fn an_answered_thread_is_filed_like_the_done_button() {
+        for state in ["inbox", "todo"] {
+            let pool = seeded_pool().await;
+            sqlx::query("UPDATE threads SET workflow_state = ? WHERE id = 'thread'")
+                .bind(state)
+                .execute(&pool)
+                .await
+                .expect("state");
+
+            let filed = file_answered_thread(&pool, &SyncQueue::new(), "thread")
+                .await
+                .expect("file");
+
+            assert!(filed, "{state}");
+            let now: String =
+                sqlx::query_scalar("SELECT workflow_state FROM threads WHERE id = 'thread'")
+                    .fetch_one(&pool)
+                    .await
+                    .expect("thread");
+            assert_eq!(now, "done");
+            // Same queue rows as the button: the keyword, then the archive
+            // move behind its Undo window.
+            let kinds = queued_kinds(&pool).await;
+            assert!(kinds.iter().any(|(kind, _)| kind == "workflow_marker"));
+            assert!(kinds
+                .iter()
+                .any(|(kind, status)| kind == "workflow_move" && status == "scheduled"));
+        }
+    }
+
+    #[tokio::test]
+    async fn an_answer_leaves_a_thread_the_user_filed_elsewhere_alone() {
+        for state in ["waiting", "snoozed", "aside", "done"] {
+            let pool = seeded_pool().await;
+            sqlx::query("UPDATE threads SET workflow_state = ? WHERE id = 'thread'")
+                .bind(state)
+                .execute(&pool)
+                .await
+                .expect("state");
+
+            let filed = file_answered_thread(&pool, &SyncQueue::new(), "thread")
+                .await
+                .expect("file");
+
+            assert!(!filed, "{state}");
+            let now: String =
+                sqlx::query_scalar("SELECT workflow_state FROM threads WHERE id = 'thread'")
+                    .fetch_one(&pool)
+                    .await
+                    .expect("thread");
+            assert_eq!(now, state);
+            assert!(queued_kinds(&pool).await.is_empty(), "{state}");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_answer_to_a_missing_thread_files_nothing() {
+        let pool = seeded_pool().await;
+        let filed = file_answered_thread(&pool, &SyncQueue::new(), "gone")
+            .await
+            .expect("file");
+        assert!(!filed);
     }
 
     #[tokio::test]

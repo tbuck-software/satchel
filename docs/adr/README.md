@@ -28,3 +28,4 @@ keine Statusquelle.
 | 0019 | Regeln verschieben und leiten weiter, lokal und auf dem Server | vorgeschlagen |
 | 0020 | Labs: Experimente hinter einem Schalter pro Gerät | vorgeschlagen |
 | 0021 | Icons aus Lucide statt selbst gezeichnet | angenommen |
+| 0022 | Eine Antwort legt den Thread ab, Warten ist eine Bitte | angenommen |

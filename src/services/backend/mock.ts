@@ -2604,11 +2604,16 @@ const handlers: Record<string, Handler> = {
     };
     messages[threadId] = [...(messages[threadId] ?? []), sent];
 
+    // Like the backend (ADR 0022): a follow-up waits in Later, an answer
+    // without one files an Inbox thread as Done, a new mail starts as Done.
+    const awaitsReply = Boolean(scope.follow_up_at);
     const thread = findThread(threadId);
     if (thread) {
       thread.lastMessageAt = now;
       thread.messageCount += 1;
       thread.snippet = sent.bodyText.slice(0, 180);
+      if (awaitsReply) thread.workflowState = 'waiting';
+      else if (thread.workflowState === 'inbox' || thread.workflowState === 'todo') thread.workflowState = 'done';
     } else {
       threads.unshift({
         id: threadId,
@@ -2621,7 +2626,7 @@ const handlers: Record<string, Handler> = {
         messageCount: 1,
         unreadCount: 0,
         hasAttachments: false,
-        workflowState: 'done',
+        workflowState: awaitsReply ? 'waiting' : 'done',
         priority: 1,
         mailboxNames: ['Sent'],
         tags: [],

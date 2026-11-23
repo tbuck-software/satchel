@@ -4464,6 +4464,10 @@
       "scheduled": "Nachfassen für {date} gesetzt",
       "set": "Nachfassen …"
     },
+    "leftList": {
+      "comesBack": "Kommt in die Inbox zurück, sobald jemand antwortet.",
+      "staysUntilYouMoveOn": "Verschwindet aus dieser Liste, sobald du weitergehst."
+    },
     "link": {
       "copied": "Link kopiert.",
       "copy": "Link kopieren",
