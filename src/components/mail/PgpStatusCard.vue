@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import AppButton from '@/components/ui/AppButton.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
+import {
+  BadgeCheck, CircleAlert, KeyRound, Lock, TriangleAlert, type IconNode,
+} from 'lucide';
 import { backendErrorKey, translateBackendError } from '@/utils/backendErrors';
 
 export type PgpState =
@@ -151,6 +155,20 @@ const config = computed<StateConfig>(() => {
       };
   }
 });
+
+/** The card's glyph per state; decrypting draws its own spinner instead. */
+const STATE_ICONS: Record<Exclude<PgpState, 'decrypting'>, IconNode> = {
+  encrypted_no_key: Lock,
+  key_available_locked: KeyRound,
+  decrypted: Lock,
+  signature_valid: BadgeCheck,
+  signature_partial: TriangleAlert,
+  signature_identity_mismatch: TriangleAlert,
+  signature_invalid: TriangleAlert,
+  signature_unknown_key: TriangleAlert,
+  error: CircleAlert,
+};
+const stateIcon = computed(() => (props.state === 'decrypting' ? null : STATE_ICONS[props.state]));
 </script>
 
 <template>
@@ -163,50 +181,11 @@ const config = computed<StateConfig>(() => {
     <div class="pgp-accent" />
 
     <div class="pgp-icon-area">
-      <!-- encrypted_no_key: shield with keyhole -->
-      <svg v-if="state === 'encrypted_no_key'" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M10 1.5L3 5v4.5c0 4.7 3 8.5 7 10 4-1.5 7-5.3 7-10V5l-7-3.5Z" />
-        <circle cx="10" cy="9" r="1.5" />
-        <path d="M10 10.5v2" />
-      </svg>
-
-      <!-- key_available_locked: key -->
-      <svg v-else-if="state === 'key_available_locked'" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="7.5" cy="12.5" r="4" />
-        <path d="M10.5 9.5L17 3" />
-        <path d="M14 3h3v3" />
-        <path d="M13 7l2 -2" />
-      </svg>
-
       <!-- decrypting: rotating spinner -->
-      <svg v-else-if="state === 'decrypting'" class="spinner" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+      <svg v-if="state === 'decrypting'" class="spinner" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
         <path d="M10 2a8 8 0 0 1 8 8" />
       </svg>
-
-      <!-- decrypted: open shield with check -->
-      <svg v-else-if="state === 'decrypted'" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M10 1.5L3 5v4.5c0 4.7 3 8.5 7 10 4-1.5 7-5.3 7-10V5l-7-3.5Z" />
-        <path d="M7.5 10l2 2 3.5-4" />
-      </svg>
-
-      <!-- signature_valid: badge with check -->
-      <svg v-else-if="state === 'signature_valid'" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M10 1l2.2 3.2 3.8.8-2 3.4.5 3.9L10 10.6l-4.5 1.7.5-3.9L4 5l3.8-.8L10 1Z" />
-        <path d="M7.5 9l2 2 3-3.5" />
-      </svg>
-
-      <!-- signature_invalid: warning triangle -->
-      <svg v-else-if="state === 'signature_partial' || state === 'signature_invalid' || state === 'signature_unknown_key' || state === 'signature_identity_mismatch'" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M10 2L1.5 17h17L10 2Z" />
-        <path d="M10 8v4" />
-        <circle cx="10" cy="14.5" r="0.5" fill="currentColor" stroke="none" />
-      </svg>
-
-      <!-- error: circle with X -->
-      <svg v-else-if="state === 'error'" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="10" cy="10" r="8" />
-        <path d="M7.5 7.5l5 5M12.5 7.5l-5 5" />
-      </svg>
+      <AppIcon v-else :icon="stateIcon" size="lg" />
     </div>
 
     <div class="pgp-content">
@@ -372,7 +351,7 @@ const config = computed<StateConfig>(() => {
     height: 32px;
   }
 
-  .pgp-icon-area svg {
+  .pgp-icon-area .spinner {
     width: 18px;
     height: 18px;
   }

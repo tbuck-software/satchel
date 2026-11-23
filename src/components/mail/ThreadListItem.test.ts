@@ -118,6 +118,7 @@ describe('thread row layout', () => {
     };
     const wrapper = shallowMount(ThreadListItem, {
       props: { thread, active: false, selected: false, selectionMode: false },
+      global: { stubs: { AppIcon: false } },
     });
     const icons = wrapper.findAll('svg.text-tertiary');
 

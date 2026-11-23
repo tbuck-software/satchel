@@ -7,6 +7,7 @@
 import { onBeforeUnmount, ref } from 'vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
+import { X } from 'lucide';
 import IconButton from '@/components/ui/IconButton.vue';
 import KeyCap from '@/components/ui/KeyCap.vue';
 import SearchInput from '@/components/ui/SearchInput.vue';
@@ -84,7 +85,7 @@ function clear() {
     >
       <template #trailing>
         <IconButton v-if="store.active" size="sm" :title="$t('inbox.listSearch.clear')" @click="clear">
-          <AppIcon><path d="m5 5 6 6m0-6-6 6" /></AppIcon>
+          <AppIcon :icon="X" />
         </IconButton>
         <KeyCap v-else-if="!focused && !ui.isMobile" class="list-search-bar__hint" aria-hidden="true">/</KeyCap>
       </template>

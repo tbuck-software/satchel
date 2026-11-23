@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { ChevronDown } from 'lucide';
 import AppButton from './AppButton.vue';
 import AppIcon from './AppIcon.vue';
 import type { ShortcutHint } from '@/types/shortcuts';
@@ -53,7 +54,7 @@ const emit = defineEmits<{
       @keydown.down.prevent="!popupDisabled && emit('open', $event)"
       @keydown.up.prevent="!popupDisabled && emit('open', $event)"
     >
-      <AppIcon><path d="m4.5 6.5 3.5 3.5 3.5-3.5" /></AppIcon>
+      <AppIcon :icon="ChevronDown" />
     </AppButton>
   </span>
 </template>

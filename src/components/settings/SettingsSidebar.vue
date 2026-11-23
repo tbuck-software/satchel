@@ -150,7 +150,7 @@ function isHighlighted(section: SettingsSection): boolean {
             :aria-current="activeSection === section.id ? 'page' : undefined"
             @click="selectSection(section.id)"
           >
-            <template #icon><AppIcon :grid="24"><g v-html="settingsSectionIcons[section.id]" /></AppIcon></template>
+            <template #icon><AppIcon :icon="settingsSectionIcons[section.id]" /></template>
             <span class="settings-sidebar__copy">
               <span>{{ section.label }}</span>
               <small v-if="section.hint">

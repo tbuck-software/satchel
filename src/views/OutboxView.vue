@@ -27,6 +27,7 @@ import {
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
+import { ArrowLeftRight, ChevronLeft, RefreshCw, SendHorizontal, Trash2 } from 'lucide';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import ErrorState from '@/components/ui/ErrorState.vue';
 import IconButton from '@/components/ui/IconButton.vue';
@@ -283,7 +284,7 @@ async function cancel(item: BackendOutboxItem) {
       </template>
       <template #actions>
         <IconButton :title="$t('common.refresh')" :disabled="outbox.loading" @click="outbox.load()">
-          <AppIcon :class="{ spinning: outbox.loading }"><path d="M13.5 8a5.5 5.5 0 1 1-1.7-3.9" /><path d="M13.5 2v3.2h-3.2" /></AppIcon>
+          <AppIcon :icon="RefreshCw" :class="{ spinning: outbox.loading }" />
         </IconButton>
       </template>
     </LargeTitleHeader>
@@ -294,20 +295,7 @@ async function cancel(item: BackendOutboxItem) {
           :disabled="outbox.loading"
           @click="outbox.load()"
         >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            :class="{ spinning: outbox.loading }"
-          >
-            <path d="M13.5 8a5.5 5.5 0 1 1-1.7-3.9" />
-            <path d="M13.5 2v3.2h-3.2" />
-          </svg>
+          <AppIcon :class="{ spinning: outbox.loading }" :icon="RefreshCw" />
         </IconButton>
       </template>
     </PaneHeader>
@@ -331,7 +319,7 @@ async function cancel(item: BackendOutboxItem) {
         :title="$t('outbox.empty.title')"
         :description="$t('outbox.empty.description')"
       >
-        <template #icon><AppIcon size="lg"><path d="M8 10V2m-3 3 3-3 3 3M3 9v4h10V9" /></AppIcon></template>
+        <template #icon><AppIcon :icon="SendHorizontal" size="lg" /></template>
       </EmptyState>
 
       <div v-else class="groups">
@@ -361,9 +349,7 @@ async function cancel(item: BackendOutboxItem) {
                   :size="36"
                 />
                 <span v-else class="row__action-icon" aria-hidden="true">
-                  <AppIcon>
-                    <path d="M2.5 5.5h7.8M8.3 3.5l2 2-2 2M13.5 10.5H5.7M7.7 8.5l-2 2 2 2" />
-                  </AppIcon>
+                  <AppIcon :icon="ArrowLeftRight" />
                 </span>
                 <span
                   v-if="item.status !== 'pending'"
@@ -404,10 +390,7 @@ async function cancel(item: BackendOutboxItem) {
                       :disabled="busy.has(item.id)"
                       @click.stop="retry(item)"
                     >
-                      <AppIcon size="sm">
-                        <path d="M13.5 8a5.5 5.5 0 1 1-1.7-3.9" />
-                        <path d="M13.5 2v3.2h-3.2" />
-                      </AppIcon>
+                      <AppIcon :icon="RefreshCw" size="sm" />
                     </IconButton>
                     <IconButton
                       v-if="canDiscard(item)"
@@ -417,10 +400,7 @@ async function cancel(item: BackendOutboxItem) {
                       :disabled="busy.has(item.id)"
                       @click.stop="cancel(item)"
                     >
-                      <AppIcon size="sm">
-                        <path d="M2.5 4h11M5.5 4V2.8A1.3 1.3 0 0 1 6.8 1.5h2.4a1.3 1.3 0 0 1 1.3 1.3V4" />
-                        <path d="M12.6 4v9a1.5 1.5 0 0 1-1.5 1.5h-6.2A1.5 1.5 0 0 1 3.4 13V4" />
-                      </AppIcon>
+                      <AppIcon :icon="Trash2" size="sm" />
                     </IconButton>
                   </span>
                 </div>
@@ -472,9 +452,7 @@ async function cancel(item: BackendOutboxItem) {
       <article v-if="selectedItem" class="detail">
         <header class="detail__header">
           <IconButton v-if="ui.isSinglePane" :title="$t('common.back')" @click="closeDetail">
-            <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="m10.5 3-5 5 5 5" />
-            </svg>
+            <AppIcon :icon="ChevronLeft" size="lg" />
           </IconButton>
           <div class="detail__copy">
             <p class="detail__status" :class="`detail__status--${markerTone(selectedItem)}`">

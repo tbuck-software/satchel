@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { Mail } from 'lucide';
 import EmailRenderer from '@/components/mail/EmailRenderer.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
@@ -144,14 +145,14 @@ async function importIntoAccount() {
 <template>
   <main class="viewer">
     <EmptyState v-if="loading" :title="t('viewer.loading')">
-      <template #icon><AppIcon size="lg"><rect x="2.6" y="3.8" width="10.8" height="8.4" rx="1.4" /><path d="m3 5 5 3.4L13 5" /></AppIcon></template>
+      <template #icon><AppIcon :icon="Mail" size="lg" /></template>
     </EmptyState>
     <EmptyState
       v-else-if="error"
       :title="t('viewer.openFailed')"
       :description="error"
     >
-      <template #icon><AppIcon size="lg"><rect x="2.6" y="3.8" width="10.8" height="8.4" rx="1.4" /><path d="m3 5 5 3.4L13 5" /></AppIcon></template>
+      <template #icon><AppIcon :icon="Mail" size="lg" /></template>
     </EmptyState>
     <template v-else-if="preview">
       <header class="head">

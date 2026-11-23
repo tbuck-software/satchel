@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, ref, onMounted } from 'vue';
+import { ChevronRight, Plus } from 'lucide';
 import { useI18n } from 'vue-i18n';
 import { useAccountsStore } from '@/stores/accounts';
 import { useUiStore } from '@/stores/ui';
@@ -84,7 +85,7 @@ function statusOf(account: Account): { tone: Tone; text: string } {
         <p>{{ $t('settings.accounts.description') }}</p>
       </div>
       <AppButton v-if="emailAccounts.length" variant="primary" size="sm" @click="ui.openAccountSetup()">
-        <template #icon><AppIcon size="sm"><path d="M8 3v10M3 8h10" /></AppIcon></template>
+        <template #icon><AppIcon size="sm" :icon="Plus" /></template>
         {{ $t('settings.accounts.addAccount') }}
       </AppButton>
     </header>
@@ -123,7 +124,7 @@ function statusOf(account: Account): { tone: Tone; text: string } {
               </span>
             </span>
             <span class="accounts__provider">{{ providerLabel(account.provider) }}</span>
-            <AppIcon class="accounts__chevron"><path d="m6 3 5 5-5 5" /></AppIcon>
+            <AppIcon class="accounts__chevron" :icon="ChevronRight" />
           </CardButton>
         </li>
       </ul>

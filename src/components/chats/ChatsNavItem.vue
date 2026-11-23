@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { MessageSquare } from 'lucide';
 import { useRoute, useRouter } from 'vue-router';
 import NavItem from '@/components/ui/NavItem.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
@@ -25,7 +26,7 @@ function open() {
     @click="open"
   >
     <template #icon>
-      <AppIcon><path d="M2.5 3.5h11v7h-7l-4 3z" /></AppIcon>
+      <AppIcon :icon="MessageSquare" />
     </template>
   </NavItem>
 </template>

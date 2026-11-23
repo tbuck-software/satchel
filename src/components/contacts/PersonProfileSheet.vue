@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import AppIcon from '@/components/ui/AppIcon.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import { computed, ref, watch } from 'vue';
+import { ChevronLeft } from 'lucide';
 import { useRouter } from 'vue-router';
 import type { Participant, Thread } from '@/types/mail';
 import { backendBlockSender } from '@/services/backend';
@@ -155,9 +157,7 @@ async function blockPerson() {
       <article class="person-profile">
         <header class="person-profile__header">
           <IconButton :title="$t('common.back')" size="lg" @click="emit('dismiss')">
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="m10.5 3-5 5 5 5" />
-            </svg>
+            <AppIcon size="lg" :icon="ChevronLeft" />
           </IconButton>
           <Avatar :name="displayName" :email="props.person.email" :size="58" />
           <div class="person-profile__identity">
@@ -236,7 +236,6 @@ async function blockPerson() {
   border-bottom: 1px solid var(--border-color-muted);
 }
 
-.person-profile__header svg { width: 20px; height: 20px; }
 .person-profile__identity { min-width: 0; }
 .person-profile__identity h2 { margin: 0; color: var(--text-primary); font-size: var(--font-size-xl); }
 .person-profile__identity p { margin: 3px 0 0; overflow: hidden; color: var(--text-tertiary); font-size: var(--font-size-sm); text-overflow: ellipsis; white-space: nowrap; }

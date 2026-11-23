@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import CardButton from '@/components/ui/CardButton.vue';
 import { computed, defineAsyncComponent, onBeforeUnmount, ref } from 'vue';
+import { ChevronLeft, ChevronRight } from 'lucide';
 import { useRouter } from 'vue-router';
 import PaneHeader from '@/components/ui/PaneHeader.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
@@ -142,7 +143,7 @@ onBeforeUnmount(() => unregisterFilter?.());
            nothing behind it to go back to. -->
       <template v-if="ui.isSinglePane && !(ui.isMobile && showOverview)" #leading>
         <IconButton :title="$t('common.back')" size="lg" @click="goBack">
-          <AppIcon size="lg"><path d="m10.5 3-5 5 5 5" /></AppIcon>
+          <AppIcon size="lg" :icon="ChevronLeft" />
         </IconButton>
       </template>
     </PaneHeader>
@@ -172,13 +173,13 @@ onBeforeUnmount(() => unregisterFilter?.());
               class="settings-overview__icon"
               :class="`settings-overview__icon--${sectionTones[section.id]}`"
             >
-              <AppIcon :grid="24"><g v-html="settingsSectionIcons[section.id]" /></AppIcon>
+              <AppIcon :icon="settingsSectionIcons[section.id]" />
             </span>
             <span class="settings-overview__copy">
               <strong>{{ sectionLabel(section.id) }}</strong>
               <small>{{ section.hint ?? sectionDescription(section.id) }}</small>
             </span>
-            <AppIcon class="settings-overview__chevron"><path d="m6 3 5 5-5 5" /></AppIcon>
+            <AppIcon class="settings-overview__chevron" :icon="ChevronRight" />
           </CardButton>
         </div>
       </section>

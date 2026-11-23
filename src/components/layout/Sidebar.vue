@@ -15,6 +15,7 @@ import { startWindowDrag as dragWindow } from '@/services/appWindow';
 import Avatar from '@/components/common/Avatar.vue';
 import SidebarMailTools from './SidebarMailTools.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
+import { Calendar, Download, ListTodo, Mail, Pin, Settings, Users } from 'lucide';
 import IconButton from '@/components/ui/IconButton.vue';
 import SidebarMailNav from './SidebarMailNav.vue';
 import SyncButton from './SyncButton.vue';
@@ -244,10 +245,7 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
               @click.stop="settings.togglePinnedContact(contact.email)"
               @keydown.enter.stop.prevent="settings.togglePinnedContact(contact.email)"
             >
-              <svg width="12" height="12" viewBox="0 0 16 16" :fill="isPinned(contact) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M6.5 2.5h3l-.4 4.1 2.4 2.1v1H4.5v-1l2.4-2.1z" />
-                <path d="M8 9.7v3.8" />
-              </svg>
+              <AppIcon :icon="Pin" size="sm" :fill="isPinned(contact) ? 'currentColor' : 'none'" />
             </span>
           </CardButton>
         </div>
@@ -274,7 +272,7 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
             :aria-current="!contextualSidebarActive ? 'page' : undefined"
             @click="returnToMail"
           >
-            <AppIcon><rect x="2" y="3.5" width="12" height="9" rx="1.5" /><path d="m2.5 4.5 5.5 4 5.5-4" /></AppIcon>
+            <AppIcon :icon="Mail" />
           </IconButton>
           <IconButton
             :title="$t('nav.calendar')"
@@ -282,7 +280,7 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
             :aria-current="calendarModuleActive ? 'page' : undefined"
             @click="goTo('calendar')"
           >
-            <AppIcon><rect x="2" y="3" width="12" height="11" rx="2" /><path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3" /></AppIcon>
+            <AppIcon :icon="Calendar" />
           </IconButton>
           <IconButton
             :title="$t('nav.contacts')"
@@ -290,7 +288,7 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
             :aria-current="contactsModuleActive ? 'page' : undefined"
             @click="goTo('contacts')"
           >
-            <AppIcon><circle cx="6" cy="5.5" r="2.5" /><path d="M1.5 13.5c0-2.2 2-4 4.5-4s4.5 1.8 4.5 4M10.5 3.2a2.5 2.5 0 0 1 0 4.6M11.5 9.7c1.7.5 3 2 3 3.8" /></AppIcon>
+            <AppIcon :icon="Users" />
           </IconButton>
           <IconButton
             :title="$t('nav.tasks')"
@@ -298,7 +296,7 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
             :aria-current="tasksModuleActive ? 'page' : undefined"
             @click="goTo('tasks')"
           >
-            <AppIcon><path d="M8 2.5a5.5 5.5 0 1 1 0 11a5.5 5.5 0 1 1 0-11Z" /><path d="M5.5 8.2l1.8 1.8L10.7 6.4" /></AppIcon>
+            <AppIcon :icon="ListTodo" />
           </IconButton>
         </nav>
         <IconButton
@@ -309,7 +307,7 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
           :disabled="appUpdate.status === 'downloading'"
           @click="void appUpdate.activate()"
         >
-          <AppIcon><path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10" /></AppIcon>
+          <AppIcon :icon="Download" />
         </IconButton>
         <IconButton
           :title="$t('common.settings')"
@@ -317,10 +315,7 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
           :aria-current="settingsModuleActive ? 'page' : undefined"
           @click="goTo('settings')"
         >
-          <AppIcon :grid="24">
-            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-            <circle cx="12" cy="12" r="3" />
-          </AppIcon>
+          <AppIcon :icon="Settings" />
         </IconButton>
       </div>
     </footer>

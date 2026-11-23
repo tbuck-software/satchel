@@ -10,6 +10,7 @@
  * the same notice and stays inside its bundle budget without it.
  */
 import { computed, defineAsyncComponent, inject, onBeforeUnmount, ref, watchEffect } from 'vue';
+import { ChevronDown } from 'lucide';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import { IMAGE_GUARD_CHOICES } from './threadMessageMenu';
@@ -70,7 +71,7 @@ if (reported) {
       size="sm"
       @click="choicesOpen = true"
     >
-      <AppIcon><path d="m4.5 6.5 3.5 3.5 3.5-3.5" /></AppIcon>
+      <AppIcon :icon="ChevronDown" />
     </AppButton>
   </span>
   <ImagePolicyChoices

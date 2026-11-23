@@ -4,6 +4,7 @@ import vue from '@vitejs/plugin-vue';
 import VueI18nPlugin from '@intlify/unplugin-vue-i18n/vite';
 import { fileURLToPath, URL } from 'node:url';
 import { i18nChunks } from './scripts/vite-i18n-chunks.mjs';
+import { lucideInline } from './scripts/vite-lucide-inline.mjs';
 
 const tauriDevHost = process.env.TAURI_DEV_HOST;
 
@@ -18,7 +19,7 @@ export default defineConfig(({ mode, command }) => {
   const mockBackend = env.VITE_SATCHEL_MOCK === '1' || env.VITE_SATCHEL_MOCK === 'true';
 
   return {
-    plugins: [tailwindcss(), vue(), ...(process.env.VITEST ? [] : i18nChunks({ mock: mockBackend })), ...(command === 'build' ? [VueI18nPlugin({
+    plugins: [tailwindcss(), vue(), lucideInline(), ...(process.env.VITEST ? [] : i18nChunks({ mock: mockBackend })), ...(command === 'build' ? [VueI18nPlugin({
       // `chunks/` is not on disk: `i18nChunks` answers those paths with the
       // keys lazy code needs (ADR 0017).
       include: [

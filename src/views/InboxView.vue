@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import AppIcon from '@/components/ui/AppIcon.vue';
+import { Bookmark, Check, ChevronLeft, Clock, Inbox, Plus, Search } from 'lucide';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
@@ -375,8 +376,8 @@ const listTitle = computed(() => {
 const workflowEmpty = computed(() => {
   if (activeBundle.value || threads.activeContact || threads.mailboxFilter.kind !== 'all') return null;
   switch (threads.workflowFilter) {
-    case 'later': return { title: t('inbox.empty.later.title'), description: t('inbox.empty.later.description'), icon: 'clock' };
-    case 'aside': return { title: t('inbox.empty.aside.title'), description: t('inbox.empty.aside.description'), icon: 'aside' };
+    case 'later': return { title: t('inbox.empty.later.title'), description: t('inbox.empty.later.description'), icon: Clock };
+    case 'aside': return { title: t('inbox.empty.aside.title'), description: t('inbox.empty.aside.description'), icon: Bookmark };
     default: return null;
   }
 });
@@ -827,16 +828,12 @@ function acceptExistingSenders() {
         <PaneHeader :title="$t('inbox.topics.title')" :count="topicsStore.activeTopics.length">
           <template #leading>
             <IconButton :title="$t('common.back')" @click="topicsViewOpen = false">
-              <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M10 3.5L5 8l5 4.5" />
-              </svg>
+              <AppIcon :icon="ChevronLeft" size="lg" />
             </IconButton>
           </template>
           <template #actions>
             <IconButton :title="$t('inbox.topics.new')" @click="void createTopic()">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-                <path d="M8 3V13M3 8H13" />
-              </svg>
+              <AppIcon :icon="Plus" />
             </IconButton>
           </template>
         </PaneHeader>
@@ -925,9 +922,7 @@ function acceptExistingSenders() {
               @click="openTopicDetail(topic.id)"
             >
               <span class="topic-avatar-done" aria-hidden="true">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M2.5 8.5L6.5 12.5L13.5 4" />
-                </svg>
+                <AppIcon :icon="Check" />
               </span>
               <span class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
                 <span class="block min-w-0 truncate text-md font-medium text-secondary">{{ topic.name }}</span>
@@ -957,7 +952,7 @@ function acceptExistingSenders() {
         </template>
         <template #actions>
           <IconButton size="lg" :title="$t('common.search')" @click="openPhoneSearch">
-            <AppIcon size="lg"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></AppIcon>
+            <AppIcon :icon="Search" size="lg" />
           </IconButton>
           <ListFilterMenu :show-layout="!folderViewActive" />
         </template>
@@ -980,9 +975,7 @@ function acceptExistingSenders() {
       >
         <template #leading>
           <IconButton :title="$t('common.back')" @click="closeGroup">
-            <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M10 3.5L5 8l5 4.5" />
-            </svg>
+            <AppIcon :icon="ChevronLeft" size="lg" />
           </IconButton>
           <SmartBucketIcon
             v-if="activeBucket"
@@ -1005,10 +998,7 @@ function acceptExistingSenders() {
             @click="void runActiveGroupDone()"
           >
             <template #icon>
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                <path v-if="activeBundleDone" d="M8 11V3.4M5.4 8.4 8 11l2.6-2.6M2.8 11.2v1.2a1 1 0 0 0 1 1h8.4a1 1 0 0 0 1-1v-1.2" />
-                <path v-else d="M3.5 8.4l2.5 2.5 6.5-6.8" />
-              </svg>
+              <AppIcon :icon="activeBundleDone ? Inbox : Check" size="sm" />
             </template>
             {{ activeBundleDone ? $t('inbox.bundleToInbox') : $t('inbox.bundleDone') }}
           </AppButton>
@@ -1115,8 +1105,7 @@ function acceptExistingSenders() {
           <template v-if="workflowEmpty" #empty>
             <EmptyState :title="workflowEmpty.title" :description="workflowEmpty.description">
               <template #icon>
-                <AppIcon v-if="workflowEmpty.icon === 'clock'" size="lg"><circle cx="8" cy="8" r="6" /><path d="M8 4v4l3 2" /></AppIcon>
-                <AppIcon v-else size="lg"><rect x="2" y="4" width="12" height="9" rx="1" /><path d="M6 4V2h4v2M2 7h12M6 9h4" /></AppIcon>
+                <AppIcon size="lg" :icon="workflowEmpty.icon" />
               </template>
             </EmptyState>
           </template>

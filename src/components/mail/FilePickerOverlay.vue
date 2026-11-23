@@ -12,6 +12,7 @@ import CardButton from '@/components/ui/CardButton.vue';
 import KeyCap from '@/components/ui/KeyCap.vue';
 import { formatBinding } from '@/config/keybindings';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { Check, Folder, Plus, Search } from 'lucide';
 import { useI18n } from 'vue-i18n';
 import { useUiStore } from '@/stores/ui';
 import { useTopicsStore } from '@/stores/topics';
@@ -241,10 +242,7 @@ function onEnter() {
           @keydown.tab="trap.onTab"
         >
           <div class="search-row">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.4" aria-hidden="true">
-              <circle cx="7" cy="7" r="5" />
-              <path d="M11 11L14 14" />
-            </svg>
+            <AppIcon :icon="Search" size="sm" opacity="0.4" />
             <input
               ref="inputRef"
               v-model="query"
@@ -276,14 +274,12 @@ function onEnter() {
               @mouseenter="activeIndex = index"
             >
               <template v-if="row.kind === 'folder'">
-                <AppIcon class="row-folder"><path d="M2 4.5h4l1.2 1.5H14v6.5a1 1 0 01-1 1H3a1 1 0 01-1-1z" /></AppIcon>
+                <AppIcon :icon="Folder" class="row-folder" />
                 <span class="row-title">{{ row.name }}</span>
               </template>
               <template v-else-if="row.kind === 'topic'">
                 <span class="row-check" :class="{ 'row-check--on': row.checked, 'row-check--partial': row.partial }" aria-hidden="true">
-                  <svg v-if="row.checked" width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M2.5 8.5L6.5 12.5L13.5 4" />
-                  </svg>
+                  <AppIcon v-if="row.checked" :icon="Check" size="sm" />
                   <span v-else-if="row.partial" class="row-check__dash" />
                 </span>
                 <span v-if="row.icon" class="row-icon">{{ row.icon }}</span>
@@ -292,9 +288,7 @@ function onEnter() {
               </template>
               <template v-else>
                 <span class="row-check" aria-hidden="true">
-                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-                    <path d="M8 3V13M3 8H13" />
-                  </svg>
+                  <AppIcon :icon="Plus" size="sm" />
                 </span>
                 <span class="row-title">{{ $t('topics.picker.createRow', { name: row.name }) }}</span>
               </template>

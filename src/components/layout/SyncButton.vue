@@ -2,6 +2,7 @@
 import { computed, defineAsyncComponent, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import AppIcon from '@/components/ui/AppIcon.vue';
+import { RefreshCw } from 'lucide';
 import IconButton from '@/components/ui/IconButton.vue';
 import { useMailSync } from '@/composables/useMailSync';
 import { useConnectionStore } from '@/stores/connection';
@@ -72,9 +73,7 @@ const title = computed(() => failureCount.value > 0 ? t('app.sync.failures.label
     @mousedown.stop
     @click="activate"
   >
-    <AppIcon :class="{ 'sync-button__icon--spinning': spinning }" @animationiteration="finishTurn">
-      <path d="M13.5 6A5.7 5.7 0 0 0 3.7 3.7L1.5 6m0-4v4h4M2.5 10a5.7 5.7 0 0 0 9.8 2.3l2.2-2.3m0 4v-4h-4" />
-    </AppIcon>
+    <AppIcon :icon="RefreshCw" :class="{ 'sync-button__icon--spinning': spinning }" @animationiteration="finishTurn" />
     <span v-if="failureCount > 0" class="sync-button__failure" aria-hidden="true" />
     <span class="sr-only" role="status">{{ statusLabel }}</span>
   </IconButton>

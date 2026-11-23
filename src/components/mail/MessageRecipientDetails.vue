@@ -1,10 +1,16 @@
 <script setup lang="ts">
 import AppButton from '@/components/ui/AppButton.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
+import {
+  BadgeCheck, BadgeQuestionMark, BadgeX, Check, ChevronDown, ChevronRight, Lock, Minus, ShieldCheck,
+  ShieldQuestionMark, ShieldX, TriangleAlert, X, type IconNode,
+} from 'lucide';
 import type { Participant, SmimeDisplayState } from '@/types/mail';
 import {
+  type AuthenticationTone,
   type AuthenticationVerdictKey,
   authenticationVerdicts,
   hasAuthenticationResults as hasVerdicts,
@@ -156,6 +162,29 @@ const smimeDetails = computed(() => {
   }
 });
 
+/** Lock for a decrypted body, otherwise the signature's seal and its verdict. */
+const smimeRowIcon = computed<IconNode>(() => {
+  if (props.smimeState === 'decrypted') return Lock;
+  if (props.smimeState === 'signature_valid') return BadgeCheck;
+  if (props.smimeState === 'signature_invalid') return BadgeX;
+  return BadgeQuestionMark;
+});
+
+const AUTHENTICATION_ICONS: Record<AuthenticationTone, IconNode> = {
+  pass: ShieldCheck,
+  fail: ShieldX,
+  warn: ShieldQuestionMark,
+  none: ShieldQuestionMark,
+};
+const authenticationRowIcon = computed(() => AUTHENTICATION_ICONS[authenticationTone.value]);
+
+const VERDICT_ICONS: Record<AuthenticationTone, IconNode> = {
+  pass: Check,
+  fail: X,
+  warn: TriangleAlert,
+  none: Minus,
+};
+
 function openDetails() {
   open.value = true;
 }
@@ -188,7 +217,7 @@ watch(() => props.from.email, () => {
     size="sm"
   >
     <span>{{ summary }}</span>
-    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 6 3 3 3-3" /></svg>
+    <AppIcon :icon="ChevronDown" size="sm" />
   </AppButton>
 
   <Teleport to="body">
@@ -205,7 +234,7 @@ watch(() => props.from.email, () => {
             <time :datetime="props.timestamp">{{ exactTimestamp }}</time>
           </div>
           <IconButton :title="$t('common.close')" size="lg" @click="open = false">
-            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" /></svg>
+            <AppIcon :icon="X" />
           </IconButton>
         </header>
 
@@ -219,19 +248,7 @@ watch(() => props.from.email, () => {
                 :class="`security-row--${smimeDetails.tone}`"
               >
                 <span class="security-row__icon" aria-hidden="true">
-                  <svg viewBox="0 0 20 20">
-                    <template v-if="props.smimeState === 'decrypted'">
-                      <rect x="3" y="8" width="14" height="9" rx="2" />
-                      <path d="M6 8V5.8a4 4 0 0 1 8 0V8" />
-                      <path d="m7.5 12.4 1.7 1.7 3.5-3.6" />
-                    </template>
-                    <template v-else>
-                      <path d="M10 1.5 12 4l3.2.3-.3 3.2 2 2.5-2 2.5.3 3.2-3.2.3-2 2.5-2-2.5-3.2-.3.3-3.2-2-2.5 2-2.5-.3-3.2L8 4l2-2.5Z" />
-                      <path v-if="props.smimeState === 'signature_valid'" d="m6.8 10 2 2 4.3-4.5" />
-                      <path v-else-if="props.smimeState === 'signature_invalid'" d="m7.2 7.2 5.6 5.6m0-5.6-5.6 5.6" />
-                      <path v-else d="M10 7.1v4m0 2.2h.01" />
-                    </template>
-                  </svg>
+                  <AppIcon :icon="smimeRowIcon" size="lg" />
                 </span>
                 <div class="security-row__body">
                   <strong>{{ smimeDetails.title }}</strong>
@@ -250,12 +267,7 @@ watch(() => props.from.email, () => {
                 :class="`security-row--${authenticationTone}`"
               >
                 <span class="security-row__icon" aria-hidden="true">
-                  <svg viewBox="0 0 20 20">
-                    <path d="M10 2.1 16 4.4V9c0 3.8-2.3 6.7-6 8.2C6.3 15.7 4 12.8 4 9V4.4z" />
-                    <path v-if="authenticationTone === 'pass'" d="m6.8 10 2 2 4.3-4.5" />
-                    <path v-else-if="authenticationTone === 'fail'" d="m7.2 7.2 5.6 5.6m0-5.6-5.6 5.6" />
-                    <path v-else d="M10 7.1v4m0 2.2h.01" />
-                  </svg>
+                  <AppIcon :icon="authenticationRowIcon" size="lg" />
                 </span>
                 <div class="security-row__body">
                   <strong>{{ $t('mail.authentication.title') }}</strong>
@@ -267,12 +279,7 @@ watch(() => props.from.email, () => {
                       :class="`auth-verdict--${row.tone}`"
                       :title="row.label"
                     >
-                      <svg viewBox="0 0 12 12" aria-hidden="true">
-                        <path v-if="row.tone === 'pass'" d="m2.5 6 2.2 2.2 4.8-4.8" />
-                        <path v-else-if="row.tone === 'fail'" d="m3 3 6 6m0-6-6 6" />
-                        <path v-else-if="row.tone === 'warn'" d="M6 2.6v3.6m0 2.4h.01" />
-                        <path v-else d="M3.2 6h5.6" />
-                      </svg>
+                      <AppIcon :icon="VERDICT_ICONS[row.tone]" size="sm" />
                       <span>{{ row.mechanism }}</span>
                       <span class="sr-only">{{ row.label }}</span>
                     </li>
@@ -290,7 +297,7 @@ watch(() => props.from.email, () => {
               <CardButton class="recipient-person recipient-person--interactive" @click="openProfile(props.from)">
                 <Avatar :name="senderName" :email="props.from.email" :size="36" />
                 <div><strong>{{ senderName }}</strong><span>{{ props.from.email }}</span></div>
-                <svg class="recipient-person__chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 3 5 5-5 5" /></svg>
+                <AppIcon :icon="ChevronRight" class="recipient-person__chevron" />
               </CardButton>
             </div>
             <div v-if="distinctReplyTo" class="message-route__row">
@@ -308,7 +315,7 @@ watch(() => props.from.email, () => {
                 >
                   <Avatar :name="personLabel(recipient)" :email="recipient.email" :size="36" />
                   <div><strong>{{ personLabel(recipient) }}</strong><span>{{ recipient.email }}</span></div>
-                  <svg class="recipient-person__chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 3 5 5-5 5" /></svg>
+                  <AppIcon :icon="ChevronRight" class="recipient-person__chevron" />
                 </CardButton>
               </div>
             </div>
@@ -323,7 +330,7 @@ watch(() => props.from.email, () => {
                 >
                   <Avatar :name="personLabel(recipient)" :email="recipient.email" :size="36" />
                   <div><strong>{{ personLabel(recipient) }}</strong><span>{{ recipient.email }}</span></div>
-                  <svg class="recipient-person__chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 3 5 5-5 5" /></svg>
+                  <AppIcon :icon="ChevronRight" class="recipient-person__chevron" />
                 </CardButton>
               </div>
             </div>
@@ -349,17 +356,6 @@ watch(() => props.from.email, () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.recipient-summary svg {
-  width: 13px;
-  height: 13px;
-  flex: 0 0 auto;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.5;
 }
 
 .recipient-details {
@@ -402,15 +398,6 @@ watch(() => props.from.email, () => {
 
 .recipient-details__header :deep(.icon-button:hover) {
   background: var(--bg-overlay);
-}
-
-.recipient-details__header svg {
-  width: 15px;
-  height: 15px;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-width: 1.6;
 }
 
 .recipient-details__groups {
@@ -473,16 +460,6 @@ watch(() => props.from.email, () => {
   border-radius: var(--radius-full);
   background: color-mix(in srgb, var(--security-color) 14%, transparent);
   color: var(--security-color);
-}
-
-.security-row__icon svg {
-  width: 18px;
-  height: 18px;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.6;
 }
 
 .security-row__body {
@@ -554,16 +531,6 @@ watch(() => props.from.email, () => {
   line-height: 1.2;
 }
 
-.auth-verdict svg {
-  width: 11px;
-  height: 11px;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.9;
-}
-
 .auth-verdict--pass { --verdict-color: var(--accent-green); }
 .auth-verdict--fail { --verdict-color: var(--accent-red-soft); }
 .auth-verdict--warn { --verdict-color: var(--accent-amber-soft); }
@@ -597,8 +564,6 @@ watch(() => props.from.email, () => {
 }
 
 .recipient-person__chevron {
-  width: 15px;
-  height: 15px;
   color: var(--text-tertiary);
 }
 

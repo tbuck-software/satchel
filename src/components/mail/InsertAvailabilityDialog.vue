@@ -5,6 +5,7 @@
  * time zone is stated in the text; nothing links to a booking page.
  */
 import { computed, ref, watch } from 'vue';
+import { X } from 'lucide';
 import { useI18n } from 'vue-i18n';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
@@ -104,7 +105,7 @@ useDismissableOnTop(() => true, () => emit('close'));
       <header class="availability__head">
         <h3>{{ $t('availability.insert.title') }}</h3>
         <IconButton size="sm" :title="$t('common.close')" @click="emit('close')">
-          <AppIcon><path d="m4 4 8 8M12 4l-8 8" /></AppIcon>
+          <AppIcon :icon="X" />
         </IconButton>
       </header>
 

@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import AppButton from '@/components/ui/AppButton.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
+import { ChevronRight } from 'lucide';
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useMessagesStore } from '@/stores/messages';
@@ -73,18 +75,7 @@ function senderLabel(message: (typeof messages.value)[number]) {
       variant="link"
       size="sm"
     >
-      <svg
-        :class="['context-chevron', { 'context-chevron--open': expanded }]"
-        width="11"
-        height="11"
-        viewBox="0 0 12 12"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.5"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
-      ><path d="m4.5 3.5 2.5 2.5-2.5 2.5" /></svg>
+      <AppIcon :icon="ChevronRight" size="sm" :class="['context-chevron', { 'context-chevron--open': expanded }]" />
       {{ toggleLabel }}
     </AppButton>
 

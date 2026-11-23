@@ -11,6 +11,7 @@ import BottomSheet from '@/components/ui/BottomSheet.vue';
 import AppBanner from '@/components/ui/AppBanner.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
+import { X } from 'lucide';
 import IconButton from '@/components/ui/IconButton.vue';
 import AccountReauthBanner from '@/components/settings/AccountReauthBanner.vue';
 import ConnectionBanner from './ConnectionBanner.vue';
@@ -57,7 +58,7 @@ watch(() => props.open, async (open) => {
         <div class="status-sheet__heading">
           <h2>{{ t('app.status.title') }}</h2>
           <IconButton :title="t('common.close')" @click="emit('close')">
-            <AppIcon><path d="m4 4 8 8m0-8-8 8" /></AppIcon>
+            <AppIcon :icon="X" />
           </IconButton>
         </div>
         <div class="status-sheet__notices">

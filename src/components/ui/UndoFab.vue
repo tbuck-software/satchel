@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { Undo2 } from 'lucide';
 import { useI18n } from 'vue-i18n';
 import { useUndoFab, type UndoFabEntry } from '@/composables/useUndoFab';
 import { useShortcutHints } from '@/composables/useShortcutHints';
@@ -128,10 +129,7 @@ const undoKey = computed(() =>
           :style="ringStyle"
         />
       </svg>
-      <AppIcon class="undo-fab__icon">
-        <path d="M3.5 6.5h6a3.2 3.2 0 010 6.4H6" />
-        <path d="M6 3.5L3 6.5l3 3" />
-      </AppIcon>
+      <AppIcon class="undo-fab__icon" :icon="Undo2" />
       </span>
       <!-- Phone: what happened and the word Undo, on the button itself, so
            the whole receipt is one thumb target (as Mail, Gmail, Proton do). -->

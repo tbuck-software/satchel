@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, useId } from 'vue';
+import { FilePen, SquarePen, Trash2 } from 'lucide';
 import type { Message } from '@/types/mail';
 import AccountAvatar from '@/components/common/AccountAvatar.vue';
 import AppButton from '@/components/ui/AppButton.vue';
@@ -83,7 +84,7 @@ useToastClearance(cardRef);
     >
       <span class="draft-card__head">
         <span class="draft-card__label">
-          <AppIcon size="sm"><path d="M11.2 2.6l2.2 2.2L5.8 12.4 3 13l.6-2.8z" /><path d="M2.5 14.5h11" /></AppIcon>
+          <AppIcon :icon="FilePen" size="sm" />
           {{ $t('mail.message.draftNotSent') }}
         </span>
         <span class="draft-card__meta">
@@ -105,7 +106,7 @@ useToastClearance(cardRef);
     <div class="draft-card__actions" @click.self="editDraft">
       <AppButton variant="primary" size="sm" :disabled="Boolean(props.message.contentError)" @click="editDraft">
         <template #icon>
-          <AppIcon><path d="M11.2 2.6l2.2 2.2L5.8 12.4 3 13l.6-2.8z" /><path d="M2.5 14.5h11" /></AppIcon>
+          <AppIcon :icon="SquarePen" />
         </template>
         {{ $t('thread.draft.continueEditing') }}
       </AppButton>
@@ -117,7 +118,7 @@ useToastClearance(cardRef);
         @click="emit('discard')"
       >
         <template #icon>
-          <AppIcon><path d="M2.5 4h11M5.5 4V2.8A1.3 1.3 0 0 1 6.8 1.5h2.4a1.3 1.3 0 0 1 1.3 1.3V4" /><path d="M12.6 4v9a1.5 1.5 0 0 1-1.5 1.5H4.9A1.5 1.5 0 0 1 3.4 13V4" /></AppIcon>
+          <AppIcon :icon="Trash2" />
         </template>
         {{ $t('common.discard') }}
       </AppButton>

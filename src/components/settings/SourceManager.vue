@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Plus } from 'lucide';
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useConfirm } from "@/composables/useConfirm";
@@ -182,7 +183,7 @@ onMounted(() => void load());
       <div v-if="!formOpen" class="setting-row setting-row--single">
         <div class="card-actions">
           <AppButton variant="secondary" size="sm" @click="formOpen = true">
-            <template #icon><AppIcon><path d="M8 3v10M3 8h10" /></AppIcon></template>
+            <template #icon><AppIcon :icon="Plus" /></template>
             {{ $t("settings.sources.newFeed") }}
           </AppButton>
           <AppButton variant="ghost" size="sm" :disabled="busy" @click="opmlInput?.click()">

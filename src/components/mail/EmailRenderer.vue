@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import AppButton from '@/components/ui/AppButton.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
 import { computed, defineAsyncComponent, inject, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { Shield } from 'lucide';
 import type { Attachment, PgpMessageState } from '@/types/mail';
 import { useImagePolicy } from '@/composables/useImagePolicy';
 import { useSettingsStore } from '@/stores/settings';
@@ -450,18 +452,7 @@ const hasPgpSegments = computed(() =>
       :class="{ 'image-guard--phone': imageGuardPhone && !domainConfirmPending }"
       role="status"
     >
-      <svg
-        class="image-guard__icon"
-        aria-hidden="true"
-        viewBox="0 0 16 16"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.5"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      >
-        <path d="M8 1.9 13 3.7v4c0 3.2-2.1 5.3-5 6.4-2.9-1.1-5-3.2-5-6.4v-4L8 1.9Z" />
-      </svg>
+      <AppIcon :icon="Shield" size="sm" class="image-guard__icon" />
       <ImageGuardDomainConfirm
         v-if="domainConfirmPending"
         :domain="senderDomainName"
@@ -956,9 +947,6 @@ const hasPgpSegments = computed(() =>
 }
 
 .image-guard__icon {
-  flex-shrink: 0;
-  width: 13px;
-  height: 13px;
   align-self: center;
   color: var(--text-tertiary);
 }

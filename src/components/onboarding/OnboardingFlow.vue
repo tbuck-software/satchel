@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import AppIcon from '@/components/ui/AppIcon.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { Check, Lock, X } from 'lucide';
 import { useSettingsStore } from '@/stores/settings';
 import { useAccountsStore } from '@/stores/accounts';
 import { useContactsStore } from '@/stores/contacts';
@@ -695,7 +697,7 @@ function finish() {
           :disabled="busy"
           @click="cancelAccountSetup"
          :title="$t('onboarding.closeSetup')">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+          <AppIcon :icon="X" />
         </IconButton>
         <aside class="wizard-rail">
           <div class="brand-mark" aria-label="Satchel">
@@ -707,7 +709,7 @@ function finish() {
             <li v-for="(item, index) in flowSteps" :key="item.label"
                 :class="{ active: step === item.step, done: currentFlowIndex > index }">
               <span class="step-index">
-                <svg v-if="currentFlowIndex > index" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m2 6 2.5 2.5L10 3" /></svg>
+                <AppIcon v-if="currentFlowIndex > index" size="sm" :icon="Check" />
                 <template v-else>{{ index + 1 }}</template>
               </span>
               <span>{{ item.label }}</span>
@@ -715,7 +717,7 @@ function finish() {
           </ol>
 
           <div v-if="step === 1 && validEmail && usesPassword" class="privacy-note">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="7" width="10" height="7" rx="2"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg>
+            <AppIcon :icon="Lock" />
             <span>{{ $t('onboarding.privacyNote') }}</span>
           </div>
         </aside>
@@ -792,7 +794,7 @@ function finish() {
                   <article v-for="service in services" :key="service.kind" class="service-row" :class="service.status">
                     <span class="service-state">
                       <span v-if="service.status === 'checking'" class="spinner" />
-                      <svg v-else-if="service.status === 'connected'" width="14" height="14" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m2 6.5 2.7 2.7L11 3"/></svg>
+                      <AppIcon v-else-if="service.status === 'connected'" size="sm" :icon="Check" />
                       <span v-else>!</span>
                     </span>
                     <span class="service-name"><strong>{{ service.label }}</strong><small>{{ service.status === 'checking' ? $t('onboarding.connection.stateChecking') : service.status === 'connected' ? [service.host, service.port].filter(Boolean).join(':') || $t('onboarding.connection.stateConnected') : service.status === 'not_found' ? $t('onboarding.connection.stateNotOffered') : $t('onboarding.connection.stateNeedsInput') }}</small></span>

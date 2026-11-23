@@ -8,6 +8,7 @@
  *
  * Its own chunk, loaded on the first tap of More.
  */
+import { Trash2 } from 'lucide';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import BottomSheet from '@/components/ui/BottomSheet.vue';
 import MenuItem from '@/components/ui/MenuItem.vue';
@@ -59,10 +60,7 @@ function act(action: 'togglePin' | 'setAside' | 'delete') {
         />
         <MenuItem v-if="props.canDelete" :label="$t('common.delete')" tone="danger" @select="act('delete')">
           <template #icon>
-            <AppIcon>
-              <path d="M2 4h12M5 4V2.5A1.5 1.5 0 016.5 1h3A1.5 1.5 0 0111 2.5V4" />
-              <path d="M13 4v9.5a1.5 1.5 0 01-1.5 1.5h-7A1.5 1.5 0 013 13.5V4" />
-            </AppIcon>
+            <AppIcon :icon="Trash2" />
           </template>
         </MenuItem>
       </div>

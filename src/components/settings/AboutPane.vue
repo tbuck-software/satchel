@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { ExternalLink } from 'lucide';
 import { useI18n } from 'vue-i18n';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
@@ -149,15 +150,15 @@ onMounted(() => { void loadBuild(); void updates.loadPreferences(); });
         </div>
         <CardButton class="setting-row about-pane__link" @click="openProject()">
           <span class="setting-label">{{ $t('settings.about.sourceCode') }}</span>
-          <AppIcon class="about-pane__out"><path d="M6 3.5h6.5V10M12.5 3.5 4 12" /></AppIcon>
+          <AppIcon class="about-pane__out" :icon="ExternalLink" />
         </CardButton>
         <CardButton class="setting-row about-pane__link" @click="openProject('/blob/main/LICENSE')">
           <span class="setting-label">{{ $t('settings.about.readLicense') }}</span>
-          <AppIcon class="about-pane__out"><path d="M6 3.5h6.5V10M12.5 3.5 4 12" /></AppIcon>
+          <AppIcon class="about-pane__out" :icon="ExternalLink" />
         </CardButton>
         <CardButton class="setting-row about-pane__link" @click="openProject('/blob/main/THIRD_PARTY_NOTICES.md')">
           <span class="setting-label">{{ $t('settings.about.thirdParty') }}</span>
-          <AppIcon class="about-pane__out"><path d="M6 3.5h6.5V10M12.5 3.5 4 12" /></AppIcon>
+          <AppIcon class="about-pane__out" :icon="ExternalLink" />
         </CardButton>
       </div>
       <p v-if="linkFailed" class="about-pane__error" role="alert">{{ $t('settings.about.linkFailed') }}</p>

@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
+import { ChevronLeft, Lock, LockOpen } from 'lucide';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import ErrorState from '@/components/ui/ErrorState.vue';
@@ -310,7 +311,7 @@ defineExpose({ focusInput: () => composer.value?.focus() });
         size="lg"
         @click="emit('close')"
       >
-        <AppIcon size="lg"><path d="m10.5 3-5 5 5 5" /></AppIcon>
+        <AppIcon :icon="ChevronLeft" size="lg" />
       </IconButton>
       <Avatar :name="title" :email="isGroup ? null : members[0]?.address" :size="36" />
       <div class="chat-conversation__heading">
@@ -322,11 +323,7 @@ defineExpose({ focusInput: () => composer.value?.focus() });
           :class="{ 'chat-conversation__security--on': meta.encrypts }"
           :title="encryptionHint || undefined"
         >
-          <AppIcon size="sm">
-            <rect x="3.5" y="7" width="9" height="6.5" rx="1.5" />
-            <path v-if="meta.encrypts" d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" />
-            <path v-else d="M5.5 7V5a2.5 2.5 0 0 1 4.8-1" />
-          </AppIcon>
+          <AppIcon :icon="meta.encrypts ? Lock : LockOpen" size="sm" />
           {{ meta.encrypts ? $t('chats.encrypted') : $t('chats.notEncrypted') }}
         </p>
       </div>

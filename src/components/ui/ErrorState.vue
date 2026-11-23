@@ -8,6 +8,7 @@
  * load your mail" are different sentences, and someone who reads the first one
  * after a failed load assumes the mail is gone.
  */
+import { CircleAlert } from 'lucide';
 import { useI18n } from 'vue-i18n';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
@@ -29,11 +30,7 @@ const { t } = useI18n();
 <template>
   <div class="error-state" role="alert">
     <span class="error-state__icon" aria-hidden="true">
-      <AppIcon :grid="24">
-        <circle cx="12" cy="12" r="8.6" />
-        <path d="M12 7.6v5" />
-        <path d="M12 15.8h.01" />
-      </AppIcon>
+      <AppIcon :icon="CircleAlert" />
     </span>
     <p class="state state--error">{{ title }}</p>
     <p v-if="detail" class="state state--detail">{{ detail }}</p>

@@ -4,6 +4,7 @@ import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import { computed, nextTick, onMounted, ref } from 'vue';
+import { Plus } from 'lucide';
 import { useI18n } from 'vue-i18n';
 import { useTemplatesStore } from '@/stores/templates';
 import { useCrudActions } from '@/composables/useCrudActions';
@@ -167,7 +168,7 @@ function parseAttachmentsJson(value?: string | null): BackendOutgoingAttachment[
       </div>
       <div v-if="!editorOpen" class="setting-row setting-row--single">
         <AppButton variant="secondary" size="sm" @click="startNew">
-          <template #icon><AppIcon><path d="M8 3v10M3 8h10" /></AppIcon></template>
+          <template #icon><AppIcon :icon="Plus" /></template>
           {{ $t('settings.templates.createTitle') }}
         </AppButton>
       </div>

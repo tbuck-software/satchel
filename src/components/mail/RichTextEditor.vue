@@ -3,6 +3,7 @@ import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
+import { AlignCenterVertical, AlignEndVertical, AlignStartVertical, BetweenHorizontalEnd, BetweenHorizontalStart, BetweenVerticalEnd, BetweenVerticalStart, Bold, Italic, LetterA, Link as LinkIcon, List, ListOrdered, PanelTop, Paperclip, RotateCcw, Strikethrough, Table, Trash2 } from 'lucide';
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Editor, EditorContent, Mark, mergeAttributes } from '@tiptap/vue-3';
@@ -659,22 +660,18 @@ defineExpose({ focusEditor, insertHtml, insertText, insertAttachmentImage, remov
         <option value="heading-3">{{ $t('compose.editor.heading3') }}</option>
       </select>
       <span class="sep" />
-      <IconButton :active="ed.isActive('bold')" :title="$t('compose.editor.bold')" @click="toggle(() => ed?.chain().focus().toggleBold().run())"><b>B</b></IconButton>
-      <IconButton :active="ed.isActive('italic')" :title="$t('compose.editor.italic')" @click="toggle(() => ed?.chain().focus().toggleItalic().run())"><i>I</i></IconButton>
-      <IconButton :active="ed.isActive('strike')" :title="$t('compose.editor.strike')" @click="toggle(() => ed?.chain().focus().toggleStrike().run())"><s>S</s></IconButton>
+      <IconButton :active="ed.isActive('bold')" :title="$t('compose.editor.bold')" @click="toggle(() => ed?.chain().focus().toggleBold().run())"><AppIcon :icon="Bold" /></IconButton>
+      <IconButton :active="ed.isActive('italic')" :title="$t('compose.editor.italic')" @click="toggle(() => ed?.chain().focus().toggleItalic().run())"><AppIcon :icon="Italic" /></IconButton>
+      <IconButton :active="ed.isActive('strike')" :title="$t('compose.editor.strike')" @click="toggle(() => ed?.chain().focus().toggleStrike().run())"><AppIcon :icon="Strikethrough" /></IconButton>
       <span class="sep" />
       <IconButton :active="ed.isActive('bulletList')" :title="$t('compose.editor.bulletList')" @click="toggle(() => ed?.chain().focus().toggleBulletList().run())">
-        <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.6 4.5h.7M2.6 8h.7M2.6 11.5h.7M6.5 4.5h7M6.5 8h7M6.5 11.5h7" /></svg>
+        <AppIcon :icon="List" />
       </IconButton>
       <IconButton :active="ed.isActive('orderedList')" :title="$t('compose.editor.orderedList')" @click="toggle(() => ed?.chain().focus().toggleOrderedList().run())">
-        <svg class="icon" viewBox="0 0 16 16" aria-hidden="true">
-          <path d="M6.5 5h7M6.5 11h7" />
-          <text class="icon-numeral" x="1" y="6.9">1</text>
-          <text class="icon-numeral" x="1" y="12.9">2</text>
-        </svg>
+        <AppIcon :icon="ListOrdered" />
       </IconButton>
       <IconButton :active="ed.isActive('link')" :title="$t('compose.editor.link')" :aria-label="$t('compose.editor.link')" @click="openLinkDialog">
-        <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.9 9.1a2.7 2.7 0 004 .3l1.8-1.8a2.7 2.7 0 00-3.8-3.8l-1 1" /><path d="M9.1 6.9a2.7 2.7 0 00-4-.3L3.3 8.4a2.7 2.7 0 003.8 3.8l1-1" /></svg>
+        <AppIcon :icon="LinkIcon" />
       </IconButton>
       <IconButton
         :disabled="ed.isActive('table')"
@@ -683,7 +680,7 @@ defineExpose({ focusEditor, insertHtml, insertText, insertAttachmentImage, remov
         data-testid="editor-insert-table"
         @click="insertTable"
       >
-        <AppIcon><rect x="2" y="3" width="12" height="10" rx="1.5" /><path d="M2 6.5h12M2 9.8h12M6 6.5V13M10 6.5V13" /></AppIcon>
+        <AppIcon :icon="Table" />
       </IconButton>
       <span class="sep" />
       <div class="color-control">
@@ -694,9 +691,7 @@ defineExpose({ focusEditor, insertHtml, insertText, insertAttachmentImage, remov
           :aria-expanded="colorPickerOpen"
           @click="colorPickerOpen = !colorPickerOpen"
         >
-          <svg class="icon" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M3.6 11.2L8 3.4l4.4 7.8M5.4 8.6h5.2" />
-          </svg>
+          <AppIcon :icon="LetterA" />
           <span
             class="color-bar"
             :style="{ background: currentTextColor ?? 'currentColor' }"
@@ -747,33 +742,33 @@ defineExpose({ focusEditor, insertHtml, insertText, insertAttachmentImage, remov
         <IconButton :title="$t('compose.editor.image.medium')" @click="setSelectedImageWidth(480)">M</IconButton>
         <IconButton :title="$t('compose.editor.image.large')" @click="setSelectedImageWidth(720)">L</IconButton>
         <IconButton :title="$t('compose.editor.image.original')" :aria-label="$t('compose.editor.image.original')" @click="setSelectedImageWidth(null)">
-          <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.3 8a4.7 4.7 0 104.7-4.7 4.7 4.7 0 00-3.7 1.8" /><path d="M3.6 2.7v2.7h2.7" /></svg>
+          <AppIcon :icon="RotateCcw" />
         </IconButton>
       </div>
       <span class="image-toolbar-separator" />
       <div class="image-control-group">
         <IconButton :title="$t('compose.editor.image.alignLeft')" :aria-label="$t('compose.editor.image.alignLeft')" @click="setSelectedImageAlignment('left')">
-          <svg width="22" height="18" viewBox="0 0 22 18" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 2h18M2 16h12"/><rect x="2" y="5" width="11" height="8" rx="1.5"/></svg>
+          <AppIcon :icon="AlignStartVertical" />
         </IconButton>
         <IconButton :title="$t('compose.editor.image.alignCenter')" :aria-label="$t('compose.editor.image.alignCenter')" @click="setSelectedImageAlignment('center')">
-          <svg width="22" height="18" viewBox="0 0 22 18" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 2h18M4 16h14"/><rect x="5.5" y="5" width="11" height="8" rx="1.5"/></svg>
+          <AppIcon :icon="AlignCenterVertical" />
         </IconButton>
         <IconButton :title="$t('compose.editor.image.alignRight')" :aria-label="$t('compose.editor.image.alignRight')" @click="setSelectedImageAlignment('right')">
-          <svg width="22" height="18" viewBox="0 0 22 18" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 2h18M8 16h12"/><rect x="9" y="5" width="11" height="8" rx="1.5"/></svg>
+          <AppIcon :icon="AlignEndVertical" />
         </IconButton>
       </div>
       <span class="image-toolbar-separator" />
       <div class="image-control-group">
         <IconButton :title="$t('compose.editor.image.wrapLeft')" :aria-label="$t('compose.editor.image.wrapLeft')" @click="setSelectedImageAlignment('wrap-left')">
-          <svg width="24" height="18" viewBox="0 0 24 18" fill="none" stroke="currentColor" stroke-width="1.35"><rect x="2" y="4" width="9" height="10" rx="1.5"/><path d="M14 4h8M14 8h8M14 12h8M2 17h20"/></svg>
+          <AppIcon :grid="24"><rect x="2" y="5" width="9" height="10" rx="1.5" /><path d="M14 5h8M14 10h8M14 15h8M2 20h20" /></AppIcon>
         </IconButton>
         <IconButton :title="$t('compose.editor.image.wrapRight')" :aria-label="$t('compose.editor.image.wrapRight')" @click="setSelectedImageAlignment('wrap-right')">
-          <svg width="24" height="18" viewBox="0 0 24 18" fill="none" stroke="currentColor" stroke-width="1.35"><rect x="13" y="4" width="9" height="10" rx="1.5"/><path d="M2 4h8M2 8h8M2 12h8M2 17h20"/></svg>
+          <AppIcon :grid="24"><rect x="13" y="5" width="9" height="10" rx="1.5" /><path d="M2 5h8M2 10h8M2 15h8M2 20h20" /></AppIcon>
         </IconButton>
       </div>
       <span class="image-toolbar-separator" />
       <IconButton class="image-as-attachment" :title="$t('compose.editor.image.asAttachment')" :aria-label="$t('compose.editor.image.asAttachment')" @click="moveSelectedImageToAttachments">
-        <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"><path d="M13.5 7.5l-6.2 6.2a3.5 3.5 0 01-5-5l6.5-6.5a2.5 2.5 0 013.5 3.5L5.8 12.2a1.5 1.5 0 01-2.1-2.1l6.1-6.1"/></svg>
+        <AppIcon :icon="Paperclip" size="lg" />
       </IconButton>
     </BubbleMenu>
 
@@ -799,16 +794,16 @@ defineExpose({ focusEditor, insertHtml, insertText, insertAttachmentImage, remov
         @keydown="onTableToolbarKeydown"
       >
         <IconButton size="sm" :title="$t('compose.editor.table.addRowBefore')" :shortcut="tableHints.addRowBefore" @click="runTableCommand('addRowBefore')">
-          <AppIcon><rect x="2.5" y="8" width="11" height="5.5" rx="1" /><path d="M8 2v4M6 4h4" /></AppIcon>
+          <AppIcon :icon="BetweenHorizontalStart" />
         </IconButton>
         <IconButton size="sm" :title="$t('compose.editor.table.addRowAfter')" :shortcut="tableHints.addRowAfter" @click="runTableCommand('addRowAfter')">
-          <AppIcon><rect x="2.5" y="2.5" width="11" height="5.5" rx="1" /><path d="M8 10v4M6 12h4" /></AppIcon>
+          <AppIcon :icon="BetweenHorizontalEnd" />
         </IconButton>
         <IconButton size="sm" :title="$t('compose.editor.table.addColumnBefore')" :shortcut="tableHints.addColumnBefore" @click="runTableCommand('addColumnBefore')">
-          <AppIcon><rect x="8" y="2.5" width="5.5" height="11" rx="1" /><path d="M2 8h4M4 6v4" /></AppIcon>
+          <AppIcon :icon="BetweenVerticalStart" />
         </IconButton>
         <IconButton size="sm" :title="$t('compose.editor.table.addColumnAfter')" :shortcut="tableHints.addColumnAfter" @click="runTableCommand('addColumnAfter')">
-          <AppIcon><rect x="2.5" y="2.5" width="5.5" height="11" rx="1" /><path d="M10 8h4M12 6v4" /></AppIcon>
+          <AppIcon :icon="BetweenVerticalEnd" />
         </IconButton>
         <span class="table-toolbar-separator" />
         <IconButton size="sm" :title="$t('compose.editor.table.deleteRow')" @click="runTableCommand('deleteRow')">
@@ -819,10 +814,10 @@ defineExpose({ focusEditor, insertHtml, insertText, insertAttachmentImage, remov
         </IconButton>
         <span class="table-toolbar-separator" />
         <IconButton size="sm" :active="tableHasHeaderRow()" :aria-pressed="tableHasHeaderRow()" :title="$t('compose.editor.table.headerRow')" @click="runTableCommand('toggleHeaderRow')">
-          <AppIcon><rect x="2.5" y="2.5" width="11" height="11" rx="1" /><path d="M2.5 6.5h11M2.5 10h11M8 6.5v7" /><rect x="2.5" y="2.5" width="11" height="4" rx="1" fill="currentColor" /></AppIcon>
+          <AppIcon :icon="PanelTop" />
         </IconButton>
         <IconButton size="sm" tone="danger" :title="$t('compose.editor.table.deleteTable')" @click="runTableCommand('deleteTable')">
-          <AppIcon><path d="M2.5 4.5h11M6 2.5h4M4 4.5l.6 9h6.8l.6-9" /></AppIcon>
+          <AppIcon :icon="Trash2" />
         </IconButton>
       </div>
     </BubbleMenu>
@@ -1019,22 +1014,6 @@ defineExpose({ focusEditor, insertHtml, insertText, insertAttachmentImage, remov
   height: 21px;
   margin: 0 1px;
   background: var(--border-color);
-}
-/* Shared look for every drawn toolbar glyph. */
-.icon {
-  width: 16px;
-  height: 16px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-.icon-numeral {
-  fill: currentColor;
-  stroke: none;
-  font-size: var(--font-size-3xs);
-  font-weight: var(--weight-bold);
 }
 .content {
   padding: 8px 12px;

@@ -8,6 +8,7 @@
  * Starting is the composer's: it owns the draft that the job replaces.
  */
 import { computed, onMounted, ref, useId, watch } from 'vue';
+import { ChevronLeft, ChevronRight } from 'lucide';
 import { useI18n } from 'vue-i18n';
 import ModalShell from '@/components/ui/ModalShell.vue';
 import AppButton from '@/components/ui/AppButton.vue';
@@ -166,13 +167,13 @@ useDismissableOnTop(() => true, close);
         <section class="merge-review__preview" :aria-label="$t('mailMerge.review.previewLabel')">
           <div class="merge-review__stepper">
             <IconButton :title="$t('mailMerge.review.previous')" :aria-label="$t('mailMerge.review.previous')" :disabled="index === 0" @click="step(-1)">
-              <AppIcon><path d="m10 3-5 5 5 5" /></AppIcon>
+              <AppIcon :icon="ChevronLeft" />
             </IconButton>
             <span class="merge-review__position" aria-live="polite" data-testid="mail-merge-position">
               {{ $t('mailMerge.review.position', { index: index + 1, total }) }}
             </span>
             <IconButton :title="$t('mailMerge.review.next')" :aria-label="$t('mailMerge.review.next')" :disabled="index >= total - 1" @click="step(1)">
-              <AppIcon><path d="m6 3 5 5-5 5" /></AppIcon>
+              <AppIcon :icon="ChevronRight" />
             </IconButton>
           </div>
           <dl class="merge-review__meta">

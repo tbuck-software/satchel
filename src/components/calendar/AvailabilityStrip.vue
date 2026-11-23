@@ -9,6 +9,7 @@
  * failed request) get an "unknown" row, not an error.
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { ChevronLeft, ChevronRight } from 'lucide';
 import { useI18n } from 'vue-i18n';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
@@ -299,11 +300,11 @@ const canSearch = computed(() => durationMinutes.value >= 5 && durationMinutes.v
       <span class="strip__title">{{ $t('availability.strip.title') }}</span>
       <span class="strip__day">
         <IconButton size="sm" :title="$t('availability.strip.previousDay')" :disabled="disabled" @click="stepDay(-1)">
-          <AppIcon><path d="m10 3-5 5 5 5" /></AppIcon>
+          <AppIcon :icon="ChevronLeft" />
         </IconButton>
         <span class="strip__day-label">{{ dayLabel }}</span>
         <IconButton size="sm" :title="$t('availability.strip.nextDay')" :disabled="disabled" @click="stepDay(1)">
-          <AppIcon><path d="m6 3 5 5-5 5" /></AppIcon>
+          <AppIcon :icon="ChevronRight" />
         </IconButton>
       </span>
     </header>

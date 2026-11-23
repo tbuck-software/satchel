@@ -6,6 +6,7 @@
  */
 import { computed, defineAsyncComponent, nextTick, ref } from 'vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
+import { ListFilter } from 'lucide';
 import IconButton from '@/components/ui/IconButton.vue';
 import FilterPill from '@/components/ui/FilterPill.vue';
 import { useAccountsStore } from '@/stores/accounts';
@@ -72,7 +73,7 @@ function closeMenu() {
       :aria-expanded="!!anchor"
       @click="openMenu"
     >
-      <AppIcon><path d="M2.5 4.5h11M4.5 8h7M6 11.5h4" /></AppIcon>
+      <AppIcon :icon="ListFilter" />
     </IconButton>
     <ListFilterMenuPanel
       v-if="menuMounted"

@@ -3,6 +3,7 @@ import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import { computed, ref } from 'vue';
+import { X } from 'lucide';
 import { useI18n } from 'vue-i18n';
 import type { BackendOutgoingAttachment } from '@/types/composer';
 import { formatBytes } from '@/utils/formatBytes';
@@ -214,7 +215,7 @@ defineExpose({ openPicker: onPick });
           :title="$t('mail.attachment.removeNamed', { name: entry.attachment.filename })"
           @click="remove(entry.index)"
         >
-          <AppIcon size="sm"><path d="m4.5 4.5 7 7M11.5 4.5l-7 7" /></AppIcon>
+          <AppIcon :icon="X" size="sm" />
         </IconButton>
       </li>
       <li class="add-item">

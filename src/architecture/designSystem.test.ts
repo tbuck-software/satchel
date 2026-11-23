@@ -251,47 +251,32 @@ const KNOWN_SCALE_LITERALS = flatten(KNOWN_SCALE_LITERAL_GROUPS);
 const MAX_KNOWN_SCALE_LITERALS = 44;
 
 // ---------------------------------------------------------------------------
-// Rule 4b — icons share one line weight, a few grids and three sizes.
+// Rule 4b — icons come from Lucide, drawn in one frame.
 // ---------------------------------------------------------------------------
 
 /*
  * UI-12 counted fourteen stroke widths, twelve viewBox grids and eighteen
- * render sizes among 284 hand-written SVGs. New icons go through AppIcon; this
- * holds the old ones to the values UI-12 settled on: no 1.4 stroke, a square
- * 16/20/24 grid, and no render size between the 14/16/20 steps.
- *
- * The entries are drawings, not icons: illustrations, the undo ring, brand
- * marks on their own grids.
+ * render sizes among 284 hand-written SVGs; ADR 0021 replaced the drawings
+ * with Lucide. An icon is `<AppIcon :icon="…" />`. A raw `<svg>` or a glyph
+ * drawn in AppIcon's slot is a drawing, and each one is listed here.
  */
 const KNOWN_ICON_LITERAL_GROUPS: KnownGroup[] = [
   {
-    reason: 'Small disclosure and status glyphs drawn on their own 8–13 grid; redraw on 16 with AppIcon size="sm".',
+    reason: 'Editor glyphs Lucide has no word for: image text-wrap left/right, delete table row/column.',
     files: {
-      'src/components/calendar/CalendarSidebar.vue': 1,
-      'src/components/layout/FolderBrowserPanel.vue': 1,
-      'src/components/layout/MailboxTree.vue': 1,
-      'src/components/mail/ComposerSignature.vue': 1,
-      'src/components/mail/ComposerThreadContext.vue': 1,
-      'src/components/mail/MessageRecipientDetails.vue': 1,
-      'src/components/onboarding/OnboardingFlow.vue': 1,
-      'src/components/settings/CalendarSettings.vue': 1,
+      'src/components/mail/RichTextEditor.vue': 4,
     },
   },
   {
-    reason: 'Sidebar and menu-bar glyphs on an 18 grid; redraw on 16 or 20.',
+    reason: 'Glyphs on a 10px filled avatar badge, stroked at 2.5 to stay legible; a 1.5 line disappears there.',
     files: {
-      'src/tray/TrayPopover.vue': 1,
+      'src/views/OutboxView.vue': 3,
     },
   },
   {
-    reason: 'Editor formatting glyphs that are wider than tall (list and quote marks).',
+    reason: 'Drawings, not icons: the empty-state envelope, the undo countdown ring and the decrypting spinner.',
     files: {
-      'src/components/mail/RichTextEditor.vue': 5,
-    },
-  },
-  {
-    reason: 'Drawings, not icons: empty-state illustrations and the undo countdown ring.',
-    files: {
+      'src/components/mail/PgpStatusCard.vue': 1,
       'src/components/mail/ThreadView.vue': 1,
       'src/components/ui/UndoFab.vue': 1,
     },
@@ -301,7 +286,7 @@ const KNOWN_ICON_LITERAL_GROUPS: KnownGroup[] = [
 const KNOWN_ICON_LITERALS = flatten(KNOWN_ICON_LITERAL_GROUPS);
 
 // Only ever lower this. See KNOWN_ICON_LITERAL_GROUPS.
-const MAX_KNOWN_ICON_LITERALS = 16;
+const MAX_KNOWN_ICON_LITERALS = 10;
 
 // ---------------------------------------------------------------------------
 // Rule 5 — transitions take their timing from the motion tokens.
@@ -829,33 +814,25 @@ function scaleLiteralsIn(source: ParsedSource): Omit<Violation, 'file'>[] {
   ];
 }
 
-const SVG_OPEN_TAG = /<svg\b[^>]*>/g;
-const ICON_GRIDS = new Set(['0 0 16 16', '0 0 20 20', '0 0 24 24']);
-const OFF_STEP_SIZES = new Set(['13', '15', '17', '19']);
+/** The frame itself draws the one `<svg>` every icon renders into. */
+const ICON_FRAME = join(SOURCE_ROOT, 'components', 'ui', 'AppIcon.vue');
+const RAW_SVG = /<svg\b/g;
+/** An AppIcon tag, read past quoted attributes (`v-if="a > b"`). */
+const APP_ICON_TAG = /<AppIcon\b((?:"[^"]*"|'[^']*'|[^'">])*)>/g;
 
 function iconLiteralsIn(source: ParsedSource): Omit<Violation, 'file'>[] {
-  if (!source.template) return [];
+  if (!source.template || source.path === ICON_FRAME) return [];
   const template = { ...source.template, content: stripHtmlComments(source.template.content) };
-  const tags = matchesIn(template, SVG_OPEN_TAG, (match) => {
-    const tag = match[0];
-    const problems: string[] = [];
-    const viewBox = tag.match(/\bviewBox="([^"]*)"/)?.[1];
-    if (viewBox && !ICON_GRIDS.has(viewBox.trim())) problems.push(`viewBox "${viewBox}"`);
-    const width = tag.match(/(?<![-\w:])width="(\d+)"/)?.[1];
-    if (width && OFF_STEP_SIZES.has(width)) problems.push(`size ${width}px`);
-    if (problems.length === 0) return null;
-    return {
-      rule: 'icon-literal',
-      detail: problems.join(', '),
-      fix: 'draw it in <AppIcon> (16 grid, size sm|md|lg) — see STYLEGUIDE.md § Icons',
-    };
-  });
-  const strokes = matchesIn(template, /stroke-width="1\.4"/g, () => ({
-    rule: 'icon-literal',
-    detail: 'stroke-width="1.4"',
-    fix: 'icons are stroked at 1.5 — use <AppIcon>',
-  }));
-  return [...tags, ...strokes];
+  const fix = 'use <AppIcon :icon="…" /> with a Lucide icon — see STYLEGUIDE.md § Icons';
+  return [
+    ...matchesIn(template, RAW_SVG, () => ({ rule: 'icon-literal', detail: 'hand-drawn <svg>', fix })),
+    // One without a Lucide icon draws its own glyph in the slot.
+    ...matchesIn(template, APP_ICON_TAG, (match) => {
+      const attributes = match[1] ?? '';
+      if (/(?:^|\s)(?::|v-bind:)icon=/.test(attributes) || attributes.trimEnd().endsWith('/')) return null;
+      return { rule: 'icon-literal', detail: 'glyph drawn in the AppIcon slot', fix };
+    }),
+  ];
 }
 
 /*
@@ -1206,22 +1183,27 @@ describe('design system: radii and type sizes come from the scale', () => {
   });
 });
 
-describe('design system: icons share one weight, grid and size scale', () => {
+describe('design system: icons come from Lucide', () => {
   guardTheList('icon-literal', KNOWN_ICON_LITERALS, MAX_KNOWN_ICON_LITERALS);
 
-  it('reports off-scale icons and leaves AppIcon and scale icons alone', () => {
+  it('reports drawn icons and leaves Lucide icons in AppIcon alone', () => {
     const path = join(SOURCE_ROOT, 'views', 'Example.vue');
     const source = [
       '<template>',
-      '  <svg width="16" height="16" viewBox="0 0 16 16" stroke-width="1.5"><path d="M1 1"/></svg>',
+      '  <AppIcon size="sm" :icon="Reply" />',
+      '  <AppIcon\n    class="x"\n    :icon="Reply"\n  />',
+      '  <AppIcon v-if="count > 1" size="sm" :icon="Reply" />',
+      '  <!-- <svg viewBox="0 0 16 16"></svg> -->',
+      '  <svg width="16" height="16" viewBox="0 0 16 16"><path d="M1 1"/></svg>',
       '  <AppIcon size="sm"><path d="M1 1"/></AppIcon>',
-      '  <svg width="13" height="13" viewBox="0 0 22 18" stroke-width="1.4"><path d="M1 1"/></svg>',
+      '  <AppIcon><path d="M1 1"/></AppIcon>',
       '</template>',
     ].join('\n');
 
     expect(violationsInSource(source, path, 'icon-literal').map((entry) => entry.detail)).toEqual([
-      'viewBox "0 0 22 18", size 13px',
-      'stroke-width="1.4"',
+      'hand-drawn <svg>',
+      'glyph drawn in the AppIcon slot',
+      'glyph drawn in the AppIcon slot',
     ]);
   });
 });

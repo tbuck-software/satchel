@@ -3,6 +3,8 @@ import { computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import AppIcon from '@/components/ui/AppIcon.vue';
+import { Calendar, Mail, Settings, Users } from 'lucide';
+import type { IconNode } from 'lucide';
 import TabBar from '@/components/ui/TabBar.vue';
 import { scrollListToTop } from '@/composables/listScrollTop';
 import { useUiStore } from '@/stores/ui';
@@ -20,6 +22,13 @@ const router = useRouter();
 const ui = useUiStore();
 
 const AREAS = ['calendar', 'contacts', 'settings'] as const;
+
+const MODULE_ICONS: Record<string, IconNode> = {
+  mail: Mail,
+  calendar: Calendar,
+  contacts: Users,
+  settings: Settings,
+};
 
 const items = computed(() => [
   { id: 'mail', label: t('nav.mail') },
@@ -63,12 +72,7 @@ function reselect(id: string) {
     @reselect="reselect"
   >
     <template #icon="{ item }">
-      <AppIcon v-if="item.id === 'mail'" size="lg"><rect x="2" y="3.5" width="12" height="9" rx="1.5" /><path d="m2.5 4.5 5.5 4 5.5-4" /></AppIcon>
-      <AppIcon v-else-if="item.id === 'calendar'" size="lg"><rect x="2" y="3" width="12" height="11" rx="2" /><path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3" /></AppIcon>
-      <AppIcon v-else-if="item.id === 'contacts'" size="lg"><circle cx="6" cy="5.5" r="2.5" /><path d="M1.5 13.5c0-2.2 2-4 4.5-4s4.5 1.8 4.5 4M10.5 3.2a2.5 2.5 0 0 1 0 4.6M11.5 9.7c1.7.5 3 2 3 3.8" /></AppIcon>
-      <!-- The cog the desktop sidebar uses (Lucide `settings`); the rayed
-           circle it replaced read as a sun. -->
-      <AppIcon v-else size="lg" :grid="24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></AppIcon>
+      <AppIcon size="lg" :icon="MODULE_ICONS[item.id] ?? Settings" />
       <!-- An account needs a look (its certificate is rejected, it cannot
            sync): the mailbox sheet behind Mail says which. -->
       <span v-if="item.id === 'mail' && ui.drawerAttention" class="mobile-tab-bar__dot" />

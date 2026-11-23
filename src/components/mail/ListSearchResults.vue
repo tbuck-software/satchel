@@ -9,6 +9,7 @@ import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
+import { Search } from 'lucide';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import SegmentedControl from '@/components/ui/SegmentedControl.vue';
 import ThreadGroupList from '@/components/mail/ThreadGroupList.vue';
@@ -224,7 +225,7 @@ function openAdvancedSearch() {
             @action="store.setScope('all')"
           >
             <template #icon>
-              <AppIcon size="lg"><circle cx="7" cy="7" r="5" /><path d="M11 11L14 14" /></AppIcon>
+              <AppIcon :icon="Search" size="lg" />
             </template>
           </EmptyState>
         </template>

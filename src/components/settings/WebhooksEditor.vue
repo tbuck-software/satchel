@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref } from 'vue';
+import { Plus } from 'lucide';
 import { useI18n } from 'vue-i18n';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
@@ -157,7 +158,7 @@ onMounted(load);
       </form>
       <div v-else class="setting-row setting-row--single">
         <AppButton variant="secondary" size="sm" @click="startAdding">
-          <template #icon><AppIcon><path d="M8 3v10M3 8h10" /></AppIcon></template>
+          <template #icon><AppIcon :icon="Plus" /></template>
           {{ $t('settings.plugins.newWebhook') }}
         </AppButton>
       </div>

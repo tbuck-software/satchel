@@ -16,6 +16,7 @@ import ModalShell from '@/components/ui/ModalShell.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
+import { X } from 'lucide';
 import { useDismissableOnTop } from '@/composables/useDismissable';
 import { useToast } from '@/composables/useToast';
 import { useAccountsStore } from '@/stores/accounts';
@@ -146,7 +147,7 @@ function retry() {
         <header class="certificate__head">
           <h2 class="certificate__title">{{ t('certificates.dialog.title', { account: accountName }) }}</h2>
           <IconButton :title="t('common.close')" @click="close">
-            <AppIcon><path d="m4 4 8 8m0-8-8 8" /></AppIcon>
+            <AppIcon :icon="X" />
           </IconButton>
         </header>
 

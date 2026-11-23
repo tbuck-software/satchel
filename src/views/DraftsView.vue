@@ -14,6 +14,7 @@ import CountBadge from '@/components/ui/CountBadge.vue';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import ErrorState from '@/components/ui/ErrorState.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
+import { ChevronLeft, FilePen, Paperclip, SquarePen, Trash2 } from 'lucide';
 import IconButton from '@/components/ui/IconButton.vue';
 import PaneHeader from '@/components/ui/PaneHeader.vue';
 import SectionHeading from '@/components/ui/SectionHeading.vue';
@@ -202,7 +203,7 @@ async function discardDraft(id: string) {
           @action="composer.openNew()"
         >
           <template #icon>
-            <AppIcon size="lg"><rect x="2.6" y="3.8" width="10.8" height="8.4" rx="1.4" /><path d="m3 5 5 3.4L13 5" /></AppIcon>
+            <AppIcon :icon="FilePen" size="lg" />
           </template>
         </EmptyState>
 
@@ -238,10 +239,7 @@ async function discardDraft(id: string) {
                       :email="avatarParticipant(draft)?.email"
                       :size="40"
                     />
-                    <svg class="row__draft-pencil" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M13.8 3.2l3 3L7.1 15.9H4.2v-2.8L13.8 3.2Z" />
-                      <path d="M12.3 4.8l3 3" />
-                    </svg>
+                    <AppIcon class="row__draft-pencil" :icon="FilePen" size="lg" />
                   </span>
 
                   <span class="row__content">
@@ -267,20 +265,14 @@ async function discardDraft(id: string) {
                       <span class="row__snippet" :class="{ 'row__snippet--empty': !snippet(draft) }">
                         {{ snippet(draft) || $t('drafts.noContent') }}
                       </span>
-                      <svg
+                      <AppIcon
                         v-if="hasAttachments(draft)"
                         class="row__attachment"
-                        width="16"
-                        height="16"
-                        viewBox="0 0 16 16"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.5"
-                        stroke-linecap="round"
+                        :icon="Paperclip"
+                        role="img"
+                        aria-hidden="false"
                         :aria-label="$t('drafts.withAttachment')"
-                      >
-                        <path d="M14 8.5 8 14.5a3.5 3.5 0 0 1-5-5L9.5 3A2.5 2.5 0 0 1 13 6.5L6.5 13a1.5 1.5 0 0 1-2-2.1L11 4.5" />
-                      </svg>
+                      />
                     </span>
                   </span>
                 </CardButton>
@@ -292,9 +284,7 @@ async function discardDraft(id: string) {
                     :disabled="Boolean(draft.content_error) || draftActions.isBusy(draft.id)"
                     @click="composer.openDraft(draft.id)"
                   >
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M12 1.5L14.5 4L5.5 13H3V10.5L12 1.5Z" />
-                    </svg>
+                    <AppIcon :icon="SquarePen" size="sm" />
                   </IconButton>
                   <IconButton
                     size="sm"
@@ -303,19 +293,7 @@ async function discardDraft(id: string) {
                     :disabled="draftActions.isBusy(draft.id)"
                     @click="void discardDraft(draft.id)"
                   >
-                    <svg
-                      width="14"
-                      height="14"
-                      viewBox="0 0 16 16"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.5"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    >
-                      <path d="M2.5 4h11M5.5 4V2.8A1.3 1.3 0 0 1 6.8 1.5h2.4a1.3 1.3 0 0 1 1.3 1.3V4" />
-                      <path d="M12.6 4v9a1.5 1.5 0 0 1-1.5 1.5h-6.2A1.5 1.5 0 0 1 3.4 13V4" />
-                    </svg>
+                    <AppIcon :icon="Trash2" size="sm" />
                   </IconButton>
                 </div>
               </li>
@@ -337,9 +315,7 @@ async function discardDraft(id: string) {
       <article v-else-if="selectedDraft" class="preview">
         <header class="preview__header">
           <IconButton v-if="ui.isSinglePane" :title="$t('common.back')" @click="closeDetail">
-            <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="m10.5 3-5 5 5 5" />
-            </svg>
+            <AppIcon :icon="ChevronLeft" size="lg" />
           </IconButton>
           <div class="preview__copy">
             <h2 class="preview__subject">{{ selectedDraft.content_error ? $t('drafts.unavailable') : selectedDraft.subject || $t('compose.noSubject') }}</h2>
@@ -384,9 +360,7 @@ async function discardDraft(id: string) {
 
           <ul v-if="selectedDraft.attachments?.length" class="preview__attachments">
             <li v-for="attachment in selectedDraft.attachments" :key="attachment.filename">
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M13.2 7.6L8.3 12.5C6.9 13.9 4.7 13.9 3.3 12.5C1.9 11.1 1.9 8.9 3.3 7.5L8.7 2.1C9.6 1.2 11.1 1.2 12 2.1C12.9 3 12.9 4.5 12 5.4L6.9 10.5C6.4 11 5.7 11 5.2 10.5C4.7 10 4.7 9.3 5.2 8.8L9.8 4.2" />
-              </svg>
+              <AppIcon :icon="Paperclip" size="sm" />
               {{ attachment.filename }}
             </li>
           </ul>
@@ -398,7 +372,7 @@ async function discardDraft(id: string) {
           :description="$t('drafts.detail.emptyDescription')"
         >
           <template #icon>
-            <AppIcon size="lg"><rect x="2.6" y="3.8" width="10.8" height="8.4" rx="1.4" /><path d="m3 5 5 3.4L13 5" /></AppIcon>
+            <AppIcon :icon="FilePen" size="lg" />
           </template>
         </EmptyState>
       </div>

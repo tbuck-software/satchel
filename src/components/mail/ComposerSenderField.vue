@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import AppIcon from '@/components/ui/AppIcon.vue';
+import { ChevronDown } from 'lucide';
 
 export interface ComposerIdentityOption {
   key: string;
@@ -58,7 +59,7 @@ const emit = defineEmits<{ change: [key: string] }>();
         >{{ option.label }}</option>
       </template>
     </select>
-    <AppIcon class="sender-chevron" size="sm"><path d="m4 6 4 4 4-4" /></AppIcon>
+    <AppIcon :icon="ChevronDown" class="sender-chevron" size="sm" />
   </div>
 </template>
 

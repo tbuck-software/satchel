@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { ArrowRight, Minus, Workflow } from 'lucide';
 import { useI18n } from 'vue-i18n';
 import { useConfirm } from '@/composables/useConfirm';
 import {
@@ -538,7 +539,7 @@ onMounted(() => {
     <div v-else-if="rules.length === 0 && !editorOpen" class="rules-empty">
       <EmptyState :title="$t('settings.rules.emptyTitle')" :description="$t('settings.rules.emptyHint')">
         <template #icon>
-          <AppIcon size="lg" :grid="24"><path d="M22 3H2l8 9.46V19l4 2v-8.54Z" /></AppIcon>
+          <AppIcon size="lg" :icon="Workflow" />
         </template>
       </EmptyState>
       <AppButton v-if="threads.activeThreadId" variant="secondary" size="sm" @click="startFromActiveThread">
@@ -563,7 +564,7 @@ onMounted(() => {
           <div class="rule-flow-preview">
             <span class="flow-kicker condition">{{ $t('settings.rules.when') }}</span>
             <span class="flow-copy">{{ ruleSummary(rule) }}</span>
-            <svg class="flow-arrow" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 10h13m-4-4 4 4-4 4" /></svg>
+            <AppIcon class="flow-arrow" :icon="ArrowRight" />
             <span class="flow-kicker action">{{ $t('settings.rules.then') }}</span>
             <span class="flow-copy">{{ rule.actions.map(parseAction).map(actionSummary).join(' · ') }}</span>
           </div>
@@ -616,9 +617,7 @@ onMounted(() => {
             :disabled="conditions.length === 1"
             @click="conditions.splice(index, 1)"
           >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
-              <path d="M3.5 8h9" />
-            </svg>
+            <AppIcon size="sm" :icon="Minus" />
           </IconButton>
         </div>
         <AppButton size="sm" :disabled="!unusedCondition" @click="addCondition">{{ $t('settings.rules.addCondition') }}</AppButton>
@@ -677,9 +676,7 @@ onMounted(() => {
             :disabled="actions.length === 1"
             @click="actions.splice(index, 1)"
           >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
-              <path d="M3.5 8h9" />
-            </svg>
+            <AppIcon size="sm" :icon="Minus" />
           </IconButton>
         </div>
         <p v-if="hasMove" class="field-hint">{{ $t('settings.ruleActions.oneMoveHint') }}</p>
@@ -747,7 +744,7 @@ input, select { border: 1px solid var(--border-color-muted); border-radius: var(
 .flow-kicker.condition { color: var(--accent-amber); background: color-mix(in srgb, var(--accent-amber) 12%, transparent); }
 .flow-kicker.action { color: var(--accent-green); background: color-mix(in srgb, var(--accent-green) 12%, transparent); }
 .flow-copy { min-width: 0; overflow: hidden; color: var(--text-secondary); font-size: var(--font-size-xs); line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
-.flow-arrow { width: 17px; color: var(--text-tertiary); fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.35; }
+.flow-arrow { color: var(--text-tertiary); }
 .editor { display: grid; gap: 12px; }
 .editor > label { display: grid; gap: 5px; font-size: var(--font-size-sm); }
 fieldset { display: grid; gap: 9px; margin: 0; padding: 12px; border: 1px solid var(--border-color-muted); border-radius: var(--radius-sm); }

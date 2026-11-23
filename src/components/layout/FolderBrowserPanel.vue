@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import AppButton from '@/components/ui/AppButton.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
 import CardButton from '@/components/ui/CardButton.vue';
+import { ChevronRight, Folder, Pencil, Star, Trash2, X } from 'lucide';
 import IconButton from '@/components/ui/IconButton.vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
@@ -214,9 +216,7 @@ onBeforeUnmount(() => {
         <h3>{{ $t('nav.folderBrowser.title') }}</h3>
       </div>
       <IconButton class="close-btn" :aria-label="$t('nav.folderBrowser.close')" @click="emit('close')" :title="$t('nav.folderBrowser.close')">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-          <path d="M3 3l10 10M13 3L3 13" />
-        </svg>
+        <AppIcon :icon="X" />
       </IconButton>
     </header>
 
@@ -276,37 +276,12 @@ onBeforeUnmount(() => {
               :aria-label="$t('nav.toggleSection', { name: row.node.label })"
               @click="toggleOpen(row.accountId, row.node.path)"
              :title="$t('nav.toggleSection', { name: row.node.label })">
-              <svg
-                class="chevron"
-                :class="{ open: isOpen(`${row.accountId}:${row.node.path}`, true) }"
-                width="12"
-                height="12"
-                viewBox="0 0 12 12"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <path d="M4 2.5L8 6 4 9.5" />
-              </svg>
+              <AppIcon class="chevron" :class="{ open: isOpen(`${row.accountId}:${row.node.path}`, true) }" :icon="ChevronRight" size="sm" />
             </IconButton>
             <span v-else class="chevron-spacer" />
 
             <CardButton class="folder-btn" @click="selectFolder(row.accountId, row.node.path)">
-              <svg
-                class="folder-icon"
-                width="16"
-                height="16"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <path d="M2 4.5h4l1.2 1.5H14v6.5a1 1 0 01-1 1H3a1 1 0 01-1-1z" />
-              </svg>
+              <AppIcon class="folder-icon" :icon="Folder" />
               <span class="folder-label">{{ row.node.label }}</span>
               <span v-if="row.node.unreadCount > 0" class="folder-count">{{ row.node.unreadCount }}</span>
             </CardButton>
@@ -322,9 +297,7 @@ onBeforeUnmount(() => {
                   :disabled="busy"
                   @click="startRename(row.id, row.node.label)"
                 >
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M11.2 2.6l2.2 2.2-7.6 7.6H3.6v-2.2l7.6-7.6Z" />
-                  </svg>
+                  <AppIcon :icon="Pencil" />
                 </IconButton>
                 <IconButton
                   class="row-action"
@@ -334,9 +307,7 @@ onBeforeUnmount(() => {
                   :disabled="busy"
                   @click="void removeFolder(row.node.folderId!, row.node.label)"
                 >
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M2 4h12M6 4V2h4v2M4 4l1 10h6l1-10" />
-                  </svg>
+                  <AppIcon :icon="Trash2" />
                 </IconButton>
               </template>
 
@@ -349,9 +320,7 @@ onBeforeUnmount(() => {
                   : $t('nav.folderBrowser.addFavorite')"
                 @click="mailboxes.toggleFavoriteFolder(row.accountId, row.node.path)"
               >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M8 2.1l1.8 3.6 4 .6-2.9 2.8.7 4L8 11.2 4.4 13l.7-4L2.2 6.3l4-.6L8 2.1Z" />
-                </svg>
+                <AppIcon :icon="Star" />
               </IconButton>
             </div>
           </div>

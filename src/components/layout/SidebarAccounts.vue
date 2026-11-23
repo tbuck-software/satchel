@@ -8,6 +8,8 @@ import { useThreadsStore } from '@/stores/threads';
 import { useUiStore } from '@/stores/ui';
 import NavItem from '@/components/ui/NavItem.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
+import { Clock, HardDrive, Moon, Shield, TriangleAlert } from 'lucide';
+import type { IconNode } from 'lucide';
 import AccountAvatar from '@/components/common/AccountAvatar.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import { useCertificateTrustStore } from '@/stores/certificateTrust';
@@ -45,6 +47,15 @@ const failingSince = computed(() => {
 });
 
 type Marker = { kind: 'certificate' | 'exception' | 'outage' | 'quota-warning' | 'quota-critical'; label: string };
+
+const MARKER_ICONS: Record<Marker['kind'], IconNode> = {
+  certificate: TriangleAlert,
+  outage: TriangleAlert,
+  // The server's storage, not this device's.
+  'quota-warning': HardDrive,
+  'quota-critical': HardDrive,
+  exception: Shield,
+};
 
 /**
  * A mailbox at 90 % or more, quiet below 98 % and red from there. Below 90 %
@@ -177,18 +188,18 @@ function openMenu(accountId: string, event: MouseEvent) {
           <AccountAvatar :name="account.displayName" :color="account.color" :avatar="account.avatar" :size="18" :resting="!accounts.isVisible(account.id)" />
         </template>
         <!-- Resting: still listed, but asleep. No number pulls at you; a moon
-             (Lucide `moon`) sits where it would be. -->
+             sits where it would be. -->
         <template v-if="!accounts.isVisible(account.id)" #trailing>
           <span class="sidebar-accounts__asleep" role="img" :aria-label="t('accountVisibility.resting')">
             <span class="sidebar-accounts__asleep-label" aria-hidden="true">{{ t('accountVisibility.resting') }}</span>
-            <AppIcon :grid="24"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401" /></AppIcon>
+            <AppIcon :icon="Moon" />
           </span>
         </template>
         <!-- Shown for today against its schedule: a clock beside the count says
              the number is borrowed until midnight. -->
         <template v-else-if="accounts.isPeeked(account.id)" #trailing>
           <span class="sidebar-accounts__peek" role="img" :aria-label="t('accountVisibility.statePeek')" :title="t('accountVisibility.statePeek')">
-            <AppIcon><circle cx="8" cy="8" r="5.6" /><path d="M8 4.8V8l2.3 1.4" /></AppIcon>
+            <AppIcon :icon="Clock" />
           </span>
           <span v-if="inboxCount(account.id) > 0" class="sidebar-accounts__count">{{ inboxCount(account.id) }}</span>
         </template>
@@ -209,22 +220,7 @@ function openMenu(accountId: string, event: MouseEvent) {
         :title="markers.get(account.id)!.label"
         @click="openMarker(account.id, markers.get(account.id)!)"
       >
-        <!-- Lucide `hard-drive`: the server's storage, not this device's. -->
-        <AppIcon v-if="markers.get(account.id)!.kind === 'quota-warning' || markers.get(account.id)!.kind === 'quota-critical'" :grid="24">
-          <path d="M22 12H2" />
-          <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
-          <path d="M6 16h.01" />
-          <path d="M10 16h.01" />
-        </AppIcon>
-        <AppIcon v-else-if="markers.get(account.id)!.kind !== 'exception'">
-          <path d="M8 2.4 14.2 13H1.8L8 2.4Z" />
-          <path d="M8 6.6v3" />
-          <path d="M8 11.6h.01" />
-        </AppIcon>
-        <AppIcon v-else>
-          <path d="M8 1.8 2.8 3.8v3.7c0 3.2 2.2 5.5 5.2 6.4 3-.9 5.2-3.2 5.2-6.4V3.8L8 1.8Z" />
-          <path d="M8 5.6v2.5l1.6 1" />
-        </AppIcon>
+        <AppIcon :icon="MARKER_ICONS[markers.get(account.id)!.kind]" />
       </IconButton>
     </div>
     <SidebarAccountMenu v-if="menuAccountId" :account-id="menuAccountId" :anchor="menuAnchor" @close="menuAnchor = null" />

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import AppIcon from '@/components/ui/AppIcon.vue';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { ChevronLeft, ChevronRight, Plus, Upload } from 'lucide';
 import { useInvitesStore } from '@/stores/invites';
 import { useAccountsStore } from '@/stores/accounts';
 import { useCalendarUiStore } from '@/stores/calendarUi';
@@ -408,16 +409,16 @@ function onKeydown(event: KeyboardEvent) {
            the two icons at the end of the title row, like a native app bar. -->
       <div v-if="ui.isMobile" class="calendar__phone-actions">
         <IconButton :title="$t('calendar.importIcs')" :aria-label="$t('calendar.importIcs')" @click="filePicker?.click()">
-          <AppIcon><path d="M8 2v8M4.5 6.5 8 10l3.5-3.5M2.5 11v2.5h11V11" /></AppIcon>
+          <AppIcon :icon="Upload" />
         </IconButton>
         <IconButton tone="accent" :title="$t('calendar.newEvent')" :aria-label="$t('calendar.newEvent')" @click="newEvent">
-          <AppIcon><path d="M8 3v10M3 8h10" /></AppIcon>
+          <AppIcon :icon="Plus" />
         </IconButton>
       </div>
       <div class="calendar__nav">
-        <IconButton size="sm" :title="$t('calendar.nav.previous')" @click="navigate(-1)"><AppIcon><path d="m10 3-5 5 5 5" /></AppIcon></IconButton>
+        <IconButton size="sm" :title="$t('calendar.nav.previous')" @click="navigate(-1)"><AppIcon :icon="ChevronLeft" /></IconButton>
         <AppButton variant="soft" size="sm" :title="$t('calendar.nav.today')" @click="goToday">{{ $t('common.today') }}</AppButton>
-        <IconButton size="sm" :title="$t('calendar.nav.next')" @click="navigate(1)"><AppIcon><path d="m6 3 5 5-5 5" /></AppIcon></IconButton>
+        <IconButton size="sm" :title="$t('calendar.nav.next')" @click="navigate(1)"><AppIcon :icon="ChevronRight" /></IconButton>
       </div>
       <div class="calendar__actions">
         <SegmentedControl

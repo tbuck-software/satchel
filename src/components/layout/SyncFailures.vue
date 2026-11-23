@@ -6,6 +6,7 @@ import BottomSheet from '@/components/ui/BottomSheet.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
+import { X } from 'lucide';
 import { useConnectionStore } from '@/stores/connection';
 import { useOutboxStore } from '@/stores/outbox';
 import { useMailSync } from '@/composables/useMailSync';
@@ -62,7 +63,7 @@ function openOutbox() {
         <div class="sync-failures__heading">
           <h2>{{ t('app.sync.failures.title') }}</h2>
           <IconButton :title="t('common.close')" @click="emit('close')">
-            <AppIcon><path d="m4 4 8 8m0-8-8 8" /></AppIcon>
+            <AppIcon :icon="X" />
           </IconButton>
         </div>
         <p>{{ t('app.sync.failures.explanation') }}</p>
