@@ -395,6 +395,40 @@ onMounted(() => {
   window.addEventListener('pointermove', dismissMessageKeyboardFocus, { passive: true });
 });
 
+// While this reader shows a thread, a change made elsewhere does not pull its
+// row out of the list (ADR 0022); the banner below says where it went.
+watch(() => props.threadId, (next, previous) => {
+  if (previous) threadsStore.closeReader(previous);
+  if (next) threadsStore.showInReader(next);
+}, { immediate: true });
+onBeforeUnmount(() => {
+  if (props.threadId) threadsStore.closeReader(props.threadId);
+});
+const leftList = computed(() =>
+  Boolean(thread.value)
+  && threadsStore.activeThreadLeftList
+  && threadsStore.activeThreadId === props.threadId,
+);
+const leftListTitle = computed(() => {
+  const current = thread.value;
+  if (!current) return '';
+  if (current.workflowState === 'waiting') return t('thread.result.inLater');
+  if (current.workflowState === 'snoozed' && current.snoozeUntil) {
+    return t('thread.row.back', { time: formatMessageTimestamp(current.snoozeUntil) });
+  }
+  return t(`thread.state.${current.workflowState}`);
+});
+const leftListComesBack = computed(() =>
+  thread.value?.workflowState === 'done' || thread.value?.workflowState === 'waiting',
+);
+const leftListCanReturn = computed(() =>
+  Boolean(thread.value) && thread.value?.workflowState !== 'inbox' && thread.value?.workflowState !== 'todo',
+);
+async function keepInInbox() {
+  if (!thread.value) return;
+  await threadActions.moveToInbox([thread.value.id]);
+}
+
 onBeforeUnmount(() => {
   window.removeEventListener('pointerdown', dismissMessageKeyboardFocus, true);
   window.removeEventListener('pointermove', dismissMessageKeyboardFocus);
@@ -1151,6 +1185,21 @@ function showEntireThread() {
               {{ $t('common.done') }}
             </span>
           </div>
+          <!-- The thread left this list while it was open — a send filed it,
+               another device moved it. It stays until the reader moves on. -->
+          <AppBanner
+            v-if="leftList && !showSelectionSummary"
+            class="thread-left-list-banner"
+            tone="info"
+            :title="leftListTitle"
+            :detail="leftListComesBack ? $t('thread.leftList.comesBack') : $t('thread.leftList.staysUntilYouMoveOn')"
+          >
+            <template v-if="leftListCanReturn" #actions>
+              <AppButton size="sm" variant="secondary" @click="keepInInbox">
+                {{ $t('thread.actions.moveToInbox') }}
+              </AppButton>
+            </template>
+          </AppBanner>
           <!-- The filter's verdict, with its answer next to it: one key or
                one click and the mark is gone. -->
           <AppBanner

@@ -26,7 +26,7 @@ This file translates `docs/PLAN.md` into execution-ready work packages.
 - WIP limits are visible per column.
 
 4. Resolve:
-- Reply from thread view updates activity and can move thread to `waiting`.
+- A reply files the thread as `done`; with a follow-up it moves to `waiting` (ADR 0022).
 - Done items remain visible for audit and can be moved back to `todo`.
 
 5. Search and command ops:

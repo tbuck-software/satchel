@@ -14,9 +14,9 @@ import { collidingKeys, type Overlap } from './threads/surface';
 /** The supported public interface; unused legacy methods stay private or removed. */
 const STORE_KEYS = [
   'activeContact', 'activeContactEmail', 'activeSimilarGroup', 'activeSimilarGroupId',
-  'activeSmartBucket', 'activeSmartBucketId', 'activeThread', 'activeThreadId',
+  'activeSmartBucket', 'activeSmartBucketId', 'activeThread', 'activeThreadId', 'activeThreadLeftList',
   'adoptListedThreads', 'allContactSummaries', 'applyWorkflowStates', 'beginThreadLeave',
-  'categoryFilter', 'clearSelection', 'closeSimilarGroup', 'closeSmartBucket',
+  'categoryFilter', 'clearSelection', 'closeReader', 'closeSimilarGroup', 'closeSmartBucket',
   'contactSummaries', 'deselectThreads', 'discardThread', 'endThreadLeave', 'ensureThreadLoaded', 'find',
   'focusNeighborThread', 'frequentContactSummaries', 'getSenderPreference', 'hasPreviousThreads', 'hasMoreThreads', 'leavingThreadIds',
   'leavingThreadStates', 'listEntries', 'load', 'loadPrevious', 'loadPreviousFailed', 'loadMore', 'loadMoreFailed', 'loadingMoreThreads',
@@ -28,7 +28,7 @@ const STORE_KEYS = [
   'selectedThreads', 'setAssignee', 'setMailboxFilter', 'setPriority',
   'setSenderCategory', 'setSenderCategoryByEmail',
   'setSelectionList', 'setSenderPriorityByEmail', 'setSharedWith', 'setThreadCategory',
-  'setThreadMuted', 'setThreadsRead', 'setThreadsStarred', 'setViewportStart',
+  'setThreadMuted', 'setThreadsRead', 'setThreadsStarred', 'setViewportStart', 'showInReader',
   'similarThreadGroups', 'smartInboxBuckets', 'smartInboxTotalCount',
   'smartListEntries', 'threadLoadInFlight', 'threads', 'toggleSelectionForThread',
   'trashThreads', 'visibleThreadOrder', 'visibleThreads', 'workflowFilter',

@@ -269,6 +269,10 @@
         "movedBannerDetail": "The spam filter on this device was sure this is spam. If it is wanted mail, say so: it goes back to the Inbox and the filter learns from it.",
         "bannerTitle": "This looks like spam",
         "bannerDetail": "The spam filter on this device flagged it. If it is wanted mail, say so and the filter learns from it."
+      },
+      "leftList": {
+        "comesBack": "It comes back to the inbox when someone replies.",
+        "staysUntilYouMoveOn": "It leaves this list once you move on."
       }
     },
     "time": {
@@ -545,6 +549,10 @@
         "movedBannerDetail": "Der Spamfilter auf diesem Gerät war sich sicher, dass das Spam ist. Ist sie erwünscht, sag es ihm – dann kommt sie zurück in den Posteingang, und er lernt daraus.",
         "bannerTitle": "Das sieht nach Spam aus",
         "bannerDetail": "Der Spamfilter auf diesem Gerät hat sie markiert. Ist sie erwünscht, sag es ihm – er lernt daraus."
+      },
+      "leftList": {
+        "comesBack": "Kommt in die Inbox zurück, sobald jemand antwortet.",
+        "staysUntilYouMoveOn": "Verschwindet aus dieser Liste, sobald du weitergehst."
       }
     },
     "time": {

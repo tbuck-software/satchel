@@ -58,6 +58,8 @@ vi.mock('@/stores/mailboxes', () => ({
 }));
 vi.mock('@/stores/threads', () => ({
   useThreadsStore: () => ({
+    showInReader: vi.fn(),
+    closeReader: vi.fn(),
     threads: [harness.thread],
     find: (id: string) => (id === harness.thread.id ? harness.thread : undefined),
     scopedVisibleThreads: [],

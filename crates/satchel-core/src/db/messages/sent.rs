@@ -42,6 +42,10 @@ pub struct SentMessageWriteRequest {
     pub signature_id: Option<String>,
     pub signature_variant: Option<String>,
     pub attachments: Vec<SentAttachmentMetadata>,
+    /// The sender asked to follow up: the thread waits in Later for an
+    /// answer. Without it a reply leaves the thread's state to the caller
+    /// and a new thread starts as Done (ADR 0022).
+    pub awaits_reply: bool,
 }
 
 /// Identifiers produced by a successful sent-message write.
@@ -160,6 +164,7 @@ impl<'a> SentMessageRepository<'a> {
             &request.subject,
             &request.body,
             &request.to,
+            request.awaits_reply,
             &now,
         )
         .await?;
@@ -355,6 +360,7 @@ async fn upsert_sent_thread(
     raw_subject: &str,
     body: &str,
     recipients: &[String],
+    awaits_reply: bool,
     now: &str,
 ) -> Result<SentThreadContext, SentMessageError> {
     let subject = normalize_subject(raw_subject);
@@ -388,14 +394,13 @@ async fn upsert_sent_thread(
         let workflow_transition_from = existing
             .workflow_state
             .as_deref()
-            .filter(|state| *state != "waiting")
+            .filter(|state| awaits_reply && *state != "waiting")
             .map(str::to_string);
 
         sqlx::query(
             "UPDATE threads
              SET subject = ?, last_message_date = ?, message_count = COALESCE(message_count, 0) + 1,
-                 unread_count = 0, participants = ?, snippet = ?, workflow_state = 'waiting',
-                 workflow_changed_at = ?, board_column = 'waiting', updated_at = ?
+                 unread_count = 0, participants = ?, snippet = ?, updated_at = ?
              WHERE id = ?",
         )
         .bind(&next_subject)
@@ -403,10 +408,20 @@ async fn upsert_sent_thread(
         .bind(merged_participants)
         .bind(&snippet)
         .bind(now)
-        .bind(now)
         .bind(thread_id)
         .execute(&mut **tx)
         .await?;
+        if awaits_reply {
+            sqlx::query(
+                "UPDATE threads
+                 SET workflow_state = 'waiting', workflow_changed_at = ?, board_column = 'waiting'
+                 WHERE id = ?",
+            )
+            .bind(now)
+            .bind(thread_id)
+            .execute(&mut **tx)
+            .await?;
+        }
 
         return Ok(SentThreadContext {
             id: thread_id.to_string(),
@@ -416,10 +431,13 @@ async fn upsert_sent_thread(
         });
     }
 
+    // Nothing in the Inbox started this thread, so there is no server move
+    // to queue: the state is all there is to set.
+    let new_thread_state = if awaits_reply { "waiting" } else { "done" };
     let thread_id = format!("th-{}", uuid::Uuid::new_v4());
     sqlx::query(
         "INSERT INTO threads (id, account_id, subject, last_message_date, message_count, unread_count, has_attachments, participants, snippet, workflow_state, workflow_changed_at, snooze_until, due_date, priority, board_column, board_position, created_at, updated_at)
-         VALUES (?, ?, ?, ?, 1, 0, 0, ?, ?, 'waiting', ?, NULL, NULL, 1, 'waiting', 1, ?, ?)",
+         VALUES (?, ?, ?, ?, 1, 0, 0, ?, ?, ?, ?, NULL, NULL, 1, ?, 1, ?, ?)",
     )
     .bind(&thread_id)
     .bind(account_id)
@@ -427,7 +445,9 @@ async fn upsert_sent_thread(
     .bind(now)
     .bind(merge_participants_json(None, recipients, account_email))
     .bind(&snippet)
+    .bind(new_thread_state)
     .bind(now)
+    .bind(new_thread_state)
     .bind(now)
     .bind(now)
     .execute(&mut **tx)

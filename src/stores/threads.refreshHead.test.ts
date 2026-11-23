@@ -289,6 +289,34 @@ describe('threads.refreshHead', () => {
     expect(threads.threads.map((t) => t.id)).toEqual(['t1']);
   });
 
+  it('keeps the row the reader holds through a list load that no longer returns it', async () => {
+    const threads = useThreadsStore();
+    listThreads.mockResolvedValueOnce(
+      page([row('t1', '2026-08-08T06:00:00Z'), row('t2', '2026-08-07T06:00:00Z')], null, false) as never,
+    );
+    await threads.load();
+    threads.selectThread('t2');
+    threads.showInReader('t2');
+
+    // Sending a reply files t2 as Done; the composer then reloads the list.
+    listThreads.mockResolvedValueOnce(page([row('t1', '2026-08-08T06:00:00Z')], null, false) as never);
+    await threads.load();
+    vi.mocked(backendGetThreads).mockResolvedValueOnce([{
+      ...row('t2', '2026-08-07T06:00:00Z'),
+      workflow_state: 'done',
+      mailbox_names: JSON.stringify(['INBOX.Archive']),
+    }] as never);
+    await threads.refreshThreads(['t2']);
+
+    expect(threads.activeThreadId).toBe('t2');
+    expect(threads.visibleThreads.map((thread) => thread.id)).toEqual(['t1', 't2']);
+    expect(threads.activeThreadLeftList).toBe(true);
+
+    threads.selectThread('t1');
+    threads.showInReader('t1');
+    expect(threads.visibleThreads.map((thread) => thread.id)).toEqual(['t1']);
+  });
+
   it('removes an externally archived thread from the cached Inbox projection', async () => {
     const threads = useThreadsStore();
     listThreads.mockResolvedValueOnce(

@@ -118,9 +118,13 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
  * splitting keeps the editor lazy and the router out of the slim windows:
  * viewer 122.2 and tray 67.9 KiB, both below their unchanged limits. Together
  * with the JavaScript dependency refresh, main measures 218.8 KiB, viewer
- * 124.0 and tray 69.0 KiB; no application feature moved into startup. */
+ * 124.0 and tray 69.0 KiB; no application feature moved into startup.
+ * Main initial 220 KiB since 2026-11-23: the threads store keeps the open
+ * thread's row while a change made elsewhere files it (ADR 0022). That lives
+ * in the list projection, which startup needs; 219.4 → 219.6 KiB. The
+ * reader's banner and its two strings stay in the lazy reader. */
 const budgets = {
-  'index.html': { entryGzip: 108 * 1024, initialGzip: 219.5 * 1024, locales: ['src/i18n/startup.en.json', 'src/i18n/startup.de.json'] },
+  'index.html': { entryGzip: 108 * 1024, initialGzip: 220 * 1024, locales: ['src/i18n/startup.en.json', 'src/i18n/startup.de.json'] },
   'tray.html': { entryGzip: 5 * 1024, initialGzip: 75 * 1024, locales: ['src/i18n/tray.en.json', 'src/i18n/tray.de.json'] },
   'viewer.html': { entryGzip: 5 * 1024, initialGzip: 130 * 1024, locales: ['src/i18n/viewer.en.json', 'src/i18n/viewer.de.json'] },
 };

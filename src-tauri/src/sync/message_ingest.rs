@@ -1250,45 +1250,41 @@ async fn persist_provider_message(
         .await
         .map_err(|error| error.to_string())?;
 
-    if newly_seen && !message_is_draft {
-        if message_is_sent && sender_is_account {
-            sqlx::query("UPDATE threads SET workflow_state = 'waiting', board_column = 'waiting', workflow_changed_at = ?, updated_at = ? WHERE id = ? AND workflow_state IN ('inbox', 'todo') AND last_message_date <= ?")
-                .bind(&now).bind(&now).bind(&thread_id).bind(&message.date_rfc3339)
-                .execute(&mut **tx).await.map_err(|error| error.to_string())?;
-        } else if !sender_is_account {
-            sqlx::query("UPDATE follow_up_reminders SET status = 'resolved', resolved_at = ?, updated_at = ? WHERE thread_id = ? AND status = 'pending'")
+    // An answer of the user's own changes no state here: Waiting is asked for
+    // at send time, and Satchel's own replies are filed by the send (ADR 0022).
+    if newly_seen && !message_is_draft && !sender_is_account {
+        sqlx::query("UPDATE follow_up_reminders SET status = 'resolved', resolved_at = ?, updated_at = ? WHERE thread_id = ? AND status = 'pending'")
                 .bind(&now).bind(&now).bind(&thread_id).execute(&mut **tx).await.map_err(|error| error.to_string())?;
-            if folder_type == "inbox" {
-                let resurfaced = sqlx::query("UPDATE threads SET workflow_state = 'inbox', board_column = 'inbox', snooze_until = NULL, workflow_changed_at = ?, updated_at = ? WHERE id = ? AND workflow_state IN ('snoozed', 'aside', 'done', 'waiting')")
+        if folder_type == "inbox" {
+            let resurfaced = sqlx::query("UPDATE threads SET workflow_state = 'inbox', board_column = 'inbox', snooze_until = NULL, workflow_changed_at = ?, updated_at = ? WHERE id = ? AND workflow_state IN ('snoozed', 'aside', 'done', 'waiting')")
                     .bind(&now).bind(&now).bind(&thread_id).execute(&mut **tx).await.map_err(|error| error.to_string())?
                     .rows_affected() > 0;
-                // The reply brought the thread back: its old Done or Snooze
-                // keyword comes off, so other clients stop showing it. Nothing
-                // is queued when the server holds no marker for it. The worker
-                // picks the row up on its next pass.
-                if resurfaced {
-                    satchel_core::sync::workflow_markers::enqueue_workflow_marker_in_transaction(
-                        tx,
-                        &SyncQueue::new(),
-                        &thread_id,
-                        &satchel_core::workflow::remote_marker::WorkflowMarker::None,
-                        None,
-                    )
-                    .await?;
-                }
-                sqlx::query("INSERT OR IGNORE INTO ingest_effects (message_id, thread_id, account_id, run_rules, created_at) VALUES (?, ?, ?, 1, ?)")
-                    .bind(&message_id).bind(&thread_id).bind(account_id).bind(&now)
-                    .execute(&mut **tx).await.map_err(|error| error.to_string())?;
-            } else if satchel_core::rules::has_filed_mark(&message.satchel_marks)
-                && !matches!(folder_type, "sent" | "drafts" | "spam" | "trash")
-            {
-                // Satchel's server script filed it away from the Inbox. The
-                // rules that run only here have not seen it yet; the ones the
-                // server ran find it where they would have put it.
-                sqlx::query("INSERT OR IGNORE INTO ingest_effects (message_id, thread_id, account_id, run_rules, created_at) VALUES (?, ?, ?, 1, ?)")
-                    .bind(&message_id).bind(&thread_id).bind(account_id).bind(&now)
-                    .execute(&mut **tx).await.map_err(|error| error.to_string())?;
+            // The reply brought the thread back: its old Done or Snooze
+            // keyword comes off, so other clients stop showing it. Nothing
+            // is queued when the server holds no marker for it. The worker
+            // picks the row up on its next pass.
+            if resurfaced {
+                satchel_core::sync::workflow_markers::enqueue_workflow_marker_in_transaction(
+                    tx,
+                    &SyncQueue::new(),
+                    &thread_id,
+                    &satchel_core::workflow::remote_marker::WorkflowMarker::None,
+                    None,
+                )
+                .await?;
             }
+            sqlx::query("INSERT OR IGNORE INTO ingest_effects (message_id, thread_id, account_id, run_rules, created_at) VALUES (?, ?, ?, 1, ?)")
+                    .bind(&message_id).bind(&thread_id).bind(account_id).bind(&now)
+                    .execute(&mut **tx).await.map_err(|error| error.to_string())?;
+        } else if satchel_core::rules::has_filed_mark(&message.satchel_marks)
+            && !matches!(folder_type, "sent" | "drafts" | "spam" | "trash")
+        {
+            // Satchel's server script filed it away from the Inbox. The
+            // rules that run only here have not seen it yet; the ones the
+            // server ran find it where they would have put it.
+            sqlx::query("INSERT OR IGNORE INTO ingest_effects (message_id, thread_id, account_id, run_rules, created_at) VALUES (?, ?, ?, 1, ?)")
+                    .bind(&message_id).bind(&thread_id).bind(account_id).bind(&now)
+                    .execute(&mut **tx).await.map_err(|error| error.to_string())?;
         }
     }
     // The server forwarded it under a rule: recorded before any rule runs
@@ -2920,6 +2916,38 @@ mod tests {
                 1
             );
         }
+    }
+
+    #[tokio::test]
+    async fn an_answer_sent_from_another_client_leaves_the_thread_where_it_is() {
+        let pool = ingest_pool().await;
+        let mut parent = envelope("parent");
+        parent.message_id_header = Some("<parent@example.test>".into());
+        parent.from_address = "external@example.test".into();
+        parent.date_rfc3339 = "2026-01-01T08:00:00Z".into();
+        ingest(&pool, "inbox", &parent).await.unwrap();
+        sqlx::query("UPDATE accounts SET last_sync_at = '2026-01-01T12:00:00Z'")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let mut answer = envelope("answer");
+        answer.message_id_header = Some("<answer@example.test>".into());
+        answer.in_reply_to = parent.message_id_header.clone();
+        answer.from_address = "account@example.com".into();
+        answer.mailbox_ids = vec!["SENT".into()];
+        answer.date_rfc3339 = "2026-01-02T09:00:00Z".into();
+        ingest(&pool, "inbox", &answer).await.unwrap();
+
+        // Waiting is something the user asks for (ADR 0022); an answer
+        // written elsewhere does not file the thread on its own.
+        assert_eq!(
+            sqlx::query_scalar::<_, String>("SELECT workflow_state FROM threads")
+                .fetch_all(&pool)
+                .await
+                .unwrap(),
+            ["inbox"]
+        );
     }
 
     #[tokio::test]

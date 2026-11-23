@@ -134,7 +134,8 @@ async fn persists_new_thread_and_repairs_missing_sent_folder() {
     .fetch_one(&pool)
     .await
     .expect("sent thread");
-    assert_eq!(thread.0, "waiting");
+    // A new mail with no follow-up asks nothing of anyone: it is filed (ADR 0022).
+    assert_eq!(thread.0, "done");
     assert_eq!(thread.1, 1);
     assert_eq!(thread.2, 0);
     assert_eq!(thread.3, r#"["friend@example.com"]"#);
@@ -176,6 +177,7 @@ async fn existing_thread_transitions_once_and_waiting_replies_emit_no_extra_even
 
     let mut first = request("acc-1");
     first.thread_id = Some("thread-1".to_string());
+    first.awaits_reply = true;
     let first_result = SentMessageRepository::new(&pool)
         .persist(first)
         .await
@@ -197,6 +199,7 @@ async fn existing_thread_transitions_once_and_waiting_replies_emit_no_extra_even
 
     let mut second = request("acc-1");
     second.thread_id = Some("thread-1".to_string());
+    second.awaits_reply = true;
     second.body = "A second reply".to_string();
     let second_result = SentMessageRepository::new(&pool)
         .persist(second)
@@ -210,6 +213,56 @@ async fn existing_thread_transitions_once_and_waiting_replies_emit_no_extra_even
             .await
             .expect("workflow event count");
     assert_eq!(event_count, 1);
+}
+
+#[tokio::test]
+async fn a_new_mail_with_a_follow_up_waits_in_later() {
+    let pool = pool().await;
+    seed_account(&pool, "acc-1", "me@example.com").await;
+    let mut input = request("acc-1");
+    input.awaits_reply = true;
+
+    let result = SentMessageRepository::new(&pool)
+        .persist(input)
+        .await
+        .expect("sent message");
+
+    let state: String = sqlx::query_scalar("SELECT workflow_state FROM threads WHERE id = ?")
+        .bind(&result.thread_id)
+        .fetch_one(&pool)
+        .await
+        .expect("thread");
+    assert_eq!(state, "waiting");
+}
+
+#[tokio::test]
+async fn a_reply_without_a_follow_up_leaves_the_state_to_the_caller() {
+    let pool = pool().await;
+    seed_account(&pool, "acc-1", "me@example.com").await;
+    seed_thread(&pool, "thread-1", "inbox").await;
+    let mut reply = request("acc-1");
+    reply.thread_id = Some("thread-1".to_string());
+
+    SentMessageRepository::new(&pool)
+        .persist(reply)
+        .await
+        .expect("reply");
+
+    // Filing it as Done queues server moves; that is the app's step after
+    // the send (`workflow::transitions::file_answered_thread`), not this write.
+    let state: (String, i64, i64) = sqlx::query_as(
+        "SELECT workflow_state, message_count, unread_count FROM threads WHERE id = 'thread-1'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("thread");
+    assert_eq!(state, ("inbox".to_string(), 2, 0));
+    let events: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM workflow_events WHERE thread_id = 'thread-1'")
+            .fetch_one(&pool)
+            .await
+            .expect("events");
+    assert_eq!(events, 0);
 }
 
 #[tokio::test]

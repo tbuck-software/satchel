@@ -77,6 +77,15 @@ export interface ThreadFilterBucketsSurface {
   activeSmartBucket: ComputedRef<SmartInboxBucketGroup | undefined>;
   activeContact: ComputedRef<ContactThreadSummary | null>;
   visibleThreads: ComputedRef<Thread[]>;
+  /**
+   * The open thread no longer belongs to this list, but stays in it until
+   * the reader moves on (ADR 0022). The reader says where it went.
+   */
+  activeThreadLeftList: ComputedRef<boolean>;
+  /** The reader shows this thread now. */
+  showInReader(threadId: string): void;
+  /** The reader that showed this thread closed or moved on. */
+  closeReader(threadId: string): void;
   contactSummaries: ComputedRef<ContactThreadSummary[]>;
   frequentContactSummaries: ComputedRef<ContactThreadSummary[]>;
   allContactSummaries: ComputedRef<ContactThreadSummary[]>;
@@ -99,6 +108,8 @@ export interface ThreadFilterBucketsSurface {
 
 export interface ThreadFilterBuckets extends ThreadFilterBucketsSurface {
   compareThreads(a: Thread, b: Thread): number;
+  /** The row the open reader holds; a list load keeps it (ADR 0022). */
+  heldThreadId(): string;
 }
 
 export interface ThreadFilterBucketsModule {
@@ -198,37 +209,73 @@ export function createThreadFilterBuckets({
       : null,
   );
 
+  /** Whether this list, as scoped now, shows the thread on its own merits. */
+  function belongsToList(thread: Thread, accountId: string, contactEmail: string): boolean {
+    if (!accountId && !isAccountVisible(thread.accountId)) return false;
+    if (accountId && thread.accountId !== accountId) return false;
+    if (contactEmail) return threadHasParticipant(thread, contactEmail);
+
+    if (!matchesWorkflowFilter(thread.workflowState, workflowFilter.value)) return false;
+    if (!matchesMailboxFilter(thread, mailboxFilter.value)) return false;
+    if (!isVisibleInCurrentScope(thread, workflowFilter.value, mailboxFilter.value)) return false;
+    // Treat threads without a category as 'personal' so the personal tab feels right out of the box.
+    if (categoryFilter.value !== 'all' && (thread.category ?? 'personal') !== categoryFilter.value) return false;
+    // Muted threads stay accessible via folder views but are hidden from the
+    // default Inbox to keep noise down.
+    return !(
+      thread.isMuted
+      && mailboxFilter.value.kind === 'section'
+      && mailboxFilter.value.value === 'inbox'
+    );
+  }
+
+  /**
+   * The open thread keeps its row while it stays open (ADR 0022). A change
+   * made elsewhere — a send filing it as Done, another device, a sync — used
+   * to pull it out from under the reader and select the top of the list.
+   * Only the thread the reader shows, only one this list showed, and only
+   * until the reader opens another one, closes, or the list changes scope.
+   * The store selects a thread on a phone's list too, where nobody reads it.
+   */
+  const heldThreadId = ref('');
+  const readerThreadId = ref('');
+  function showInReader(threadId: string) {
+    readerThreadId.value = threadId;
+  }
+  /** Leaves a reader that opened since alone. */
+  function closeReader(threadId: string) {
+    if (readerThreadId.value === threadId) readerThreadId.value = '';
+  }
+  const activeBelongsToList = computed(() => {
+    const id = selection.getActiveThreadId();
+    const thread = id ? threads.value.find((row) => row.id === id) : undefined;
+    return Boolean(thread && belongsToList(
+      thread,
+      activeAccountId(),
+      normalizedParticipantEmail(activeContactEmail.value),
+    ));
+  });
+  function readerShowsActive() {
+    const id = selection.getActiveThreadId();
+    return Boolean(id) && readerThreadId.value === id;
+  }
+  const activeThreadLeftList = computed(() =>
+    Boolean(heldThreadId.value)
+    && heldThreadId.value === selection.getActiveThreadId()
+    && !activeBelongsToList.value,
+  );
+
   const visibleThreads = computed(() => {
     const accountId = activeAccountId();
     const contactEmail = normalizedParticipantEmail(activeContactEmail.value);
+    const held = heldThreadId.value;
     const visible: Thread[] = [];
 
     // This projection reruns for every mailbox mutation. Keep it to one pass:
     // chained filters allocated and traversed up to six intermediate arrays
     // before the virtual list could render the same result.
     for (const thread of threads.value) {
-      if (!accountId && !isAccountVisible(thread.accountId)) continue;
-      if (accountId && thread.accountId !== accountId) continue;
-
-      if (contactEmail) {
-        if (threadHasParticipant(thread, contactEmail)) visible.push(thread);
-        continue;
-      }
-
-      if (!matchesWorkflowFilter(thread.workflowState, workflowFilter.value)) continue;
-      if (!matchesMailboxFilter(thread, mailboxFilter.value)) continue;
-      if (!isVisibleInCurrentScope(thread, workflowFilter.value, mailboxFilter.value)) continue;
-      // Treat threads without a category as 'personal' so the personal tab feels right out of the box.
-      if (categoryFilter.value !== 'all' && (thread.category ?? 'personal') !== categoryFilter.value) continue;
-      // Muted threads stay accessible via folder views but are hidden from the
-      // default Inbox to keep noise down.
-      if (
-        thread.isMuted
-        && mailboxFilter.value.kind === 'section'
-        && mailboxFilter.value.value === 'inbox'
-      ) continue;
-
-      visible.push(thread);
+      if (thread.id === held || belongsToList(thread, accountId, contactEmail)) visible.push(thread);
     }
 
     if (contactEmail) return visible.sort((a, b) => b.lastMessageAtMs - a.lastMessageAtMs);
@@ -528,6 +575,19 @@ export function createThreadFilterBuckets({
     if (watchersStarted) return;
     watchersStarted = true;
 
+    // Opening another thread or rescoping the list ends a hold; a thread
+    // entering the list while open starts one.
+    const hold = () => {
+      heldThreadId.value = activeBelongsToList.value && readerShowsActive() ? selection.getActiveThreadId() : '';
+    };
+    watch(
+      () => [selection.getActiveThreadId(), readerThreadId.value, activeAccountId(), workflowFilter.value,
+        mailboxFilter.value, categoryFilter.value, activeContactEmail.value],
+      hold,
+      { immediate: true, flush: 'sync' },
+    );
+    watch(activeBelongsToList, (belongs) => belongs && hold(), { flush: 'sync' });
+
     watch(activeSimilarGroup, (nextGroup) => {
       if (!nextGroup) {
         if (activeSimilarGroupId.value) {
@@ -620,6 +680,9 @@ export function createThreadFilterBuckets({
     activeSmartBucket,
     activeContact,
     visibleThreads,
+    activeThreadLeftList,
+    showInReader,
+    closeReader,
     contactSummaries,
     frequentContactSummaries,
     allContactSummaries,
@@ -642,7 +705,7 @@ export function createThreadFilterBuckets({
 
   return {
     surface,
-    filter: { ...surface, compareThreads },
+    filter: { ...surface, compareThreads, heldThreadId: () => heldThreadId.value },
     onScopeChange(listener) {
       scopeListeners.push(listener);
     },
