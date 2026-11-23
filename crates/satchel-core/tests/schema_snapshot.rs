@@ -265,6 +265,10 @@ async fn an_older_database_with_retired_migrations_upgrades_without_losing_mail(
             .await
             .unwrap();
     assert_eq!(retired, 4);
+    use satchel_core::db::data_repairs::{run_repair, CC_INDEX, DEFAULT_BLOCK_SIZE};
+    run_repair(&pool, &CC_INDEX, DEFAULT_BLOCK_SIZE, None, |_| {})
+        .await
+        .unwrap();
     assert!(satchel_core::db::message_index_intact(&pool).await.unwrap());
     satchel_core::db::init(&pool)
         .await

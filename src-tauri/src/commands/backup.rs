@@ -1889,17 +1889,14 @@ async fn inspect_database(path: &Path) -> Result<DatabaseFacts, String> {
         .fetch_one(&pool)
         .await
         .map_err(|err| err.to_string())?;
-    let schema_version = satchel_core::backup::schema_version(&pool).await;
-    // Read-only, so this is the coarse count comparison rather than FTS5's own
-    // integrity-check; `stage_restore` runs the full one on its writable
-    // snapshot before anything is published.
-    let search_index_ok = satchel_core::db::message_index_matches_row_count(&pool).await;
+    let schema_version = satchel_core::backup::schema_version(&pool).await?;
+    let search_index_ok = satchel_core::db::backup_search_index_intact(&pool, schema_version).await;
     pool.close().await;
     Ok(DatabaseFacts {
         accounts,
         messages,
-        schema_version: schema_version?,
-        search_index_ok: search_index_ok?,
+        schema_version,
+        search_index_ok: search_index_ok.map_err(|err| err.to_string())?,
     })
 }
 
@@ -2041,21 +2038,13 @@ async fn create_backup_in(
 ) -> Result<BackupEntry, String> {
     let staging = satchel_core::backup::publication::StagedBackup::new(root, created_at)?;
     let target = staging.path().join("satchel.db");
-    // VACUUM INTO takes an expression rather than a bound parameter; quote the
-    // path the way SQLite expects.
-    //
-    // It may also renumber the rowids of a table without an explicit INTEGER
-    // PRIMARY KEY, and `messages` is one — `messages_fts` and
-    // `message_search_projection` both key off those numbers. Observed builds
-    // preserve them; the documented guarantee is not there, which is why the
-    // inspection below and `stage_restore` check the index instead of assuming.
-    sqlx::query(&format!(
-        "VACUUM INTO '{}'",
-        target.to_string_lossy().replace('\'', "''")
-    ))
-    .execute(pool)
-    .await
-    .map_err(|err| err.to_string())?;
+    // All three search structures depend on the implicit message rowids.
+    // Inspect the snapshot in case VACUUM INTO changes those rowids.
+    sqlx::query("VACUUM INTO ?")
+        .bind(target.to_string_lossy().as_ref())
+        .execute(pool)
+        .await
+        .map_err(|err| err.to_string())?;
 
     // The encryption key lives outside the database. A backup without it cannot
     // restore an account whose credentials are encrypted.
@@ -2129,9 +2118,9 @@ async fn list_backups_in(dir: String) -> CommandResult<Vec<BackupEntry>> {
 
     let mut entries = Vec::new();
     for path in candidates {
-        let metadata = tokio::fs::metadata(path.join("satchel.db"))
-            .await
-            .map_err(|err| err.to_string())?;
+        let Ok(metadata) = tokio::fs::metadata(path.join("satchel.db")).await else {
+            continue;
+        };
         let manifest = satchel_core::backup::read_backup_manifest(&path).unwrap_or_default();
         entries.push(BackupEntry {
             name: path
@@ -3301,6 +3290,64 @@ mod tests {
             Path::new(&entry.path)
         ));
         pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn backup_health_and_restore_detect_projection_and_cc_drift() {
+        use satchel_core::db::data_repairs::{run_repair, CC_INDEX, DEFAULT_BLOCK_SIZE};
+
+        let (_profile, pool) = backup_source_pool().await;
+        let root = tempfile::tempdir().unwrap();
+        let backups = root.path().join("it's a backup");
+        std::fs::create_dir(&backups).unwrap();
+        seed_exportable_messages(&pool, 1).await;
+        sqlx::query("UPDATE messages SET cc_addresses = '[\"alice@example.test\"]'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        run_repair(&pool, &CC_INDEX, DEFAULT_BLOCK_SIZE, None, |_| {})
+            .await
+            .unwrap();
+        let before = create_backup_in(&pool, &backups, backup_time(0), synthetic_key_export)
+            .await
+            .unwrap();
+        assert_eq!(before.search_index_ok, Some(true));
+
+        let restore = root.path().join("restore");
+        for (index, damage) in [
+            "UPDATE message_search_projection SET account_id = 'wrong-account'",
+            "UPDATE message_cc_fts SET cc_addresses = '[\"bob@example.test\"]'",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            sqlx::query(damage).execute(&pool).await.unwrap();
+            let backup = create_backup_in(
+                &pool,
+                &backups,
+                backup_time(index as i64 + 1),
+                synthetic_key_export,
+            )
+            .await
+            .unwrap();
+            assert_eq!(backup.search_index_ok, Some(false), "{damage}");
+            let backup_path = Path::new(&backup.path);
+            let manifest = satchel_core::backup::read_backup_manifest(backup_path).unwrap();
+            assert_eq!(manifest.search_index_ok, Some(false));
+            let error = satchel_core::backup::stage_restore(
+                &restore,
+                &backup_path.join("satchel.db"),
+                &[],
+                None,
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(error, "backend.errors.restoreSearchIndexInvalid");
+            assert!(!satchel_core::backup::restore_pending(&restore));
+            assert!(satchel_core::db::verify_and_repair_message_index(&pool)
+                .await
+                .unwrap());
+        }
     }
 
     #[tokio::test]

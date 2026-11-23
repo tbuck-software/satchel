@@ -26,6 +26,7 @@ pub mod publication;
 
 const READY: &str = "satchel.restore-ready.json";
 const APPLYING: &str = "satchel.restore-applying.json";
+const PREVIOUS_STAGING: &str = ".satchel.restore-previous";
 const DATABASE: &str = "satchel.db";
 const APPLY_INCOMING_CUTOFF: &str = include_str!("backup/apply_incoming_cutoff.sql");
 const PROFILE_FILES: &[&str] = &[
@@ -291,8 +292,7 @@ pub async fn stage_restore(
     let temporary = tempfile::NamedTempFile::new_in(profile).map_err(|e| e.to_string())?;
     // VACUUM INTO also makes imports from an open SQLite file WAL-consistent.
     // It is allowed to renumber the rowids of `messages` (no explicit INTEGER
-    // PRIMARY KEY), which is what `messages_fts` and
-    // `message_search_projection` are keyed on — hence the index check below.
+    // PRIMARY KEY). The search indexes and projection use those rowids.
     let source_pool = SqlitePoolOptions::new()
         .max_connections(1)
         .connect_with(SqliteConnectOptions::new().filename(source).read_only(true))
@@ -353,17 +353,25 @@ pub async fn stage_restore(
             "SELECT id, account_id, workflow_state FROM threads LIMIT 0",
             "SELECT id, account_id, folder_id, thread_id, original_source FROM messages LIMIT 0",
             "SELECT rowid FROM messages_fts LIMIT 0",
+            "SELECT message_rowid, message_id, thread_id, account_id, date FROM message_search_projection LIMIT 0",
+            "SELECT rowid FROM message_cc_fts LIMIT 0",
         ] {
             if let Err(error) = sqlx::query(statement).execute(&pool).await {
                 tracing::warn!(%error, "restore database schema is incomplete");
                 return Err("backend.errors.restoreDatabaseInvalid".into());
             }
         }
-        // `PRAGMA integrity_check` says nothing about an external-content FTS5
-        // table. A search index that no longer matches its messages would be
-        // restored as-is and answer wrongly for as long as it took someone to
-        // notice. The snapshot is writable here, so ask FTS5 itself.
-        if !crate::db::message_index_intact(&pool).await? {
+        // Older backups can still be waiting for migration 0076's Cc backfill.
+        // Complete it in one pass before judging index coverage. This private
+        // snapshot has no concurrent writers that need a turn between blocks.
+        use crate::db::data_repairs::{run_repair, CC_INDEX};
+        run_repair(&pool, &CC_INDEX, i64::MAX, None, |_| {})
+            .await
+            .map_err(|err| err.to_string())?;
+        if !crate::db::message_index_intact(&pool)
+            .await
+            .map_err(|err| err.to_string())?
+        {
             return Err("backend.errors.restoreSearchIndexInvalid".into());
         }
         rewrap_secrets(&pool, source_keys, target_key).await
@@ -493,6 +501,38 @@ fn copy_synced(from: &Path, to: &Path) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+fn remove_previous_staging(staging: &Path) -> Result<(), String> {
+    match fs::remove_dir_all(staging) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+/// Copy the live files under the exclusive profile lock. A killed process can
+/// leave only one staging directory, which the next attempt clears.
+fn stage_previous_profile(profile: &Path, backup: &Path) -> Result<(), String> {
+    let staging = profile.join(PREVIOUS_STAGING);
+    remove_previous_staging(&staging)?;
+    fs::create_dir(&staging).map_err(|err| err.to_string())?;
+    let result = (|| {
+        for name in PROFILE_FILES {
+            let live = profile.join(name);
+            if live.try_exists().map_err(|err| err.to_string())? {
+                copy_synced(&live, &staging.join(name))?;
+            }
+        }
+        sync_directory(&staging)?;
+        fs::rename(&staging, backup).map_err(|err| err.to_string())
+    })();
+    if result.is_err() {
+        if let Err(error) = remove_previous_staging(&staging) {
+            tracing::warn!(%error, "could not remove incomplete restore recovery copy");
+        }
+    }
+    result
+}
+
 /// Finish an installed restore or recover the previous profile if the atomic
 /// replacement did not happen. Rollback restores the previous WAL with its DB.
 async fn recover_interrupted_apply(profile: &Path) -> Result<bool, String> {
@@ -614,17 +654,20 @@ pub async fn apply_pending_restore(
     }
     let previous = format!("satchel.db.replaced-{}", uuid::Uuid::new_v4());
     let backup = profile.join(&previous);
-    fs::create_dir(&backup).map_err(|e| e.to_string())?;
-    for name in PROFILE_FILES {
-        let live = profile.join(name);
-        if live.exists() {
-            copy_synced(&live, &backup.join(name))?;
-        }
-    }
-    sync_directory(&backup)?;
+    stage_previous_profile(profile, &backup)?;
     manifest.previous = Some(previous);
     manifest.activation_cutoff = Some(activation_time());
-    write_manifest(&profile.join(APPLYING), &manifest)?;
+    let applying = profile.join(APPLYING);
+    if let Err(error) = write_manifest(&applying, &manifest) {
+        // A parent sync failure can leave a published manifest that still
+        // needs its recovery copy. Clean up only if publication did not occur.
+        if applying.try_exists().is_ok_and(|exists| !exists) {
+            if let Err(cleanup_error) = fs::remove_dir_all(&backup) {
+                tracing::warn!(%cleanup_error, "could not remove unpublished restore recovery copy");
+            }
+        }
+        return Err(error);
+    }
     for name in &PROFILE_FILES[1..] {
         let live = profile.join(name);
         if live.exists() {
@@ -760,6 +803,61 @@ mod tests {
 
         drop(open);
         assert!(apply_pending_restore(&profile, Some(&key)).await.unwrap());
+        assert!(!restore_pending(&profile));
+    }
+
+    #[tokio::test]
+    async fn failed_previous_profile_copies_do_not_accumulate_across_restarts() {
+        let directory = tempfile::tempdir().unwrap();
+        let profile = directory.path().join("profile");
+        let source = directory.path().join("backup.db");
+        let key = [7; 32];
+        backup_file(&source, &key).await;
+        stage_restore(&profile, &source, &[key], Some(&key))
+            .await
+            .unwrap();
+        let live = profile.join(DATABASE);
+        fs::write(&live, b"live database").unwrap();
+        // The DB copy succeeds first. A directory at the WAL path makes the
+        // second copy fail deterministically on any account.
+        let blocked_wal = profile.join("satchel.db-wal");
+        fs::create_dir(&blocked_wal).unwrap();
+        let displaced_profiles = || {
+            fs::read_dir(&profile)
+                .unwrap()
+                .map(|entry| entry.unwrap())
+                .filter(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with("satchel.db.replaced-")
+                })
+                .map(|entry| entry.path())
+                .collect::<Vec<_>>()
+        };
+        for _ in 0..3 {
+            assert!(apply_pending_restore(&profile, Some(&key)).await.is_err());
+            assert!(restore_pending(&profile));
+            assert!(!recovery_in_progress(&profile));
+            assert_eq!(fs::read(&live).unwrap(), b"live database");
+            assert!(displaced_profiles().is_empty());
+            assert!(!profile.join(PREVIOUS_STAGING).exists());
+        }
+
+        // A process killed during copying can leave this staging directory.
+        let staging = profile.join(PREVIOUS_STAGING);
+        fs::create_dir(&staging).unwrap();
+        fs::write(staging.join("satchel.db-wal"), b"stale partial WAL").unwrap();
+        fs::remove_dir(&blocked_wal).unwrap();
+        assert!(apply_pending_restore(&profile, Some(&key)).await.unwrap());
+        let displaced = displaced_profiles();
+        assert_eq!(displaced.len(), 1);
+        assert_eq!(
+            fs::read(displaced[0].join(DATABASE)).unwrap(),
+            b"live database"
+        );
+        assert!(!displaced[0].join("satchel.db-wal").exists());
+        assert!(!staging.exists());
         assert!(!restore_pending(&profile));
     }
 
@@ -1156,6 +1254,16 @@ mod tests {
         let migrations = sqlx::migrate!("./src/db/migrations");
         old.ensure_migrations_table().await.unwrap();
         old.apply(migrations.iter().next().unwrap()).await.unwrap();
+        old.execute(sqlx::raw_sql(
+            "INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+             VALUES ('acc', 'Backup', 'backup@example.test', 'imap', '{}', '', '', '');
+             INSERT INTO folders (id, account_id, name, full_path, folder_type, created_at, updated_at)
+             VALUES ('fld', 'acc', 'INBOX', 'INBOX', 'inbox', '', '');
+             INSERT INTO messages (id, account_id, folder_id, from_address, to_addresses, cc_addresses, date, created_at, updated_at)
+             VALUES ('old-mail', 'acc', 'fld', 'sender@example.test', '[]', '[\"alice@example.test\"]', '', '', '');",
+        ))
+        .await
+        .unwrap();
         old.close().await.unwrap();
         let source_hash = file_hash(&source).unwrap();
 
@@ -1169,6 +1277,15 @@ mod tests {
             schema_version(&restored).await.unwrap(),
             crate::db::latest_migration_version(),
         );
+        let cc_hit: String = sqlx::query_scalar(
+            "SELECT m.id FROM message_cc_fts
+             JOIN messages AS m ON m.rowid = message_cc_fts.rowid
+             WHERE message_cc_fts MATCH 'alice'",
+        )
+        .fetch_one(&restored)
+        .await
+        .unwrap();
+        assert_eq!(cc_hit, "old-mail");
         assert_eq!(file_hash(&source).unwrap(), source_hash);
         restored.close().await;
     }
