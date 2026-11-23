@@ -16,6 +16,7 @@ export interface Split {
 export const MAIN_ENTRY: string;
 export const OTHER_ENTRIES: string[];
 export const STARTUP: { prefixes: string[]; rustSources: string[] };
+export const LAZY_COMMAND_KEYS: Record<string, string>;
 export const UNANCHORED_KEYS: Record<string, string[]>;
 export const NOT_KEYS: Record<string, string>;
 export const FIRST_PAINT: string[];

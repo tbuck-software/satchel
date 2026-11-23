@@ -1,4 +1,5 @@
 pub mod api;
+pub(crate) mod event_dispatch;
 pub mod registry;
 #[cfg(desktop)]
 pub mod runtime;

@@ -115,9 +115,13 @@ pub(crate) async fn load_message_body_with_pools(
             (parsed.text.unwrap_or_default(), parsed.html)
         }
         "gmail" => {
-            let envelope = crate::providers::gmail::GmailProvider::from_account_config(&config)
-                .fetch_message_by_id(&remote_id)
-                .await?;
+            let envelope = crate::providers::gmail::GmailProvider::from_stored_account(
+                write,
+                &target.account_id,
+                &config,
+            )
+            .fetch_message_by_id(&remote_id)
+            .await?;
             (envelope.body_text.unwrap_or_default(), envelope.body_html)
         }
         "outlook" => {

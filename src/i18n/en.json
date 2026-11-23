@@ -407,6 +407,7 @@
       "oauthReloadRequired": "The account's sign-in changed while this was in progress. Please try again.",
       "oauthUrlRejected": "Satchel refused an unexpected sign-in address.",
       "outboxActionCannotBeDiscarded": "This outbox action cannot be discarded safely.",
+      "outboxMailCannotBeRequeued": "This email cannot be queued again right now.",
       "outgoingSendHeldAfterRestore": "Send paused after restore or import. Review before sending.",
       "outlookCalendarAccessMissing": "Calendar access for this Outlook account is not connected. Connect it under Settings → Calendar.",
       "outlookCalendarSyncFailed": "Outlook Calendar for {account} could not be synchronized.",

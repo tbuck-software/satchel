@@ -50,6 +50,8 @@ pub(crate) async fn process_special_attachment(
         return;
     }
     let Ok(bytes) = attachment_bytes(
+        pool,
+        account_id,
         provider_kind,
         account_config,
         account_email,

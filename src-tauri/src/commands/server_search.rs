@@ -163,7 +163,7 @@ pub(crate) async fn fetch_server_search_hit_impl(
 
     let (envelope, folder_hint) = match provider.as_str() {
         "gmail" => (
-            GmailProvider::from_account_config(&config)
+            GmailProvider::from_stored_account(pool, &input.account_id, &config)
                 .fetch_message_by_id(&input.remote_id)
                 .await
                 .map_err(|error| error.to_string())?,

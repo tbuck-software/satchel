@@ -60,6 +60,22 @@ describe('i18n chunk plugin', () => {
     expect(JSON.stringify(messages)).not.toContain('"backend"');
   });
 
+  it('loads the requeue error with the Outbox route', () => {
+    const source = readFileSync(router, 'utf8');
+    const result = hook(wrap, 'transform').call(context, source, router);
+    expect(result.code).toContain('__satchelWithMessages("views.OutboxView"');
+
+    for (const locale of ['en', 'de']) {
+      const startup = JSON.parse(readFileSync(path.join(repoRoot, `src/i18n/startup.${locale}.json`), 'utf8'));
+      const full = JSON.parse(readFileSync(path.join(repoRoot, `src/i18n/${locale}.json`), 'utf8'));
+      const id = hook(serve, 'resolveId').call(context, `/src/i18n/chunks/views.OutboxView.${locale}.json`);
+      const messages = JSON.parse(hook(serve, 'load').call(context, id));
+      expect(startup.backend.errors.outboxMailCannotBeRequeued).toBeUndefined();
+      expect(messages.backend.errors.outboxMailCannotBeRequeued)
+        .toBe(full.backend.errors.outboxMailCannotBeRequeued);
+    }
+  });
+
   it('lists each chunk with a loader per locale in the table', () => {
     const id = hook(serve, 'resolveId').call(context, '/src/i18n/chunks/table.js');
     const table = hook(serve, 'load').call(context, id);

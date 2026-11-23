@@ -250,10 +250,7 @@ pub(crate) async fn upsert_provider_messages(
     let mut results = Vec::with_capacity(messages.len());
     for chunk in messages.chunks(INGEST_BATCH_SIZE) {
         let body_html = prepare_message_html(chunk).await?;
-        let mut tx = pool
-            .begin_with("BEGIN IMMEDIATE")
-            .await
-            .map_err(|error| error.to_string())?;
+        let mut tx = crate::sync::leases::begin_sync_write(pool, account_id).await?;
         let flag_locks = PendingFlagLocks::load(&mut tx, account_id).await?;
         let mut stored = Vec::new();
         for (message, body_html) in chunk.iter().zip(&body_html) {
@@ -415,10 +412,7 @@ pub(crate) async fn upsert_gmail_snapshot_message(
     .into_iter()
     .collect();
     let html = prepare_message_html(std::slice::from_ref(message)).await?;
-    let mut tx = pool
-        .begin_with("BEGIN IMMEDIATE")
-        .await
-        .map_err(|error| error.to_string())?;
+    let mut tx = crate::sync::leases::begin_sync_write(pool, account_id).await?;
     if crate::sync::gmail_reconcile::gmail_snapshot_message_pinned_tx(
         &mut tx,
         account_id,

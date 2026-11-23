@@ -57,10 +57,7 @@ pub async fn apply_outlook_id_translations(
     translations: &[RemoteIdTranslation],
 ) -> Result<(), String> {
     let now = chrono::Utc::now().to_rfc3339();
-    let mut tx = pool
-        .begin_with("BEGIN IMMEDIATE")
-        .await
-        .map_err(|err| err.to_string())?;
+    let mut tx = crate::sync::leases::begin_sync_write(pool, account_id).await?;
 
     for translation in translations {
         let target_id = translation.target_id.trim();

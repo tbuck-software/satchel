@@ -32,9 +32,9 @@ use crate::sync::gmail_reconcile::{
 
 #[cfg(mobile)]
 use crate::sync::leases::acquire_mobile_mailbox_work_permit;
-use crate::sync::leases::sync_run_lock;
 #[cfg(target_os = "android")]
 use crate::sync::leases::CrossProcessSyncLease;
+use crate::sync::leases::{begin_sync_write, sync_run_lock};
 use crate::sync::message_ingest::{replay_ingest_effects, upsert_provider_messages};
 use crate::sync::outlook_migration::migrate_outlook_remote_ids;
 use crate::sync::queue::{QueuedAction, SyncQueue};
@@ -908,10 +908,7 @@ async fn persist_sync_cursors(
 ) -> Result<(), String> {
     let encoded = serde_json::to_string(state).map_err(|err| err.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
-    let mut tx = pool
-        .begin_with("BEGIN IMMEDIATE")
-        .await
-        .map_err(|err| err.to_string())?;
+    let mut tx = begin_sync_write(pool, account_id).await?;
     sqlx::query("UPDATE accounts SET sync_state = ?, updated_at = ? WHERE id = ?")
         .bind(encoded)
         .bind(&now)
@@ -938,10 +935,7 @@ async fn reset_imap_folder(
     state: &mut ImapSyncState,
     now: &str,
 ) -> Result<HashSet<String>, String> {
-    let mut tx = pool
-        .begin_with("BEGIN IMMEDIATE")
-        .await
-        .map_err(|error| error.to_string())?;
+    let mut tx = begin_sync_write(pool, account_id).await?;
     let thread_ids = reset_local_provider_folder_with_generation_tx(
         &mut tx,
         account_id,
@@ -1129,14 +1123,43 @@ async fn ingest_folder_batch(
     Ok(outcome)
 }
 
+async fn write_sync_status<'q>(
+    pool: &SqlitePool,
+    account_id: &str,
+    query: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>>,
+) -> Result<(), String> {
+    // Desktop only needs the local account lock for an individual statement.
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = account_id;
+        query
+            .execute(pool)
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+    #[cfg(target_os = "android")]
+    {
+        let mut tx = begin_sync_write(pool, account_id).await?;
+        query
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| error.to_string())?;
+        tx.commit().await.map_err(|error| error.to_string())
+    }
+}
+
 async fn stamp_inbox_fetch(
     pool: &SqlitePool,
     account_id: &str,
     started_at: &str,
     advance_cutoff: bool,
 ) -> Result<(), String> {
-    sqlx::query(
-        "UPDATE accounts
+    write_sync_status(
+        pool,
+        account_id,
+        sqlx::query(
+            "UPDATE accounts
          SET last_sync_at = ?1,
              incoming_effects_cutoff = CASE
                  WHEN ?2 AND (julianday(incoming_effects_cutoff) IS NULL
@@ -1145,14 +1168,13 @@ async fn stamp_inbox_fetch(
                  ELSE COALESCE(incoming_effects_cutoff, last_sync_at, '') END,
              updated_at = ?3
          WHERE id = ?4",
+        )
+        .bind(started_at)
+        .bind(advance_cutoff)
+        .bind(chrono::Utc::now().to_rfc3339())
+        .bind(account_id),
     )
-    .bind(started_at)
-    .bind(advance_cutoff)
-    .bind(chrono::Utc::now().to_rfc3339())
-    .bind(account_id)
-    .execute(pool)
-    .await
-    .map_err(|error| error.to_string())?;
+    .await?;
     Ok(())
 }
 
@@ -1231,24 +1253,18 @@ async fn account_run_with_deadline<T>(
     })?
 }
 
-/// Run one account's sync under its lock (and, on mobile, the global mailbox
-/// permit), with the deadline counted from the moment both are held.
-///
-/// Serialize one complete account snapshot, then release the permit so due
-/// Outbox work gets a fair turn before the next account, avoiding the old
-/// all-account lock convoy. The wait for the lock is not part of the run: a
-/// poll queued behind a long full sync used to time out without doing any work
-/// and mark the account as failed.
+/// Serialize one complete account snapshot, then release the lock so due
+/// outbox work gets a turn before the next account. The deadline starts only
+/// once the local lock and the mobile permit are held.
 async fn account_run_exclusive<T>(
     account_id: &str,
-    duration: std::time::Duration,
-    run: impl std::future::Future<Output = Result<T, String>>,
-) -> Result<T, String> {
+    run: impl std::future::Future<Output = T>,
+) -> T {
     #[cfg(mobile)]
     let _mobile_work_guard = acquire_mobile_mailbox_work_permit().await;
     let run_lock = sync_run_lock(account_id);
     let _run_guard = run_lock.lock().await;
-    account_run_with_deadline(duration, run).await
+    run.await
 }
 
 /// Execute one mailbox synchronization request.
@@ -1296,35 +1312,94 @@ pub(crate) async fn sync_mailboxes(
     }
 
     for account_id in account_ids {
-        let result = account_run_exclusive(&account_id, ACCOUNT_SYNC_TIMEOUT, async {
-        #[cfg(target_os = "android")]
-        let cross_process_lease = match CrossProcessSyncLease::acquire(pool, &account_id).await? {
-            Some(lease) => lease,
-            None => {
+        let result = account_run_exclusive(&account_id, async {
+            #[cfg(target_os = "android")]
+            let Some(lease) = CrossProcessSyncLease::acquire(pool, &account_id).await?
+            else {
                 tracing::debug!(
                     account_id = %account_id,
                     "mailbox sync is already running in another Android process"
                 );
                 return Ok(());
-            }
-        };
+            };
 
+            let run = sync_one_account(
+                pool,
+                &account_id,
+                app,
+                events,
+                folder_selection,
+                &mut summary,
+            );
+
+            #[cfg(target_os = "android")]
+            {
+                let result = lease.run(run).await;
+                lease.release().await;
+                result
+            }
+            #[cfg(not(target_os = "android"))]
+            run.await
+        })
+        .await;
+        if let Err(error) = result {
+            #[cfg(target_os = "android")]
+            if CrossProcessSyncLease::was_lost(&error) {
+                tracing::debug!(%account_id, "mailbox sync stopped after losing its lease");
+                continue;
+            }
+            tracing::warn!(%account_id, %error, "account sync could not finish");
+            let now = chrono::Utc::now().to_rfc3339();
+            summary.accounts_failed += 1;
+            summary.failures.push(encoded_account_sync_failure(
+                &account_id,
+                &account_id,
+                &error,
+                &now,
+            ));
+        }
+    }
+
+    // A server that presents a valid certificate again needs no exception.
+    if let Err(error) = satchel_core::providers::tls_trust::settle(pool).await {
+        tracing::warn!(error = %error, "certificate exceptions could not be settled");
+    }
+
+    // Re-publish any durable intents left behind by a process exit between
+    // message ingestion and native delivery. The renderer uses the message id,
+    // so a concurrent retry updates the same system notification.
+    if let Some(events) = events {
+        if let Err(error) = crate::commands::notifications::publish_pending_mail_notifications(
+            pool,
+            events.as_ref(),
+            None,
+        )
+        .await
+        {
+            tracing::warn!(%error, "pending mail notifications could not be published");
+        }
+    }
+
+    Ok(summary)
+}
+
+async fn sync_one_account(
+    pool: &SqlitePool,
+    account_id: &str,
+    app: Option<&AppHandle>,
+    events: Option<&Arc<EventBus>>,
+    folder_selection: FolderSelection,
+    summary: &mut MailboxSyncSummary,
+) -> Result<(), String> {
+    let result = account_run_with_deadline(ACCOUNT_SYNC_TIMEOUT, async {
         // Re-reading under the lock prevents a concurrent run from restoring a
         // stale cursor.
-        let Some(mut account) = MailAccountRow::load(pool, &account_id)
+        let Some(mut account) = MailAccountRow::load(pool, account_id)
             .await
             .map_err(|err| err.to_string())?
         else {
             return Ok(());
         };
-        // Import the other Android process's block after acquiring the account
-        // lease and before this process can issue Gmail requests.
-        #[cfg(target_os = "android")]
-        if account.provider == "gmail" {
-            crate::sync::rate_limit_state::restore(pool)
-                .await
-                .map_err(|error| format!("could not read Gmail rate limit: {error}"))?;
-        }
         // Seeded local demo account should not block or pollute real sync runs.
         if crate::sync::is_seeded_demo_account(&account.id, &account.email) {
             return Ok(());
@@ -1344,7 +1419,7 @@ pub(crate) async fn sync_mailboxes(
             .unwrap_or_default();
 
         let sync_started_at = chrono::Utc::now().to_rfc3339();
-        let _ = sqlx::query(
+        write_sync_status(pool, &account.id, sqlx::query(
             "UPDATE accounts
              SET sync_status = 'syncing',
                  last_sync_error = NULL,
@@ -1355,9 +1430,7 @@ pub(crate) async fn sync_mailboxes(
         )
         .bind(serde_json::json!({"phase": "starting"}).to_string())
         .bind(&sync_started_at)
-        .bind(&account.id)
-        .execute(pool)
-        .await;
+        .bind(&account.id)).await?;
 
         // Before new mail meets the rules: is Satchel's Sieve script still the
         // one the server runs? A forward Satchel leaves to the server depends
@@ -1365,7 +1438,9 @@ pub(crate) async fn sync_mailboxes(
         if account.provider == "imap" {
             satchel_core::server_rules::service::verify_if_due(pool, &account.id).await;
         }
-        let account_sync_result: Result<(usize, usize, bool, usize, usize), String> = async {
+        // Keep the provider and ingest future off the stack of the deadline
+        // and lease wrappers.
+        let account_sync_result: Result<(usize, usize, bool, usize, usize), String> = Box::pin(async {
             replay_ingest_effects(pool, &account.id).await?;
             let config = crate::utils::oauth::refresh_account_config(pool, &account.id, &account.provider, &account.config).await.map_err(|err| err.encoded())?;
 
@@ -1567,7 +1642,7 @@ pub(crate) async fn sync_mailboxes(
                         state.folder_snapshot_at.get(&folder.id).map(String::as_str),
                         chrono::Utc::now(),
                     );
-                let _ = sqlx::query(
+                write_sync_status(pool, &account.id, sqlx::query(
                     "UPDATE accounts
                      SET sync_progress_json = ?, updated_at = ?
                      WHERE id = ?",
@@ -1582,9 +1657,7 @@ pub(crate) async fn sync_mailboxes(
                     .to_string(),
                 )
                 .bind(&now)
-                .bind(&account.id)
-                .execute(pool)
-                .await;
+                .bind(&account.id)).await?;
 
                 sqlx::query(
                     "INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, uidvalidity, message_count, unread_count, sync_enabled, sort_order, special_use, created_at, updated_at)
@@ -1808,6 +1881,8 @@ pub(crate) async fn sync_mailboxes(
                             marker_changed_threads.extend(progress.markers_applied);
                             flag_changed_threads.extend(progress.flags_changed);
                         }
+                        #[cfg(target_os = "android")]
+                        Err(err) if CrossProcessSyncLease::was_lost(&err) => return Err(err),
                         Err(err) => summary.failures.push(encoded_folder_sync_failure(
                             &account.email, &folder_name, err,
                         )),
@@ -1898,7 +1973,7 @@ pub(crate) async fn sync_mailboxes(
             }
 
             let now = chrono::Utc::now().to_rfc3339();
-            sqlx::query(
+            write_sync_status(pool, &account.id, sqlx::query(
                 "UPDATE accounts
                  SET sync_status = 'idle',
                      last_sync_error = NULL,
@@ -1910,10 +1985,7 @@ pub(crate) async fn sync_mailboxes(
             )
                 .bind(serde_json::json!({"phase": "complete"}).to_string())
                 .bind(&now)
-                .bind(&account.id)
-                .execute(pool)
-                .await
-                .map_err(|err| err.to_string())?;
+                .bind(&account.id)).await?;
 
             Ok((
                 folders_synced,
@@ -1922,7 +1994,7 @@ pub(crate) async fn sync_mailboxes(
                 backfill_remaining_messages,
                 backfill_total_messages,
             ))
-        }
+        })
         .await;
 
         match account_sync_result {
@@ -1947,6 +2019,10 @@ pub(crate) async fn sync_mailboxes(
                 summary.backfill_total_messages += backfill_total_messages;
             }
             Err(error) => {
+                #[cfg(target_os = "android")]
+                if CrossProcessSyncLease::was_lost(&error) {
+                    return Err(error);
+                }
                 let now = chrono::Utc::now().to_rfc3339();
                 let since = failing_since.clone().unwrap_or_else(|| now.clone());
                 let failure =
@@ -1959,7 +2035,7 @@ pub(crate) async fn sync_mailboxes(
                     tracing::warn!(account_id = %account.id, provider = %account.provider,
                         error = %error, "account sync failed");
                 }
-                let _ = sqlx::query(
+                write_sync_status(pool, &account.id, sqlx::query(
                     "UPDATE accounts
                      SET sync_status = 'error',
                          last_sync_error = ?,
@@ -1974,80 +2050,52 @@ pub(crate) async fn sync_mailboxes(
                 .bind(&since)
                 .bind(serde_json::json!({"phase": "error"}).to_string())
                 .bind(&now)
-                .bind(&account.id)
-                .execute(pool)
-                .await;
+                .bind(&account.id)).await?;
                 summary.accounts_failed += 1;
                 summary.failures.push(failure);
             }
         }
 
-        #[cfg(target_os = "android")]
-        {
-            if account.provider == "gmail" {
-                crate::sync::rate_limit_state::persist(pool).await;
-            }
-            cross_process_lease.release().await;
-        }
         Ok(())
-        }).await;
-        if let Err(error) = result {
-            tracing::warn!(account_id = %account_id, error = %error, "account sync failed");
-            let now = chrono::Utc::now().to_rfc3339();
-            let since = sqlx::query_scalar::<_, Option<String>>(
-                "SELECT sync_failing_since FROM accounts WHERE id = ?",
-            )
-            .bind(&account_id)
-            .fetch_optional(pool)
-            .await
-            .ok()
-            .flatten()
-            .flatten()
-            .unwrap_or_else(|| now.clone());
-            let failure = encoded_account_sync_failure(&account_id, &account_id, &error, &since);
-            let _ = sqlx::query(
+    }).await;
+    if let Err(error) = result {
+        #[cfg(target_os = "android")]
+        if CrossProcessSyncLease::was_lost(&error) {
+            return Err(error);
+        }
+        tracing::warn!(account_id = %account_id, error = %error, "account sync failed");
+        let now = chrono::Utc::now().to_rfc3339();
+        let since = sqlx::query_scalar::<_, Option<String>>(
+            "SELECT sync_failing_since FROM accounts WHERE id = ?",
+        )
+        .bind(account_id)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
+        .flatten()
+        .unwrap_or_else(|| now.clone());
+        let failure = encoded_account_sync_failure(account_id, account_id, &error, &since);
+        write_sync_status(
+            pool,
+            account_id,
+            sqlx::query(
                 "UPDATE accounts SET sync_status = 'error', last_sync_error = ?,
-                last_sync_error_at = ?, sync_failing_since = ?, sync_progress_json = ?,
-                updated_at = ? WHERE id = ?",
+            last_sync_error_at = ?, sync_failing_since = ?, sync_progress_json = ?,
+            updated_at = ? WHERE id = ?",
             )
             .bind(&failure)
             .bind(&now)
             .bind(&since)
             .bind(serde_json::json!({"phase": "error"}).to_string())
             .bind(&now)
-            .bind(&account_id)
-            .execute(pool)
-            .await;
-            summary.accounts_failed += 1;
-            summary.failures.push(failure);
-        }
-    }
-
-    // A block earned during this run has to outlive the process, or the next
-    // start knocks on it and renews it.
-    crate::sync::rate_limit_state::persist(pool).await;
-
-    // A server that presents a valid certificate again needs no exception.
-    if let Err(error) = satchel_core::providers::tls_trust::settle(pool).await {
-        tracing::warn!(error = %error, "certificate exceptions could not be settled");
-    }
-
-    // Re-publish any durable intents left behind by a process exit between
-    // message ingestion and native delivery. The renderer uses the message id,
-    // so a concurrent retry updates the same system notification.
-    if let Some(events) = events {
-        if let Err(error) = crate::commands::notifications::publish_pending_mail_notifications(
-            pool,
-            events.as_ref(),
-            None,
+            .bind(account_id),
         )
-        .await
-        {
-            tracing::warn!(%error, "pending mail notifications could not be published");
-        }
+        .await?;
+        summary.accounts_failed += 1;
+        summary.failures.push(failure);
     }
-
-    Ok(summary)
+    Ok(())
 }
 
 /// How much history the user wants kept with its body, if they have said.
@@ -2272,6 +2320,51 @@ mod tests {
             .cursors
     }
 
+    #[tokio::test]
+    async fn a_cursor_write_rejects_an_expired_and_a_superseded_lease() {
+        use crate::sync::leases::CrossProcessSyncLease;
+        use crate::sync::queue::SyncQueue;
+
+        let pool = sync_pool().await;
+        let queue = SyncQueue::new();
+        let old = CrossProcessSyncLease::acquire(&pool, "account")
+            .await
+            .unwrap()
+            .unwrap();
+        sqlx::query("UPDATE account_sync_leases SET lease_expires_at = '2000-01-01T00:00:00Z'")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let mut stale = ImapSyncState::default();
+        stale.cursors.insert("INBOX".into(), "stale".into());
+        let result = old
+            .run(persist_sync_cursors(&pool, "account", &stale, &queue, None))
+            .await;
+        assert!(CrossProcessSyncLease::was_lost(&result.unwrap_err()));
+
+        let successor = CrossProcessSyncLease::acquire(&pool, "account")
+            .await
+            .unwrap()
+            .unwrap();
+        let mut current = ImapSyncState::default();
+        current.cursors.insert("INBOX".into(), "current".into());
+        successor
+            .run(persist_sync_cursors(
+                &pool, "account", &current, &queue, None,
+            ))
+            .await
+            .unwrap();
+
+        let result = old
+            .run(persist_sync_cursors(&pool, "account", &stale, &queue, None))
+            .await;
+        assert!(CrossProcessSyncLease::was_lost(&result.unwrap_err()));
+        assert_eq!(stored_cursors(&pool).await, current.cursors);
+        old.release().await;
+        successor.release().await;
+    }
+
     /// One unusable message used to abort the account before any cursor was
     /// written — including the cursors of every folder that had synced fine.
     #[tokio::test]
@@ -2446,11 +2539,12 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(150)).await;
             drop(held);
         });
-        let result = super::account_run_exclusive(
-            "deadline-wait-test",
-            std::time::Duration::from_millis(50),
-            async { Ok::<_, String>("ran") },
-        )
+        let result = super::account_run_exclusive("deadline-wait-test", async {
+            super::account_run_with_deadline(std::time::Duration::from_millis(50), async {
+                Ok::<_, String>("ran")
+            })
+            .await
+        })
         .await;
         release.await.unwrap();
         assert_eq!(result, Ok("ran"));

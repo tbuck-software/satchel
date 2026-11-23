@@ -81,6 +81,7 @@ pub async fn backfill_calendar_invites_from_attachments(
 
     let mut imported = 0_u64;
     let mut remote_fetches = 0_u32;
+    let mut rate_limited_accounts = std::collections::HashSet::new();
     for row in rows {
         let Ok(reference) = ContentReference::load(pool, &row.message_id).await else {
             continue;
@@ -124,9 +125,9 @@ pub async fn backfill_calendar_invites_from_attachments(
             }
             // Hunting for invites is background curiosity, and it is competing
             // for the same provider budget as fetching mail. Cached copies are
-            // free; downloads are rationed and stop the pass the moment the
-            // provider pushes back, rather than earning a longer block one
-            // attachment at a time.
+            // free. When a provider pushes back, leave that account's remote
+            // attachments pending and keep scanning the other accounts.
+            None if rate_limited_accounts.contains(&row.account_id) => continue,
             None if remote_fetches >= MAX_CALENDAR_SCAN_FETCHES => break,
             None => {
                 remote_fetches += 1;
@@ -139,6 +140,8 @@ pub async fn backfill_calendar_invites_from_attachments(
                 .await
                 .map_err(|err| err.encoded())?;
                 match crate::providers::gmail::as_background(attachment_bytes(
+                    pool,
+                    &row.account_id,
                     &row.provider,
                     &account_config,
                     &row.account_email,
@@ -153,9 +156,11 @@ pub async fn backfill_calendar_invites_from_attachments(
                     Ok(bytes) => Some(bytes),
                     Err(err) if err.is_rate_limited() => {
                         tracing::info!(
-                            "calendar invite scan stopped: provider is rate limited ({err})"
+                            account_id = %row.account_id,
+                            "calendar invite downloads paused for rate-limited account ({err})"
                         );
-                        break;
+                        rate_limited_accounts.insert(row.account_id);
+                        continue;
                     }
                     Err(_) => None,
                 }

@@ -52,12 +52,20 @@ export const STARTUP = {
   /*
    * Command errors arrive from Rust as `{ key, params }`, and any command,
    * including one a lazy view sends, reports through the startup toast stack.
-   * Keeping the whole namespace is cheaper than proving which view can fail
-   * with which key.
+   * The namespace ships at startup by default. A command with a single
+   * lazy caller can register its key with that view.
    */
   prefixes: ['backend'],
   /** Rust trees whose key literals (`"mail.foo"`, `"errors.x.{}"`) ship at startup. */
   rustSources: ['src-tauri/src', 'crates/satchel-core/src'],
+};
+
+/** Command errors whose callers load their view's catalogue before invoking them.
+ * The view owns the key even when the shared error decoder mentions its prefix.
+ * @type {Record<string, string>}
+ */
+export const LAZY_COMMAND_KEYS = {
+  'backend.errors.outboxMailCannotBeRequeued': 'src/views/OutboxView.vue',
 };
 
 /**
@@ -122,8 +130,15 @@ const abs = (rel) => path.join(repoRoot, rel);
  * @returns {Iterable<string>}
  */
 export function moduleKeys(file, index) {
-  if (!(repoRelative(file) in NOT_KEYS)) return keyMentions(file, index);
-  return [...messageKeys([file])].flatMap((key) => index.expand(key, false));
+  const relative = repoRelative(file);
+  const mentioned = relative in NOT_KEYS
+    ? [...messageKeys([file])].flatMap((key) => index.expand(key, false))
+    : keyMentions(file, index);
+  const keys = [...mentioned].filter((key) => !(key in LAZY_COMMAND_KEYS));
+  for (const [key, owner] of Object.entries(LAZY_COMMAND_KEYS)) {
+    if (relative === owner && index.has(key)) keys.push(key);
+  }
+  return keys;
 }
 
 /** @param {string} file absolute path of a boundary module */
@@ -227,8 +242,9 @@ export function computeSplit(allKeys, options = {}) {
   const rust = rustKeys(index);
   const unmentioned = [];
   for (const key of keys) {
-    if (STARTUP.prefixes.some((prefix) => key === prefix || key.startsWith(`${prefix}.`))) startup.add(key);
-    if (rust.has(key)) startup.add(key);
+    if (!(key in LAZY_COMMAND_KEYS) && (
+      rust.has(key) || STARTUP.prefixes.some((prefix) => key === prefix || key.startsWith(`${prefix}.`))
+    )) startup.add(key);
     if (!mainMentions.has(key) && !elsewhere.has(key)) {
       unmentioned.push(key);
       startup.add(key);

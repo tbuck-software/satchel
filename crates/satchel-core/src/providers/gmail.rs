@@ -1,3 +1,8 @@
+use std::{
+    collections::HashMap,
+    sync::{LazyLock, Mutex, PoisonError},
+};
+
 use crate::{
     providers::{
         cursor,
@@ -72,6 +77,7 @@ pub(crate) const GMAIL_PERMANENT_DELETE_UNAVAILABLE: &str =
     "backend.errors.gmailPermanentDeleteUnavailable";
 
 async fn batch_modify_labels(
+    quota: &RequestQuota<'_>,
     client: &reqwest::Client,
     token: &str,
     ids: &[String],
@@ -88,6 +94,7 @@ async fn batch_modify_labels(
             "removeLabelIds": remove_labels,
         });
         let response = send_with_rate_limit_retry(
+            quota,
             || {
                 client
                     .post(format!("{}/messages/batchModify", gmail_api_base()))
@@ -298,85 +305,74 @@ impl QuotaPacer {
     }
 }
 
-/// Re-arm a block that was recorded before this process started.
-///
-/// The pacer holds the block in memory, which a restart used to wipe: the app
-/// came back up, fired its startup work within seconds, and walked straight
-/// into a block that still had half an hour to run — which Gmail measures on a
-/// moving window, so knocking extended it. `sync::rate_limit_state` owns the
-/// stored copy (the pool lives there, not here) and calls this at startup.
-pub async fn restore_block(remaining: std::time::Duration, consecutive_blocks: u32) {
-    if remaining.is_zero() {
-        return;
-    }
-    let mut pacer = QUOTA_PACER.lock().await;
-    let now = std::time::Instant::now();
-    let Some(until) = now.checked_add(remaining) else {
-        return;
-    };
-    let same_incident = pacer
-        .last_block_lapsed
-        .is_some_and(|lapsed| now.saturating_duration_since(lapsed) <= REPEAT_BLOCK_WINDOW);
-    pacer.consecutive_blocks = if same_incident {
-        pacer.consecutive_blocks.max(consecutive_blocks.max(1))
-    } else {
-        consecutive_blocks.max(1)
-    };
-    pacer.last_block_lapsed = pacer.last_block_lapsed.max(Some(until));
-    if pacer.blocked_until.is_some_and(|current| until <= current) {
-        return;
-    }
-    pacer.blocked_until = Some(until);
-    tracing::debug!(
-        "gmail still rate limited from an earlier run: {}s remaining",
-        remaining.as_secs()
-    );
+fn stored_quota_key(account_id: &str) -> String {
+    format!("{}|account:{account_id}", gmail_api_base())
 }
 
-/// Drop the block, so a test can act as a freshly started process.
-#[cfg(test)]
-pub async fn clear_block_for_test() {
-    let mut pacer = QUOTA_PACER.lock().await;
-    pacer.blocked_until = None;
-    pacer.consecutive_blocks = 0;
-    pacer.last_block_lapsed = None;
-}
-
-/// The block still in force, as (remaining, consecutive blocks), for storing.
-pub async fn block_snapshot() -> Option<(std::time::Duration, u32)> {
-    let pacer = QUOTA_PACER.lock().await;
-    pacer
-        .block_remaining()
-        .map(|remaining| (remaining, pacer.consecutive_blocks))
-}
-
-static QUOTA_PACER: std::sync::LazyLock<tokio::sync::Mutex<QuotaPacer>> =
-    std::sync::LazyLock::new(|| {
-        tokio::sync::Mutex::new(QuotaPacer {
-            next_free: std::time::Instant::now(),
-            background_next_free: std::time::Instant::now(),
-            blocked_until: None,
-            consecutive_blocks: 0,
-            last_block_lapsed: None,
-        })
+fn with_quota_pacer<T>(key: &str, use_pacer: impl FnOnce(&mut QuotaPacer) -> T) -> T {
+    static QUOTA_PACERS: LazyLock<Mutex<HashMap<String, QuotaPacer>>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
+    let mut pacers = QUOTA_PACERS.lock().unwrap_or_else(PoisonError::into_inner);
+    let pacer = pacers.entry(key.to_string()).or_insert_with(|| QuotaPacer {
+        next_free: std::time::Instant::now(),
+        background_next_free: std::time::Instant::now(),
+        blocked_until: None,
+        consecutive_blocks: 0,
+        last_block_lapsed: None,
     });
+    use_pacer(pacer)
+}
 
-/// Wait until the budget allows a call costing `units`.
+/// Re-arm a block the account earned before this process started.
+pub fn restore_block(account_id: &str, remaining: std::time::Duration, consecutive_blocks: u32) {
+    let now = std::time::Instant::now();
+    let Some(until) = now.checked_add(remaining).filter(|until| *until > now) else {
+        return;
+    };
+    with_quota_pacer(&stored_quota_key(account_id), |pacer| {
+        let same_incident = pacer
+            .last_block_lapsed
+            .is_some_and(|lapsed| now.saturating_duration_since(lapsed) <= REPEAT_BLOCK_WINDOW);
+        pacer.consecutive_blocks = if same_incident {
+            pacer.consecutive_blocks.max(consecutive_blocks.max(1))
+        } else {
+            consecutive_blocks.max(1)
+        };
+        pacer.last_block_lapsed = pacer.last_block_lapsed.max(Some(until));
+        if pacer.blocked_until.is_none_or(|current| until > current) {
+            pacer.blocked_until = Some(until);
+            tracing::debug!(
+                %account_id,
+                seconds = remaining.as_secs(),
+                "Gmail rate limit restored"
+            );
+        }
+    });
+}
+
+/// The account's active block as (remaining, consecutive blocks).
+pub fn block_snapshot(account_id: &str) -> Option<(std::time::Duration, u32)> {
+    with_quota_pacer(&stored_quota_key(account_id), |pacer| {
+        pacer
+            .block_remaining()
+            .map(|remaining| (remaining, pacer.consecutive_blocks))
+    })
+}
+
+/// Wait until this account's budget allows a call costing `units`.
 ///
 /// `Err` means the caller is background work that must not run now.
-pub(crate) async fn await_quota(
+async fn await_quota(
+    key: &str,
     units: f64,
     priority: Priority,
     label: &str,
 ) -> crate::sync::errors::SyncResult<()> {
-    // The lock is released before sleeping so concurrent callers can take their
-    // own slot rather than serialising on the mutex itself.
-    let (wait, retry_after) = {
-        let mut pacer = QUOTA_PACER.lock().await;
+    let (wait, retry_after) = with_quota_pacer(key, |pacer| {
         let wait = pacer.reserve(units, priority);
         let retry_after = wait.is_none().then(|| pacer.block_remaining()).flatten();
         (wait, retry_after)
-    };
+    });
     let Some(wait) = wait else {
         return Err(crate::sync::errors::SyncError::rate_limited(
             format!(
@@ -465,6 +461,11 @@ pub(crate) fn rate_limit_delay(
         .unwrap_or_else(|| std::time::Duration::from_secs(1u64 << attempt))
 }
 
+struct RequestQuota<'a> {
+    key: String,
+    account: Option<(&'a sqlx::SqlitePool, &'a str)>,
+}
+
 /// Send a Gmail request, waiting out rate limits instead of failing the run.
 ///
 /// Retrying only on the next sync tick — the previous behaviour — keeps landing
@@ -474,6 +475,7 @@ pub(crate) fn rate_limit_delay(
 /// Non-rate-limit responses are returned untouched so callers keep their own
 /// status handling, including the 404 skip in the message loop.
 async fn send_with_rate_limit_retry<F>(
+    quota: &RequestQuota<'_>,
     build: F,
     label: &str,
     units: f64,
@@ -481,7 +483,7 @@ async fn send_with_rate_limit_retry<F>(
 where
     F: Fn() -> reqwest::RequestBuilder,
 {
-    send_with_rate_limit_retry_mapped(build, label, units, |err| {
+    send_with_rate_limit_retry_mapped(quota, build, label, units, |err| {
         format!("gmail {label} failed: {err}").into()
     })
     .await
@@ -491,6 +493,7 @@ where
 /// error means. A submission needs that: whether its body got out decides
 /// between a retry and `delivery_unknown`.
 async fn send_with_rate_limit_retry_mapped<F, E>(
+    quota: &RequestQuota<'_>,
     build: F,
     label: &str,
     units: f64,
@@ -505,7 +508,7 @@ where
     loop {
         // A block recorded by any other call path is honoured here, so one 429
         // does not have to be rediscovered by every endpoint in turn.
-        if let Some(remaining) = QUOTA_PACER.lock().await.block_remaining() {
+        if let Some(remaining) = with_quota_pacer(&quota.key, |pacer| pacer.block_remaining()) {
             // The margin is part of the wait, so it counts against the ceiling —
             // otherwise "longest a single request will wait" quietly becomes
             // MAX_RATE_LIMIT_WAIT + BLOCK_LAPSE_MARGIN.
@@ -525,7 +528,7 @@ where
         // Every attempt costs the same units, retries included — Gmail bills the
         // rejected call too, so charging only the first would understate usage
         // exactly when we are already over budget.
-        await_quota(units, priority, label).await?;
+        await_quota(&quota.key, units, priority, label).await?;
 
         let response = build().send().await.map_err(&transport_error)?;
 
@@ -555,7 +558,10 @@ where
         // The applied wait can exceed what Gmail asked for; report that figure
         // rather than the server's, so the log and the account error say how
         // long calls are actually paused.
-        let delay = QUOTA_PACER.lock().await.block_for(delay);
+        let delay = with_quota_pacer(&quota.key, |pacer| pacer.block_for(delay));
+        if let Some((pool, account_id)) = quota.account {
+            crate::sync::rate_limit_state::persist(pool, account_id).await;
+        }
 
         if attempt >= RATE_LIMIT_ATTEMPTS as u32 {
             return Err(
@@ -572,7 +578,7 @@ where
             // one still being waited out.
             tracing::warn!(
                 "gmail {label} rate limited ({status}); Gmail asks for {}s, \
-                 longer than this run will wait — pausing all Gmail calls until then",
+                 longer than this run will wait — pausing Gmail calls for this account",
                 delay.as_secs()
             );
             return Err(crate::sync::errors::SyncError::rate_limited(
@@ -598,6 +604,7 @@ where
 #[derive(Debug, Clone)]
 pub struct GmailProvider {
     credentials: OAuthCredentials,
+    restored_rate_limit: tokio::sync::OnceCell<()>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -781,14 +788,25 @@ impl GmailProvider {
     }
 
     pub fn from_credentials(credentials: OAuthCredentials) -> Self {
-        Self { credentials }
+        Self {
+            credentials,
+            restored_rate_limit: tokio::sync::OnceCell::new(),
+        }
     }
 
-    /// The label cache's key: the stored account, or the token of a
-    /// detached provider. Scoped to the API base so test fakes stay apart.
-    fn label_cache_key(&self, token: &str) -> String {
+    pub fn from_stored_account(
+        pool: &sqlx::SqlitePool,
+        account_id: &str,
+        config: &crate::accounts::AccountConfig,
+    ) -> Self {
+        Self::from_credentials(OAuthCredentials::stored(pool, account_id, config))
+    }
+
+    /// Cache and quota key. Detached providers group by token, and stored
+    /// providers keep the same key across token rotations.
+    fn account_key(&self, token: &str) -> String {
         match self.credentials.account_id() {
-            Some(account_id) => format!("{}|account:{account_id}", gmail_api_base()),
+            Some(account_id) => stored_quota_key(account_id),
             None => {
                 use sha2::Digest;
                 let digest = crate::utils::hex::lower_hex(&sha2::Sha256::digest(token.as_bytes()));
@@ -798,7 +816,22 @@ impl GmailProvider {
     }
 
     async fn access_token(&self) -> crate::sync::errors::SyncResult<String> {
+        if let Some((pool, account_id)) = self.credentials.stored_account() {
+            self.restored_rate_limit
+                .get_or_try_init(|| async {
+                    crate::sync::rate_limit_state::restore(pool, account_id).await
+                })
+                .await
+                .map_err(|error| format!("could not read Gmail rate limit: {error}"))?;
+        }
         self.credentials.access_token(OAuthProvider::Gmail).await
+    }
+
+    fn request_quota(&self, token: &str) -> RequestQuota<'_> {
+        RequestQuota {
+            key: self.account_key(token),
+            account: self.credentials.stored_account(),
+        }
     }
 
     /// Fetches a single message by its Gmail id and maps it to an envelope.
@@ -809,15 +842,16 @@ impl GmailProvider {
     ) -> crate::sync::errors::SyncResult<MessageEnvelope> {
         let token = self.access_token().await?;
         let client = crate::utils::http::client();
-        let (mut messages, _, _) = Self::fetch_message_details(
-            &client,
-            &token,
-            &self.label_cache_key(&token),
-            vec![GmailMessageListItem {
-                id: remote_id.to_string(),
-            }],
-        )
-        .await?;
+        let (mut messages, _, _) = self
+            .fetch_message_details(
+                &client,
+                &token,
+                &self.account_key(&token),
+                vec![GmailMessageListItem {
+                    id: remote_id.to_string(),
+                }],
+            )
+            .await?;
         Ok(messages
             .pop()
             .ok_or_else(|| "message no longer exists on the server".to_string())?)
@@ -831,6 +865,7 @@ impl GmailProvider {
     ) -> crate::sync::errors::SyncResult<Vec<u8>> {
         let token = self.access_token().await?;
         let response = send_with_rate_limit_retry(
+            &self.request_quota(&token),
             || {
                 crate::utils::http::client()
                     .get(format!("{}/messages/{remote_id}", gmail_api_base()))
@@ -949,6 +984,7 @@ impl GmailProvider {
     /// ancient ids by construction, and feeding them into the cursor could only
     /// ever move it backwards.
     async fn backfill_one_page(
+        &self,
         client: &reqwest::Client,
         token: &str,
         labels: &str,
@@ -956,15 +992,18 @@ impl GmailProvider {
         page_token: Option<&str>,
         cursor_state: &mut GmailCursorState,
     ) -> crate::sync::errors::SyncResult<(Vec<MessageEnvelope>, u64)> {
-        let payload = Self::list_message_page(client, token, folder, None, page_token).await?;
+        let payload = self
+            .list_message_page(client, token, folder, None, page_token)
+            .await?;
         let items = payload.messages.unwrap_or_default();
         let fetched_count = items.len();
         let total_estimate = payload
             .result_size_estimate
             .and_then(|value| usize::try_from(value).ok())
             .unwrap_or(cursor_state.backfill_total_messages.max(fetched_count));
-        let (page_messages, page_latest_ts, _page_history_id) =
-            Self::fetch_message_details(client, token, labels, items).await?;
+        let (page_messages, page_latest_ts, _page_history_id) = self
+            .fetch_message_details(client, token, labels, items)
+            .await?;
 
         if let Some(next_page_token) = payload
             .next_page_token
@@ -991,16 +1030,19 @@ impl GmailProvider {
     }
 
     async fn list_message_page(
+        &self,
         client: &reqwest::Client,
         token: &str,
         folder: &str,
         after_ts: Option<u64>,
         page_token: Option<&str>,
     ) -> crate::sync::errors::SyncResult<GmailMessageListResponse> {
-        Self::list_message_page_with_label(client, token, Some(folder), after_ts, page_token).await
+        self.list_message_page_with_label(client, token, Some(folder), after_ts, page_token)
+            .await
     }
 
     async fn list_message_page_with_label(
+        &self,
         client: &reqwest::Client,
         token: &str,
         folder: Option<&str>,
@@ -1010,6 +1052,7 @@ impl GmailProvider {
         let url = Self::gmail_message_list_url(folder, after_ts, page_token)?;
 
         let response = send_with_rate_limit_retry(
+            &self.request_quota(token),
             || client.get(url.clone()).bearer_auth(token),
             "messages list",
             cost::MESSAGES_LIST,
@@ -1066,6 +1109,7 @@ impl GmailProvider {
     const DETAIL_FETCHES_IN_FLIGHT: usize = 3;
 
     async fn fetch_message_details(
+        &self,
         client: &reqwest::Client,
         token: &str,
         labels: &str,
@@ -1081,6 +1125,7 @@ impl GmailProvider {
         // stored batch stays newest-first exactly as the sequential loop did.
         let mut details = futures::stream::iter(item_ids.into_iter().map(|item| async move {
             let detail = send_with_rate_limit_retry(
+                &self.request_quota(token),
                 || {
                     client
                         .get(format!("{}/messages/{}", gmail_api_base(), item.id))
@@ -1116,7 +1161,7 @@ impl GmailProvider {
             validate_gmail_full_message(&message)?;
             if message.label_ids.is_none() {
                 message.label_ids =
-                    Some(Self::confirm_omitted_labels(client, token, &item.id).await?);
+                    Some(self.confirm_omitted_labels(client, token, &item.id).await?);
             }
             if gmail_message_needs_raw_crypto(&message)
                 || message
@@ -1125,6 +1170,7 @@ impl GmailProvider {
                     .is_some_and(gmail_body_needs_raw_source)
             {
                 let raw = send_with_rate_limit_retry(
+                    &self.request_quota(token),
                     || {
                         client
                             .get(format!("{}/messages/{}", gmail_api_base(), item.id))
@@ -1200,16 +1246,19 @@ impl GmailProvider {
                 Self::newest_history_id(latest_history_id, detail.history_id.clone());
             messages.push(map_gmail_message(detail));
         }
-        Self::attach_workflow_markers(client, token, labels, &mut messages).await?;
+        self.attach_workflow_markers(client, token, labels, &mut messages)
+            .await?;
 
         Ok((messages, latest_ts, latest_history_id))
     }
 
     async fn list_labels(
+        &self,
         client: &reqwest::Client,
         token: &str,
     ) -> crate::sync::errors::SyncResult<Vec<GmailLabel>> {
         let response = send_with_rate_limit_retry(
+            &self.request_quota(token),
             || {
                 client
                     .get(format!("{}/labels", gmail_api_base()))
@@ -1243,6 +1292,7 @@ impl GmailProvider {
     /// The label list is asked for only when some message carries a user
     /// label at all; system labels are never Satchel's.
     async fn attach_workflow_markers(
+        &self,
         client: &reqwest::Client,
         token: &str,
         key: &str,
@@ -1267,7 +1317,7 @@ impl GmailProvider {
             {
                 Some(names) => satchel_names_by_id(&names),
                 None => {
-                    let labels = Self::list_labels(client, token).await?;
+                    let labels = self.list_labels(client, token).await?;
                     satchel_names_by_id(&remember_label_names(key, &labels))
                 }
             }
@@ -1280,6 +1330,7 @@ impl GmailProvider {
 
     /// The id of the label called `name`, created when it does not exist yet.
     async fn ensure_label(
+        &self,
         client: &reqwest::Client,
         token: &str,
         key: &str,
@@ -1306,6 +1357,7 @@ impl GmailProvider {
             "messageListVisibility": "show",
         });
         let response = send_with_rate_limit_retry(
+            &self.request_quota(token),
             || {
                 client
                     .post(format!("{}/labels", gmail_api_base()))
@@ -1318,7 +1370,7 @@ impl GmailProvider {
         .await?;
         if response.status() == reqwest::StatusCode::CONFLICT {
             // Another device created it between our list and this call.
-            let labels = Self::list_labels(client, token).await?;
+            let labels = self.list_labels(client, token).await?;
             return labels
                 .into_iter()
                 .find(|label| label.name.eq_ignore_ascii_case(name))
@@ -1351,6 +1403,7 @@ impl GmailProvider {
     /// snooze on the same message replaced the wake label, so this clears
     /// exactly the snoozes that ran out, without reading any message.
     async fn delete_expired_wake_labels(
+        &self,
         client: &reqwest::Client,
         token: &str,
         labels: &[GmailLabel],
@@ -1365,8 +1418,9 @@ impl GmailProvider {
             .filter(|label| wake_label_expired(&label.name, now))
         {
             // Cleanup only; the marker write does not depend on it.
-            if let Err(error) =
-                Self::clear_expired_wake_label(client, token, label, snoozed.as_deref()).await
+            if let Err(error) = self
+                .clear_expired_wake_label(client, token, label, snoozed.as_deref())
+                .await
             {
                 tracing::debug!(label = %label.name, %error, "expired Gmail wake label kept");
             }
@@ -1374,6 +1428,7 @@ impl GmailProvider {
     }
 
     async fn clear_expired_wake_label(
+        &self,
         client: &reqwest::Client,
         token: &str,
         label: &GmailLabel,
@@ -1382,9 +1437,9 @@ impl GmailProvider {
         let mut ids = Vec::new();
         let mut page_token = None::<String>;
         loop {
-            let page =
-                Self::list_message_page(client, token, &label.id, None, page_token.as_deref())
-                    .await?;
+            let page = self
+                .list_message_page(client, token, &label.id, None, page_token.as_deref())
+                .await?;
             ids.extend(
                 page.messages
                     .unwrap_or_default()
@@ -1401,6 +1456,7 @@ impl GmailProvider {
         }
         if let Some(snoozed) = snoozed {
             batch_modify_labels(
+                &self.request_quota(token),
                 client,
                 token,
                 &ids,
@@ -1411,6 +1467,7 @@ impl GmailProvider {
             .await?;
         }
         let response = send_with_rate_limit_retry(
+            &self.request_quota(token),
             || {
                 client
                     .delete(format!("{}/labels/{}", gmail_api_base(), label.id))
@@ -1433,11 +1490,13 @@ impl GmailProvider {
     /// email message ID and labels") and accept an empty set only from a
     /// complete answer that again carries none.
     async fn confirm_omitted_labels(
+        &self,
         client: &reqwest::Client,
         token: &str,
         id: &str,
     ) -> crate::sync::errors::SyncResult<Vec<String>> {
         let response = send_with_rate_limit_retry(
+            &self.request_quota(token),
             || {
                 client
                     .get(format!("{}/messages/{}", gmail_api_base(), id))
@@ -1476,6 +1535,7 @@ impl GmailProvider {
     }
 
     async fn fetch_current_drafts(
+        &self,
         client: &reqwest::Client,
         token: &str,
         labels: &str,
@@ -1493,6 +1553,7 @@ impl GmailProvider {
                 }
             }
             let response = send_with_rate_limit_retry(
+                &self.request_quota(token),
                 || client.get(url.clone()).bearer_auth(token),
                 "drafts list",
                 cost::DRAFTS_LIST,
@@ -1513,8 +1574,9 @@ impl GmailProvider {
                 .await
                 .map_err(|err| format!("gmail drafts list parse failed: {err}"))?;
             for draft in payload.drafts.unwrap_or_default() {
-                let (mut fetched, _, _) =
-                    Self::fetch_message_details(client, token, labels, vec![draft.message]).await?;
+                let (mut fetched, _, _) = self
+                    .fetch_message_details(client, token, labels, vec![draft.message])
+                    .await?;
                 if let Some(message) = fetched.first_mut() {
                     message.remote_draft_id = Some(draft.id);
                 }
@@ -1553,10 +1615,12 @@ impl GmailProvider {
     /// The mailbox's current historyId from the profile endpoint — the correct
     /// checkpoint to snapshot "now" before/while backfilling older mail.
     async fn fetch_profile_history_id(
+        &self,
         client: &reqwest::Client,
         token: &str,
     ) -> crate::sync::errors::SyncResult<Option<String>> {
         let response = send_with_rate_limit_retry(
+            &self.request_quota(token),
             || {
                 client
                     .get(format!("{}/profile", gmail_api_base()))
@@ -1581,6 +1645,7 @@ impl GmailProvider {
     }
 
     async fn list_history_page(
+        &self,
         client: &reqwest::Client,
         token: &str,
         folder: &str,
@@ -1600,6 +1665,7 @@ impl GmailProvider {
             }
         }
         let response = send_with_rate_limit_retry(
+            &self.request_quota(token),
             || client.get(url.clone()).bearer_auth(token),
             "history request",
             cost::HISTORY_LIST,
@@ -1707,7 +1773,7 @@ impl MailProvider for GmailProvider {
     async fn sync_folders(&self) -> crate::sync::errors::SyncResult<Vec<RemoteFolder>> {
         let token = self.access_token().await?;
         let client = crate::utils::http::client();
-        let labels = Self::list_labels(&client, &token).await?;
+        let labels = self.list_labels(&client, &token).await?;
 
         let mut folders = labels
             .into_iter()
@@ -1747,12 +1813,9 @@ impl MailProvider for GmailProvider {
         let client = crate::utils::http::client();
         if folder.eq_ignore_ascii_case("DRAFT") || folder.eq_ignore_ascii_case("DRAFTS") {
             return Ok(SyncBatch {
-                messages: Self::fetch_current_drafts(
-                    &client,
-                    &token,
-                    &self.label_cache_key(&token),
-                )
-                .await?,
+                messages: self
+                    .fetch_current_drafts(&client, &token, &self.account_key(&token))
+                    .await?,
                 removals: Vec::new(),
                 remote_uidvalidity: None,
                 reset_folder: false,
@@ -1778,14 +1841,15 @@ impl MailProvider for GmailProvider {
                 history_synced = true;
                 loop {
                     token = self.access_token().await?;
-                    let payload = match Self::list_history_page(
-                        &client,
-                        &token,
-                        folder,
-                        &history_id,
-                        page_token.as_deref(),
-                    )
-                    .await
+                    let payload = match self
+                        .list_history_page(
+                            &client,
+                            &token,
+                            folder,
+                            &history_id,
+                            page_token.as_deref(),
+                        )
+                        .await
                     {
                         Ok(payload) => payload,
                         Err(err) if Self::history_cursor_expired(&err.to_string()) => {
@@ -1826,13 +1890,8 @@ impl MailProvider for GmailProvider {
                             }
                         }
                     }
-                    let (page_messages, page_latest_ts, _detail_history_id) =
-                        Self::fetch_message_details(
-                            &client,
-                            &token,
-                            &self.label_cache_key(&token),
-                            items,
-                        )
+                    let (page_messages, page_latest_ts, _detail_history_id) = self
+                        .fetch_message_details(&client, &token, &self.account_key(&token), items)
                         .await?;
                     latest_ts = latest_ts.max(page_latest_ts);
                     // Details may already reflect changes beyond this history
@@ -1867,21 +1926,22 @@ impl MailProvider for GmailProvider {
 
                     loop {
                         token = self.access_token().await?;
-                        let payload = Self::list_message_page(
-                            &client,
-                            &token,
-                            folder,
-                            Some(since_ts),
-                            page_token.as_deref(),
-                        )
-                        .await?;
-                        let items = payload.messages.unwrap_or_default();
-                        let next_page_token = payload.next_page_token;
-                        let (page_messages, page_latest_ts, page_history_id) =
-                            Self::fetch_message_details(
+                        let payload = self
+                            .list_message_page(
                                 &client,
                                 &token,
-                                &self.label_cache_key(&token),
+                                folder,
+                                Some(since_ts),
+                                page_token.as_deref(),
+                            )
+                            .await?;
+                        let items = payload.messages.unwrap_or_default();
+                        let next_page_token = payload.next_page_token;
+                        let (page_messages, page_latest_ts, page_history_id) = self
+                            .fetch_message_details(
+                                &client,
+                                &token,
+                                &self.account_key(&token),
                                 items,
                             )
                             .await?;
@@ -1910,7 +1970,7 @@ impl MailProvider for GmailProvider {
                     .unwrap_or_default()
                     .is_empty()
                 {
-                    if let Ok(fresh) = Self::fetch_profile_history_id(&client, &token).await {
+                    if let Ok(fresh) = self.fetch_profile_history_id(&client, &token).await {
                         cursor_state.history_id = fresh;
                     }
                 }
@@ -1937,15 +1997,16 @@ impl MailProvider for GmailProvider {
                     BackfillStep::Continue(token) => Some(token.as_str()),
                     _ => None,
                 };
-                match Self::backfill_one_page(
-                    &client,
-                    &token,
-                    &self.label_cache_key(&token),
-                    folder,
-                    page_token,
-                    &mut cursor_state,
-                )
-                .await
+                match self
+                    .backfill_one_page(
+                        &client,
+                        &token,
+                        &self.account_key(&token),
+                        folder,
+                        page_token,
+                        &mut cursor_state,
+                    )
+                    .await
                 {
                     Ok((page_messages, page_latest_ts)) => {
                         backfill_advanced = true;
@@ -2002,15 +2063,16 @@ impl MailProvider for GmailProvider {
         remote_id: &str,
     ) -> crate::sync::errors::SyncResult<Option<MessageEnvelope>> {
         let token = self.access_token().await?;
-        let (mut messages, _, _) = Self::fetch_message_details(
-            &crate::utils::http::client(),
-            &token,
-            &self.label_cache_key(&token),
-            vec![GmailMessageListItem {
-                id: remote_id.to_string(),
-            }],
-        )
-        .await?;
+        let (mut messages, _, _) = self
+            .fetch_message_details(
+                &crate::utils::http::client(),
+                &token,
+                &self.account_key(&token),
+                vec![GmailMessageListItem {
+                    id: remote_id.to_string(),
+                }],
+            )
+            .await?;
         // fetch_message_details omits only explicit HTTP 404 responses.
         // Parsing, authentication, quota and transport errors remain errors.
         let message = messages.pop();
@@ -2038,9 +2100,9 @@ impl MailProvider for GmailProvider {
         let mut states = Vec::new();
 
         loop {
-            let payload =
-                Self::list_message_page(&client, &token, folder, None, page_token.as_deref())
-                    .await?;
+            let payload = self
+                .list_message_page(&client, &token, folder, None, page_token.as_deref())
+                .await?;
             states.extend(
                 payload
                     .messages
@@ -2090,6 +2152,7 @@ impl MailProvider for GmailProvider {
         );
         let upload = crate::utils::http::UploadProgress::default();
         let response = send_with_rate_limit_retry_mapped(
+            &self.request_quota(&token),
             || {
                 client
                     .post(format!("{}/messages/send", gmail_api_base()))
@@ -2160,6 +2223,7 @@ impl MailProvider for GmailProvider {
             .map(|message| message.remote_id.clone())
             .collect::<Vec<_>>();
         batch_modify_labels(
+            &self.request_quota(&token),
             &crate::utils::http::client(),
             &token,
             &ids,
@@ -2192,6 +2256,7 @@ impl MailProvider for GmailProvider {
             .map(|message| message.remote_id.clone())
             .collect::<Vec<_>>();
         batch_modify_labels(
+            &self.request_quota(&token),
             &crate::utils::http::client(),
             &token,
             &ids,
@@ -2227,13 +2292,16 @@ impl MailProvider for GmailProvider {
         }
         let token = self.access_token().await?;
         let client = crate::utils::http::client();
-        let labels = Self::list_labels(&client, &token).await?;
-        let key = self.label_cache_key(&token);
+        let labels = self.list_labels(&client, &token).await?;
+        let key = self.account_key(&token);
         remember_label_names(&key, &labels);
         let wanted = marker.gmail_labels();
         let mut add_labels = Vec::new();
         for name in &wanted {
-            add_labels.push(Self::ensure_label(&client, &token, &key, &labels, name).await?);
+            add_labels.push(
+                self.ensure_label(&client, &token, &key, &labels, name)
+                    .await?,
+            );
         }
         let remove_labels = labels
             .iter()
@@ -2249,6 +2317,7 @@ impl MailProvider for GmailProvider {
             return Ok(applied);
         }
         batch_modify_labels(
+            &self.request_quota(&token),
             &client,
             &token,
             &ids,
@@ -2257,7 +2326,8 @@ impl MailProvider for GmailProvider {
             "set_workflow_marker",
         )
         .await?;
-        Self::delete_expired_wake_labels(&client, &token, &labels, chrono::Utc::now()).await;
+        self.delete_expired_wake_labels(&client, &token, &labels, chrono::Utc::now())
+            .await;
         Ok(applied)
     }
 
@@ -2275,6 +2345,7 @@ impl MailProvider for GmailProvider {
             "messageListVisibility": "show",
         });
         let response = send_with_rate_limit_retry(
+            &self.request_quota(&token),
             || {
                 client
                     .post(format!("{}/labels", gmail_api_base()))
@@ -2317,6 +2388,7 @@ impl MailProvider for GmailProvider {
 
         let client = crate::utils::http::client();
         let response = send_with_rate_limit_retry(
+            &self.request_quota(&token),
             || {
                 client
                     .post(format!("{}/drafts", gmail_api_base()))
@@ -2360,10 +2432,10 @@ impl MailProvider for GmailProvider {
                 .as_deref()
                 .filter(|value| !value.trim().is_empty())
             {
-                Self::fetch_current_drafts(
+                self.fetch_current_drafts(
                     &crate::utils::http::client(),
                     &token,
-                    &self.label_cache_key(&token),
+                    &self.account_key(&token),
                 )
                 .await?
                 .into_iter()
@@ -2384,6 +2456,7 @@ impl MailProvider for GmailProvider {
             .map(str::to_string)
             .or(discovered_draft_id);
         let response = send_with_rate_limit_retry(
+            &self.request_quota(&token),
             || {
                 let request = if let Some(id) = effective_draft_id.as_deref() {
                     client
@@ -2427,13 +2500,12 @@ impl MailProvider for GmailProvider {
     ) -> crate::sync::errors::SyncResult<Option<String>> {
         let token = self.access_token().await?;
         let client = crate::utils::http::client();
-        Ok(
-            Self::fetch_current_drafts(&client, &token, &self.label_cache_key(&token))
-                .await?
-                .into_iter()
-                .find(|message| message.remote_id == message_remote_id)
-                .and_then(|message| message.remote_draft_id),
-        )
+        Ok(self
+            .fetch_current_drafts(&client, &token, &self.account_key(&token))
+            .await?
+            .into_iter()
+            .find(|message| message.remote_id == message_remote_id)
+            .and_then(|message| message.remote_draft_id))
     }
 
     async fn remote_draft_exists(
@@ -2443,6 +2515,7 @@ impl MailProvider for GmailProvider {
         let token = self.access_token().await?;
         let client = crate::utils::http::client();
         let response = send_with_rate_limit_retry(
+            &self.request_quota(&token),
             || {
                 client
                     .get(format!(
@@ -2475,6 +2548,7 @@ impl MailProvider for GmailProvider {
         let token = self.access_token().await?;
         let client = crate::utils::http::client();
         let response = send_with_rate_limit_retry(
+            &self.request_quota(&token),
             || {
                 client
                     .delete(format!("{}/drafts/{remote_draft_id}", gmail_api_base()))
@@ -2505,6 +2579,7 @@ impl MailProvider for GmailProvider {
         let token = self.access_token().await?;
         let client = crate::utils::http::client();
         let response = send_with_rate_limit_retry(
+            &self.request_quota(&token),
             || {
                 client
                     .get(format!(
@@ -3320,6 +3395,38 @@ mod tests {
     };
     use crate::providers::traits::{MessageEnvelope, MessageRef, OutgoingMessage, SyncCheckpoint};
     use base64::Engine;
+
+    #[tokio::test]
+    async fn quota_reservations_and_blocks_are_shared_only_with_the_same_account() {
+        let first = super::stored_quota_key("gmail-pacer-a");
+        let second = super::stored_quota_key("gmail-pacer-b");
+        // Reserving quota on A makes its next request wait.
+        super::with_quota_pacer(&first, |pacer| {
+            assert_eq!(
+                pacer.reserve(10_000.0, Priority::Interactive),
+                Some(std::time::Duration::ZERO)
+            );
+            assert!(pacer.reserve(1.0, Priority::Interactive).unwrap() > std::time::Duration::ZERO);
+        });
+        super::with_quota_pacer(&second, |pacer| {
+            assert_eq!(
+                pacer.reserve(1.0, Priority::Interactive),
+                Some(std::time::Duration::ZERO)
+            );
+        });
+        super::restore_block("gmail-pacer-a", std::time::Duration::from_secs(600), 1);
+        assert!(
+            super::await_quota(&first, 1.0, Priority::Background, "labels.list")
+                .await
+                .unwrap_err()
+                .is_rate_limited()
+        );
+        assert!(
+            super::await_quota(&second, 1.0, Priority::Background, "labels.list")
+                .await
+                .is_ok()
+        );
+    }
 
     #[test]
     fn rejects_markup_in_attachment_mime_types() {
