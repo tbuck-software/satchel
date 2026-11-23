@@ -463,19 +463,10 @@ async fn run_once(
         );
         let result = satchel_core::db::maintenance::checkpoint(checkpoint_pool).await;
         if !result.as_ref().is_ok_and(|row| row.complete()) {
-            info!(target: "satchel::maintenance", ?result, "post-VACUUM checkpoint needs retry");
-            let checkpoint_pool = checkpoint_pool.clone();
-            tauri::async_runtime::spawn(async move {
-                loop {
-                    tokio::time::sleep(satchel_core::db::maintenance::CHECKPOINT_RETRY).await;
-                    if satchel_core::db::maintenance::checkpoint(&checkpoint_pool)
-                        .await
-                        .is_ok_and(|row| row.complete())
-                    {
-                        break;
-                    }
-                }
-            });
+            info!(
+                target: "satchel::maintenance",
+                ?result, "post-VACUUM checkpoint deferred to the checkpoint worker"
+            );
         }
     }
 
@@ -689,61 +680,6 @@ async fn record_setting(pool: &SqlitePool, key: &str) {
     .await;
 }
 
-/// Check the message search index against its content table, and rebuild it
-/// when the two have drifted apart.
-///
-/// `messages_fts` is external-content FTS5: the index holds terms, `messages`
-/// holds the rows, and only the `messages_ai`/`ad`/`au` triggers keep them
-/// aligned. Anything that writes `messages` without firing those triggers — a
-/// manual `sqlite3` session, a restore of a file assembled elsewhere — leaves
-/// an index that answers for messages that are gone or stays silent about ones
-/// that are there. `PRAGMA integrity_check` does not look at this; only
-/// FTS5's own `integrity-check` does.
-///
-/// Returns whether a repair was necessary.
-pub(crate) async fn verify_and_repair_fts(pool: &SqlitePool) -> Result<bool, String> {
-    if satchel_core::db::message_index_intact(pool).await? {
-        return Ok(false);
-    }
-    warn!(
-        target: "satchel::maintenance",
-        "message search index failed its integrity check; rebuilding"
-    );
-    sqlx::query("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
-        .execute(pool)
-        .await
-        .map_err(|err| err.to_string())?;
-    rebuild_search_projection(pool).await?;
-    // A rebuild that does not fix it is worse news than the drift.
-    if !satchel_core::db::message_index_intact(pool).await? {
-        return Err("message search index is still inconsistent after a rebuild".into());
-    }
-    Ok(true)
-}
-
-/// `messages` has no explicit `INTEGER PRIMARY KEY`; `message_search_projection`
-/// and `messages_fts` both key off the implicit rowid. Re-derive the projection
-/// from `messages` whenever the index next to it had to be rebuilt.
-async fn rebuild_search_projection(pool: &SqlitePool) -> Result<(), String> {
-    let mut tx = pool
-        .begin_with("BEGIN IMMEDIATE")
-        .await
-        .map_err(|err| err.to_string())?;
-    sqlx::query("DELETE FROM message_search_projection")
-        .execute(&mut *tx)
-        .await
-        .map_err(|err| err.to_string())?;
-    sqlx::query(
-        "INSERT INTO message_search_projection
-             (message_rowid, message_id, thread_id, account_id, date)
-         SELECT rowid, id, thread_id, account_id, COALESCE(date, '') FROM messages",
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|err| err.to_string())?;
-    tx.commit().await.map_err(|err| err.to_string())
-}
-
 #[cfg(test)]
 async fn body_window_cleanup(pool: &SqlitePool) -> Result<u64, String> {
     use satchel_core::db::{
@@ -770,7 +706,7 @@ async fn run_pending_fts_check(pool: &SqlitePool) -> Result<(), String> {
             .await
             .map_err(|err| err.to_string())?;
     if let Some(generation) = pending {
-        verify_and_repair_fts(pool).await?;
+        satchel_core::db::verify_and_repair_message_index(pool).await?;
         // Keep the request after a crash, and do not consume a newer import's request.
         sqlx::query("DELETE FROM app_settings WHERE key = ? AND value = ?")
             .bind(key)
@@ -1265,7 +1201,9 @@ mod body_window_tests {
         assert_eq!(fts_hits(&pool, "Narwal").await, 0);
 
         assert!(
-            super::verify_and_repair_fts(&pool).await.expect("repair"),
+            satchel_core::db::verify_and_repair_message_index(&pool)
+                .await
+                .expect("repair"),
             "the drift should have triggered a rebuild"
         );
 
@@ -1301,16 +1239,98 @@ mod body_window_tests {
             .execute(&pool)
             .await
             .unwrap();
-        assert!(satchel_core::db::message_index_matches_row_count(&pool)
-            .await
-            .unwrap());
+        assert!(satchel_core::db::backup_search_index_intact(
+            &pool,
+            satchel_core::db::latest_migration_version()
+        )
+        .await
+        .unwrap());
         assert_eq!(fts_hits(&pool, "Oldterm").await, 1);
         assert_eq!(fts_hits(&pool, "Newterm").await, 0);
         assert!(!satchel_core::db::message_index_intact(&pool).await.unwrap());
-        assert!(super::verify_and_repair_fts(&pool).await.unwrap());
+        assert!(satchel_core::db::verify_and_repair_message_index(&pool)
+            .await
+            .unwrap());
         assert_eq!(fts_hits(&pool, "Oldterm").await, 0);
         assert_eq!(fts_hits(&pool, "Newterm").await, 1);
-        assert!(!super::verify_and_repair_fts(&pool).await.unwrap());
+        assert!(!satchel_core::db::verify_and_repair_message_index(&pool)
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
+    async fn missing_extra_and_misaligned_projection_rows_are_repaired() {
+        let pool = pool_with_messages().await;
+        for damage in [
+            "DELETE FROM message_search_projection",
+            "UPDATE message_search_projection SET message_id = 'wrong-id' WHERE message_id = 'recent'",
+            "UPDATE message_search_projection SET thread_id = 'wrong-thread' WHERE message_id = 'recent'",
+            "UPDATE message_search_projection SET account_id = 'wrong-account' WHERE message_id = 'recent'",
+            "UPDATE message_search_projection SET date = '' WHERE message_id = 'recent'",
+            "INSERT INTO message_search_projection VALUES (999, 'orphan', NULL, 'acc', '')",
+        ] {
+            sqlx::query(damage).execute(&pool).await.unwrap();
+            sqlx::query("INSERT INTO messages_fts(messages_fts, rank) VALUES('integrity-check', 1)")
+                .execute(&pool)
+                .await
+                .expect("the text index is intact");
+            assert!(!satchel_core::db::message_index_intact(&pool).await.unwrap(), "{damage}");
+            satchel_core::db::maintenance::request_fts_check(&pool)
+                .await
+                .unwrap();
+            super::run_pending_fts_check(&pool).await.unwrap();
+            assert!(satchel_core::db::message_index_intact(&pool).await.unwrap(), "{damage}");
+        }
+        let hits: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM messages_fts
+             JOIN message_search_projection AS p ON p.message_rowid = messages_fts.rowid
+             WHERE messages_fts MATCH 'Rumpf' AND p.message_id = 'recent'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(hits, 1);
+    }
+
+    #[tokio::test]
+    async fn cc_repair_restores_documents_and_terms_without_touching_the_prefix_backfill() {
+        let pool = pool_with_messages().await;
+        sqlx::query(
+            "UPDATE messages SET cc_addresses = '[\"Cécile@example.test\"]' WHERE id = 'recent'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        for damage in [
+            "UPDATE message_cc_fts SET cc_addresses = 'wrongaddress@example.test'
+                 WHERE rowid = (SELECT rowid FROM messages WHERE id = 'recent');",
+            "DELETE FROM message_cc_fts WHERE rowid = (SELECT rowid FROM messages WHERE id = 'recent');
+             INSERT INTO message_cc_fts (rowid, cc_addresses) VALUES (999, 'Cécile@example.test');",
+            "INSERT INTO message_cc_fts(message_cc_fts) VALUES('delete-all');",
+        ] {
+            use sqlx::Executor;
+            pool.execute(sqlx::raw_sql(damage)).await.unwrap();
+            assert!(!satchel_core::db::message_index_intact(&pool).await.unwrap());
+            assert!(satchel_core::db::verify_and_repair_message_index(&pool).await.unwrap());
+            let hits: Vec<String> = sqlx::query_scalar(
+                "SELECT m.id FROM message_cc_fts
+                 JOIN messages AS m ON m.rowid = message_cc_fts.rowid
+                 WHERE message_cc_fts MATCH 'cecile'",
+            )
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+            assert_eq!(hits, ["recent"]);
+        }
+        let prefix_docs: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM messages_prefix_fts_docsize")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(prefix_docs, 4);
+        assert!(!satchel_core::db::verify_and_repair_message_index(&pool)
+            .await
+            .unwrap());
     }
 
     #[tokio::test]
@@ -1323,9 +1343,6 @@ mod body_window_tests {
             .execute(&pool)
             .await
             .unwrap();
-        assert!(satchel_core::db::message_index_matches_row_count(&pool)
-            .await
-            .unwrap());
         assert!(satchel_core::db::message_index_intact(&pool).await.is_err());
         assert!(super::run_pending_fts_check(&pool).await.is_err());
         let pending: i64 = sqlx::query_scalar(
@@ -1340,7 +1357,9 @@ mod body_window_tests {
             .await
             .unwrap();
         super::run_pending_fts_check(&pool).await.unwrap();
-        assert!(!super::verify_and_repair_fts(&pool).await.unwrap());
+        assert!(!satchel_core::db::verify_and_repair_message_index(&pool)
+            .await
+            .unwrap());
     }
 
     #[tokio::test]
@@ -1397,7 +1416,9 @@ mod body_window_tests {
     #[tokio::test]
     async fn a_healthy_fts_index_is_left_alone() {
         let pool = pool_with_messages().await;
-        assert!(!super::verify_and_repair_fts(&pool).await.expect("check"));
+        assert!(!satchel_core::db::verify_and_repair_message_index(&pool)
+            .await
+            .expect("check"));
     }
 }
 
