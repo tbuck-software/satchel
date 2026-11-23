@@ -407,6 +407,7 @@
       "oauthReloadRequired": "Die Anmeldung des Kontos hat sich währenddessen geändert. Bitte versuche es erneut.",
       "oauthUrlRejected": "Satchel hat eine unerwartete Anmeldeadresse abgelehnt.",
       "outboxActionCannotBeDiscarded": "Dieser Eintrag im Postausgang kann nicht sicher verworfen werden.",
+      "outboxMailCannotBeRequeued": "Diese Mail kann gerade nicht erneut eingereiht werden.",
       "outgoingSendHeldAfterRestore": "Versand nach Wiederherstellung oder Import angehalten. Prüfe die Nachricht vor dem Senden.",
       "outlookCalendarAccessMissing": "Der Kalender-Zugriff für dieses Outlook-Konto ist nicht verbunden. Verbinde ihn unter Einstellungen → Kalender.",
       "outlookCalendarSyncFailed": "Der Outlook-Kalender für {account} konnte nicht synchronisiert werden.",

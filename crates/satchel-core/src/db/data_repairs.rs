@@ -164,9 +164,16 @@ pub async fn run_repair(
             tx.rollback().await?;
             return Ok(finished(blocks));
         };
-        let prepared = prepared
-            .filter(|(prepared_for, _)| *prepared_for == cursor)
-            .map(|(_, work)| work);
+        let prepared = match prepared {
+            Some((prepared_for, work)) if prepared_for == cursor => Some(work),
+            Some(_) => {
+                // Another process advanced the repair while we prepared this
+                // block. Read and prepare again after releasing the write lock.
+                tx.rollback().await?;
+                continue;
+            }
+            None => None,
+        };
         let next = (repair.block)(&mut tx, &cursor, size, prepared).await?;
         let now = chrono::Utc::now().to_rfc3339();
         match &next {
@@ -272,15 +279,16 @@ fn sanitize_message_html_prepare<'c>(
 
 fn sanitize_message_html_block<'c>(
     connection: &'c mut SqliteConnection,
-    cursor: &'c str,
-    limit: i64,
+    _cursor: &'c str,
+    _limit: i64,
     prepared: Option<Prepared>,
 ) -> BoxFuture<'c, Result<Option<String>, sqlx::Error>> {
     Box::pin(async move {
-        let cleaned = match prepared.and_then(|work| work.downcast::<SanitizedHtml>().ok()) {
-            Some(work) => *work,
-            None => sanitize_html_rows(&mut *connection, cursor, limit).await?,
-        };
+        let cleaned = *prepared
+            .and_then(|work| work.downcast::<SanitizedHtml>().ok())
+            .ok_or_else(|| {
+                sqlx::Error::Protocol("missing prepared sanitize message html block".into())
+            })?;
         let Some(last) = cleaned.0.last().map(|row| row.0) else {
             return Ok(None);
         };
@@ -377,15 +385,14 @@ fn legacy_mime_prepare<'c>(
 
 fn legacy_mime_block<'c>(
     connection: &'c mut SqliteConnection,
-    cursor: &'c str,
-    limit: i64,
+    _cursor: &'c str,
+    _limit: i64,
     prepared: Option<Prepared>,
 ) -> BoxFuture<'c, Result<Option<String>, sqlx::Error>> {
     Box::pin(async move {
-        let work = match prepared.and_then(|work| work.downcast::<LegacyMimeWork>().ok()) {
-            Some(work) => *work,
-            None => legacy_mime_rows(&mut *connection, cursor, limit).await?,
-        };
+        let work = *prepared
+            .and_then(|work| work.downcast::<LegacyMimeWork>().ok())
+            .ok_or_else(|| sqlx::Error::Protocol("missing prepared legacy mime block".into()))?;
         let Some(last) = work.last else {
             return Ok(None);
         };
@@ -819,6 +826,54 @@ mod tests {
                 .unwrap();
         assert_eq!(rows[0].0, "<p>Hi</p>");
         assert_eq!(rows[1], ("<p>Newer</p>".to_string(), None));
+    }
+
+    #[tokio::test]
+    async fn a_shifted_cursor_is_prepared_again_outside_the_write_lock() {
+        const REPAIR: DataRepair = DataRepair {
+            name: "cursor_shift",
+            prepare: Some(prepare),
+            block,
+        };
+        fn prepare<'c>(
+            pool: &'c SqlitePool,
+            cursor: &'c str,
+            _size: i64,
+        ) -> BoxFuture<'c, Result<Prepared, sqlx::Error>> {
+            Box::pin(async move {
+                // With a one-connection pool, even the second prepare can
+                // write only if the previous transaction released its lock.
+                sqlx::query("UPDATE app_settings SET value = 'advanced' WHERE key = ?")
+                    .bind(REPAIR.marker_key())
+                    .execute(pool)
+                    .await?;
+                Ok(Box::new(cursor.to_owned()) as Prepared)
+            })
+        }
+        fn block<'c>(
+            _connection: &'c mut SqliteConnection,
+            cursor: &'c str,
+            _size: i64,
+            prepared: Option<Prepared>,
+        ) -> BoxFuture<'c, Result<Option<String>, sqlx::Error>> {
+            Box::pin(async move {
+                let prepared = *prepared.unwrap().downcast::<String>().unwrap();
+                assert_eq!(cursor, "advanced");
+                assert_eq!(prepared, cursor);
+                Ok(None)
+            })
+        }
+
+        let pool = pool().await;
+        sqlx::query("INSERT INTO app_settings (key, value, updated_at) VALUES (?, '', '')")
+            .bind(REPAIR.marker_key())
+            .execute(&pool)
+            .await
+            .unwrap();
+        let run = run_repair(&pool, &REPAIR, 1, Some(1), |_| {})
+            .await
+            .unwrap();
+        assert_eq!(run, RepairRun::Completed { blocks: 1 });
     }
 
     #[tokio::test]

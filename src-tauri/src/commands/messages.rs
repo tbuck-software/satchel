@@ -4972,10 +4972,14 @@ pub(crate) async fn fetch_remote_message_source(
             .fetch_raw_message(&remote_id)
             .await?
         }
-        "gmail" => crate::providers::gmail::GmailProvider::from_account_config(&config)
-            .fetch_raw_message(&remote_id)
-            .await
-            .map_err(|error| error.to_string())?,
+        "gmail" => crate::providers::gmail::GmailProvider::from_stored_account(
+            write_pool,
+            &target.account_id,
+            &config,
+        )
+        .fetch_raw_message(&remote_id)
+        .await
+        .map_err(|error| error.to_string())?,
         "outlook" => crate::providers::outlook::OutlookProvider::from_account_config(&config)
             .fetch_raw_message(&remote_id)
             .await

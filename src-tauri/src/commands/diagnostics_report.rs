@@ -185,8 +185,9 @@ fn render_report(build: &BuildInfo, overview: &DiagnosticsOverviewDto, log: &[St
     for limit in &overview.rate_limits {
         let _ = writeln!(
             out,
-            "- {}: blocked_until={} streak={}",
+            "- {} {}: blocked_until={} streak={}",
             limit.provider,
+            limit.email,
             or_dash(&limit.blocked_until),
             limit.streak
         );

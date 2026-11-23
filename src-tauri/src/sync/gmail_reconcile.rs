@@ -269,10 +269,7 @@ pub(crate) async fn reconcile_gmail_snapshot_deletion(
     remote_id: &str,
     live_draft_ids: &[String],
 ) -> Result<SnapshotResolution, String> {
-    let mut tx = pool
-        .begin_with("BEGIN IMMEDIATE")
-        .await
-        .map_err(|error| error.to_string())?;
+    let mut tx = crate::sync::leases::begin_sync_write(pool, account_id).await?;
     if gmail_snapshot_message_pinned_tx(&mut tx, account_id, remote_id).await? {
         tx.rollback().await.map_err(|error| error.to_string())?;
         return Ok(SnapshotResolution::Deferred(

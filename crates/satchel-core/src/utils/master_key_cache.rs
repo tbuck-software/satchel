@@ -1,80 +1,106 @@
-use std::sync::{Condvar, Mutex};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 type KeyResult = Result<[u8; 32], String>;
+#[derive(Default)]
+struct Attempt {
+    result: OnceLock<KeyResult>,
+    ready: tokio::sync::Notify,
+}
 
 #[derive(Default)]
 enum State {
     #[default]
     Empty,
-    Loading,
-    Ready(KeyResult),
+    Loading(Arc<Attempt>),
+    Ready([u8; 32]),
+}
+
+enum Claim {
+    Cached([u8; 32]),
+    Wait(Arc<Attempt>),
+    Load(Arc<Attempt>),
 }
 
 #[derive(Default)]
 pub(super) struct MasterKeyCache {
     state: Mutex<State>,
-    ready: Condvar,
 }
 
 impl MasterKeyCache {
     pub(super) const fn new() -> Self {
         Self {
             state: Mutex::new(State::Empty),
-            ready: Condvar::new(),
+        }
+    }
+
+    fn claim(&self) -> Claim {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        match &*state {
+            State::Ready(key) => Claim::Cached(*key),
+            State::Loading(attempt) => Claim::Wait(attempt.clone()),
+            State::Empty => {
+                let attempt = Arc::new(Attempt::default());
+                *state = State::Loading(attempt.clone());
+                Claim::Load(attempt)
+            }
         }
     }
 
     pub(super) fn start(&'static self, load: impl FnOnce() -> KeyResult + Send + 'static) {
-        let mut state = self.state.lock().expect("master key cache poisoned");
-        if !matches!(*state, State::Empty) {
+        let Claim::Load(attempt) = self.claim() else {
             return;
-        }
-        *state = State::Loading;
-        drop(state);
+        };
         std::thread::spawn(move || {
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(load))
-                .unwrap_or_else(|_| Err("master key loader panicked".to_string()));
-            if let Err(err) = &result {
+            if let Err(err) = self.run_load(attempt, load) {
                 tracing::error!(%err, "credential key unavailable; stored passwords cannot be unlocked");
             }
-            let _ = self.finish(result);
         });
     }
 
     pub(super) fn load(&self, load: impl FnOnce() -> KeyResult) -> KeyResult {
-        let mut state = self.state.lock().expect("master key cache poisoned");
-        loop {
-            match &*state {
-                State::Ready(result) => return result.clone(),
-                State::Loading => {
-                    state = self.ready.wait(state).expect("master key cache poisoned")
-                }
-                State::Empty => {
-                    *state = State::Loading;
-                    drop(state);
-                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(load))
-                        .unwrap_or_else(|_| Err("master key loader panicked".to_string()));
-                    return self.finish(result);
-                }
-            }
-        }
+        self.resolve(self.claim(), load)
     }
 
     pub(super) async fn load_async(
         &'static self,
         load: impl FnOnce() -> KeyResult + Send + 'static,
     ) -> KeyResult {
-        if let State::Ready(result) = &*self.state.lock().expect("master key cache poisoned") {
-            return result.clone();
+        match self.claim() {
+            Claim::Cached(key) => Ok(key),
+            Claim::Wait(attempt) => {
+                let ready = attempt.ready.notified();
+                if attempt.result.get().is_none() {
+                    ready.await;
+                }
+                attempt.result.wait().clone()
+            }
+            Claim::Load(attempt) => {
+                tokio::task::spawn_blocking(move || self.run_load(attempt, load))
+                    .await
+                    .map_err(|err| format!("credential key worker failed: {err}"))?
+            }
         }
-        tokio::task::spawn_blocking(move || self.load(load))
-            .await
-            .map_err(|err| format!("credential key worker failed: {err}"))?
     }
 
-    fn finish(&self, result: KeyResult) -> KeyResult {
-        *self.state.lock().expect("master key cache poisoned") = State::Ready(result.clone());
-        self.ready.notify_all();
+    fn resolve(&self, claim: Claim, load: impl FnOnce() -> KeyResult) -> KeyResult {
+        match claim {
+            Claim::Cached(key) => Ok(key),
+            Claim::Wait(attempt) => attempt.result.wait().clone(),
+            Claim::Load(attempt) => self.run_load(attempt, load),
+        }
+    }
+
+    fn run_load(&self, attempt: Arc<Attempt>, load: impl FnOnce() -> KeyResult) -> KeyResult {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(load))
+            .unwrap_or_else(|_| Err("master key loader panicked".to_string()));
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        *state = match &result {
+            Ok(key) => State::Ready(*key),
+            Err(_) => State::Empty,
+        };
+        // Waiters retain their attempt even if a new load starts immediately.
+        let _ = attempt.result.set(result.clone());
+        attempt.ready.notify_waiters();
         result
     }
 }
@@ -127,12 +153,36 @@ mod tests {
     }
 
     #[test]
-    fn failure_is_shared_without_retrying_the_keychain() {
+    fn waiters_get_the_failed_attempt_even_after_a_retry_succeeds() {
         let cache = MasterKeyCache::new();
-        assert_eq!(cache.load(|| Err("locked".into())), Err("locked".into()));
+        let Claim::Load(attempt) = cache.claim() else {
+            panic!("expected a fresh attempt");
+        };
+        let first_waiter = cache.claim();
+        let second_waiter = cache.claim();
+
         assert_eq!(
-            cache.load(|| panic!("no competing load")),
+            cache.run_load(attempt, || Err("locked".into())),
             Err("locked".into())
         );
+        assert_eq!(cache.load(|| Ok([7; 32])), Ok([7; 32]));
+        for waiter in [first_waiter, second_waiter] {
+            assert_eq!(
+                cache.resolve(waiter, || panic!("already joined the first load")),
+                Err("locked".into())
+            );
+        }
+        assert_eq!(cache.load(|| panic!("already cached")), Ok([7; 32]));
+    }
+
+    #[test]
+    fn a_poisoned_state_mutex_can_still_cache_the_key() {
+        let cache = MasterKeyCache::new();
+        let _ = std::panic::catch_unwind(|| {
+            let _guard = cache.state.lock().unwrap();
+            panic!("poison the cache mutex");
+        });
+        assert_eq!(cache.load(|| Ok([6; 32])), Ok([6; 32]));
+        assert_eq!(cache.load(|| panic!("already cached")), Ok([6; 32]));
     }
 }

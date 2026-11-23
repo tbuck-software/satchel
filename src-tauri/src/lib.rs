@@ -232,11 +232,10 @@ pub fn run() {
                     let _ = window.hide();
                 }
             }
-            // Before any worker can call a provider: a block recorded by an
-            // earlier run is still running on the server, and knocking renews it.
-            if let Err(error) = tauri::async_runtime::block_on(sync::rate_limit_state::restore(&pool))
+            if let Err(error) =
+                tauri::async_runtime::block_on(sync::rate_limit_state::clear_legacy(&pool))
             {
-                tracing::warn!(%error, "could not read Gmail rate limit");
+                tracing::warn!(%error, "could not clear legacy Gmail rate limit");
             }
             // Before the first handshake too: IDLE and body fetches connect
             // without waiting for a sync run.
@@ -375,7 +374,8 @@ pub fn run() {
             // Bridge AppEvent -> Tauri events for the frontend.
             let event_app = app_handle.clone();
             let event_pool = pool.clone();
-            let event_plugin_runtime = state.plugin_runtime.clone();
+            let mut event_dispatch =
+                plugins::event_dispatch::EventDispatch::spawn(state.plugin_runtime.clone(), pool.clone());
             let event_sync_activity = state.sync_activity.clone();
             let mut subscriber = state.events.subscribe();
             tauri::async_runtime::spawn(async move {
@@ -396,35 +396,7 @@ pub fn run() {
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                     };
-                    if let Some((event_name, idempotency_key, payload)) =
-                        plugin_event_payload(&event)
-                    {
-                        let webhook_pool = event_pool.clone();
-                        let webhook_event = event_name.clone();
-                        let webhook_key = idempotency_key.clone();
-                        let webhook_payload = payload.clone();
-                        tauri::async_runtime::spawn(async move {
-                            if let Err(error) =
-                                db::webhooks::WebhookRepository::new(&webhook_pool)
-                                    .enqueue_deliveries(
-                                        &webhook_event,
-                                        &webhook_key,
-                                        &webhook_payload,
-                                    )
-                                    .await
-                            {
-                                tracing::warn!(
-                                    target: "events",
-                                    error = ?error,
-                                    "webhook delivery enqueue failed"
-                                );
-                            }
-                        });
-                        let runtime = event_plugin_runtime.clone();
-                        tauri::async_runtime::spawn_blocking(move || {
-                            let _ = runtime.dispatch_event(&event_name, &idempotency_key, payload);
-                        });
-                    }
+                    event_dispatch.enqueue(&event);
 
                     match event {
                         AppEvent::SyncStarted | AppEvent::SyncCompleted => {
@@ -1136,54 +1108,9 @@ fn classify_open_with(path: &std::path::Path) -> OpenWithKind {
     OpenWithKind::Unhandled
 }
 
-fn plugin_event_payload(
-    event: &events::bus::AppEvent,
-) -> Option<(String, String, serde_json::Value)> {
-    match event {
-        events::bus::AppEvent::ThreadsUpdated(thread_ids) => Some((
-            "thread.updated".to_string(),
-            format!("thread.updated:{}", thread_ids.join(",")),
-            serde_json::json!({ "thread_ids": thread_ids, "thread_id": if thread_ids.len() == 1 { thread_ids.first() } else { None } }),
-        )),
-        events::bus::AppEvent::NewMail {
-            event_id,
-            account_id,
-            from_name,
-            from_address,
-            subject,
-            preview,
-            thread_id,
-        } => Some((
-            "message.received".to_string(),
-            format!("message.received:{account_id}:{event_id}"),
-            serde_json::json!({
-                "event_id": event_id,
-                "account_id": account_id,
-                "thread_id": thread_id,
-                "from_name": from_name,
-                "from_address": from_address,
-                "subject": subject,
-                "preview": preview,
-            }),
-        )),
-        _ => None,
-    }
-}
-
 #[cfg(all(test, desktop))]
 mod tests {
     use super::{classify_open_with, opens_a_file_of_its_own, OpenWithKind};
-
-    #[test]
-    fn thread_change_payload_carries_the_whole_batch() {
-        let event = super::events::bus::AppEvent::ThreadsUpdated(vec!["a".into(), "b".into()]);
-        let (name, _, payload) = super::plugin_event_payload(&event).unwrap();
-        assert_eq!(name, "thread.updated");
-        assert_eq!(payload["thread_ids"], serde_json::json!(["a", "b"]));
-        let event = super::events::bus::AppEvent::ThreadsUpdated(vec!["a".into()]);
-        let (_, _, payload) = super::plugin_event_payload(&event).unwrap();
-        assert_eq!(payload["thread_id"], "a");
-    }
 
     fn scratch(name: &str, contents: &[u8]) -> std::path::PathBuf {
         let path =

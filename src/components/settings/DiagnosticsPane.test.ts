@@ -153,6 +153,8 @@ const POPULATED = {
   rate_limits: [
     {
       provider: 'gmail',
+      account_id: 'gmail-account',
+      email: 'gmail@example.de',
       blocked_until: '2026-08-27T12:30:00Z',
       streak: 3,
       updated_at: '2026-08-27T11:55:00Z',
@@ -308,7 +310,7 @@ describe('an installation with problems', () => {
   it('shows an armed rate-limit block with its streak', async () => {
     const wrapper = await mountPane();
 
-    expect(wrapper.text()).toContain('gmail');
+    expect(wrapper.text()).toContain('gmail@example.de');
     expect(wrapper.text()).toContain('Blocked');
     expect(wrapper.text()).toContain('Blocks in a row');
   });

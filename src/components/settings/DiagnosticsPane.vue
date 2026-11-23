@@ -597,9 +597,9 @@ onMounted(() => {
           </template>
         </EmptyState>
         <ul v-else class="rows">
-          <li v-for="limit in activeRateLimits" :key="limit.provider" class="row">
+          <li v-for="limit in activeRateLimits" :key="limit.account_id" class="row">
             <div class="row__head">
-              <strong>{{ limit.provider }}</strong>
+              <strong>{{ limit.email }}</strong>
               <span class="tag tag--error">
                 {{ $t('settings.diagnostics.rateLimits.blocked') }}
               </span>

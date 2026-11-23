@@ -1053,7 +1053,7 @@ impl SyncQueue {
         .map_err(|err| err.to_string())?
         .rows_affected();
         if changed != 1 {
-            return Err("Diese Mail kann gerade nicht erneut eingereiht werden.".to_string());
+            return Err("backend.errors.outboxMailCannotBeRequeued".to_string());
         }
         self.notify.notify_one();
         Ok(())
@@ -2104,7 +2104,7 @@ mod tests {
             .requeue_mail(&pool, &mutation.id)
             .await
             .expect_err("internal action must not be user-requeued");
-        assert!(error.contains("nicht erneut"));
+        assert_eq!(error, "backend.errors.outboxMailCannotBeRequeued");
 
         let mail = QueuedAction::new("acc-1".into(), "send_message", serde_json::json!({}));
         queue.enqueue(&pool, mail.clone()).await.unwrap();
@@ -2113,7 +2113,7 @@ mod tests {
             .requeue_mail(&pool, &mail.id)
             .await
             .expect_err("in-flight mail must not be user-requeued");
-        assert!(error.contains("nicht erneut"));
+        assert_eq!(error, "backend.errors.outboxMailCannotBeRequeued");
     }
 
     #[tokio::test]
@@ -2134,7 +2134,7 @@ mod tests {
         assert_eq!(visible[0].status, "delivered");
         assert_eq!(
             queue.requeue_mail(&pool, &mail.id).await.unwrap_err(),
-            "Diese Mail kann gerade nicht erneut eingereiht werden."
+            "backend.errors.outboxMailCannotBeRequeued"
         );
     }
 

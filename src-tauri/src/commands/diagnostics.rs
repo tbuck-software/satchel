@@ -70,9 +70,6 @@ pub fn record_frontend_diagnostic(input: FrontendDiagnosticInput) {
 /// `sync::queue` does.
 const NOTIFICATION_ID_PREFIX: &str = "notification:%";
 
-const GMAIL_BLOCK_UNTIL_KEY: &str = "gmail_rate_limit_block_until";
-const GMAIL_BLOCK_STREAK_KEY: &str = "gmail_rate_limit_block_streak";
-
 const RECENT_LIMIT: i64 = 20;
 
 /// Enough rows to cover a morning of mail without turning the pane into a log.
@@ -203,6 +200,8 @@ pub struct DiagnosticsNotificationsDto {
 )]
 pub struct DiagnosticsRateLimitDto {
     pub provider: String,
+    pub account_id: String,
+    pub email: String,
     pub blocked_until: Option<String>,
     pub streak: u64,
     pub updated_at: Option<String>,
@@ -393,46 +392,39 @@ async fn status_counts(
         .map_err(|err| err.to_string())
 }
 
-/// Reads the two `app_settings` keys `sync::rate_limit_state` persists. An
-/// empty value means the block was cleared, not that it is still armed.
+/// Show active Gmail blocks alongside the accounts that earned them.
 async fn rate_limits(pool: &SqlitePool) -> Result<Vec<DiagnosticsRateLimitDto>, String> {
-    let rows = sqlx::query_as::<_, (String, String, String)>(
-        "SELECT key, value, updated_at FROM app_settings WHERE key IN (?, ?)",
+    use crate::sync::rate_limit_state::{GMAIL_BLOCK_STREAK_PREFIX, GMAIL_BLOCK_UNTIL_PREFIX};
+
+    let rows: Vec<(String, String, String, String, Option<String>)> = sqlx::query_as(
+        "SELECT a.id, a.email, until.value, until.updated_at, streak.value
+         FROM accounts a
+         JOIN app_settings until ON until.key = ? || a.id
+         LEFT JOIN app_settings streak ON streak.key = ? || a.id
+         WHERE a.provider = 'gmail' AND julianday(until.value) > julianday('now')
+         ORDER BY a.email, a.id",
     )
-    .bind(GMAIL_BLOCK_UNTIL_KEY)
-    .bind(GMAIL_BLOCK_STREAK_KEY)
+    .bind(GMAIL_BLOCK_UNTIL_PREFIX)
+    .bind(GMAIL_BLOCK_STREAK_PREFIX)
     .fetch_all(pool)
     .await
     .map_err(|err| err.to_string())?;
 
-    let mut blocked_until: Option<String> = None;
-    let mut streak: u64 = 0;
-    let mut updated_at: Option<String> = None;
-    let mut seen = false;
-
-    for (key, value, stamp) in rows {
-        seen = true;
-        let trimmed = value.trim().to_string();
-        if key == GMAIL_BLOCK_UNTIL_KEY {
-            if !trimmed.is_empty() {
-                blocked_until = Some(trimmed);
-            }
-            updated_at = Some(stamp);
-        } else if key == GMAIL_BLOCK_STREAK_KEY {
-            streak = trimmed.parse::<u64>().unwrap_or(0);
-        }
-    }
-
-    if !seen {
-        return Ok(Vec::new());
-    }
-
-    Ok(vec![DiagnosticsRateLimitDto {
-        provider: "gmail".to_string(),
-        blocked_until,
-        streak,
-        updated_at,
-    }])
+    Ok(rows
+        .into_iter()
+        .map(
+            |(account_id, email, until, updated_at, streak)| DiagnosticsRateLimitDto {
+                provider: "gmail".to_string(),
+                account_id,
+                email,
+                blocked_until: Some(until),
+                streak: streak
+                    .and_then(|value| value.trim().parse().ok())
+                    .unwrap_or(1),
+                updated_at: Some(updated_at),
+            },
+        )
+        .collect())
 }
 
 /// Rows from the last day, grouped on the reason code in front of the colon.

@@ -1,7 +1,7 @@
 use base64::Engine as _;
 
 use crate::providers::{
-    provider_for_account,
+    provider_for_stored_account,
     traits::{MessageRef, RemoteAttachment},
 };
 
@@ -11,6 +11,8 @@ use crate::providers::{
 /// does not make a second network request. Providers are used only when the
 /// message contains a remote part reference without inline bytes.
 pub async fn attachment_bytes(
+    pool: &sqlx::SqlitePool,
+    account_id: &str,
     provider_kind: &str,
     account_config: &crate::accounts::AccountConfig,
     account_email: &str,
@@ -25,7 +27,14 @@ pub async fn attachment_bytes(
         }
     }
 
-    let provider = provider_for_account(provider_kind, account_config, account_email, None)?;
+    let provider = provider_for_stored_account(
+        pool,
+        account_id,
+        provider_kind,
+        account_config,
+        account_email,
+        None,
+    )?;
     provider
         .fetch_attachment(
             &MessageRef {

@@ -7,6 +7,7 @@ import { SUBSETS } from '../../scripts/i18n-merge.mjs';
 import {
   FIRST_PAINT,
   IDLE_PREFETCH,
+  LAZY_COMMAND_KEYS,
   OTHER_ENTRIES,
   computeSplit,
   moduleKeys,
@@ -91,13 +92,22 @@ describe('startup catalogue split', () => {
     expect(homeless).toEqual([]);
   });
 
-  it('keeps every key Rust sends in startup', () => {
+  it('keeps shared backend keys in startup', () => {
     const rust = ['src-tauri/src/commands/error.rs', 'crates/satchel-core/src/sync/remote_mutations.rs']
       .map((file) => readFileSync(path.join(repoRoot, file), 'utf8')).join('\n');
     const sent = new Set(rust.match(/backend\.errors\.[A-Za-z0-9_]+/g) ?? []);
     expect(sent.size).toBeGreaterThan(0);
     expect([...sent].filter((key) => index.has(key) && !startup.has(key))).toEqual([]);
-    expect(allKeys.filter((key) => key.startsWith('backend.') && !startup.has(key))).toEqual([]);
+    expect(allKeys.filter((key) => key.startsWith('backend.') && !(key in LAZY_COMMAND_KEYS)
+      && !startup.has(key))).toEqual([]);
+  });
+
+  it('ships each scoped command error with its owning view', () => {
+    const chunks = new Map([...split.chunks.values()].map((chunk) => [rel(chunk.file), chunk.keys]));
+    for (const [key, owner] of Object.entries(LAZY_COMMAND_KEYS)) {
+      expect(startup.has(key), key).toBe(false);
+      expect(chunks.get(owner), owner).toContain(key);
+    }
   });
 
   it('keeps startup well under half of the catalogue', () => {
