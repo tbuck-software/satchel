@@ -1,6 +1,7 @@
 import { onBeforeUnmount, watch, type Ref } from 'vue';
 import {
   BACKUP_HEARTBEAT_MS,
+  MAX_BACKUP_HTML_CHARS,
   composerBackupPersistence,
   type ComposerBackup,
   type ComposerBackupContent,
@@ -30,8 +31,7 @@ export function useComposerLocalBackup(options: ComposerLocalBackupOptions) {
     heartbeat = null;
   }
 
-  function writeNow() {
-    const content = options.content();
+  function writeNow(content = options.content()) {
     if (!hasMeaningfulComposerContent(content)) {
       clear();
       return;
@@ -66,13 +66,13 @@ export function useComposerLocalBackup(options: ComposerLocalBackupOptions) {
   }
 
   /**
-   * Writes the editor's content now, changed or not. `true` once it is stored,
-   * or when there is nothing worth keeping.
+   * Writes the editor's content now. A quit requires a complete, stored copy.
    */
   function keep(): boolean {
     changes.settle();
-    writeNow();
-    return stored || !hasMeaningfulComposerContent(options.content());
+    const content = options.content();
+    writeNow(content);
+    return stored && (content.bodyHtml?.length ?? 0) <= MAX_BACKUP_HTML_CHARS;
   }
 
   /** The draft on disk has caught up with the editor. */

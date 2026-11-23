@@ -1061,8 +1061,12 @@
       "undoHint": "Dieses Fenster schließt sich, sobald die Nachricht rausgeht."
     },
     "backup": {
+      "chooseSender": "Wähle ein Absenderkonto aus, bevor du diesen Entwurf sendest.",
       "detail": "Anhänge sind in dieser Kopie nicht enthalten.",
+      "missingSender": "Das ursprüngliche Absenderkonto ({address}) ist nicht verfügbar.",
+      "missingSenderUnknown": "Das ursprüngliche Absenderkonto ist nicht verfügbar.",
       "restore": "Wiederherstellen",
+      "selectSender": "Absender auswählen",
       "title": "Ungespeicherter Text von {time} wurde auf diesem Gerät aufbewahrt."
     },
     "body": {
@@ -2065,6 +2069,11 @@
       "compose": "Neue E-Mail",
       "settings": "Einstellungen…",
       "sync": "E-Mails synchronisieren"
+    },
+    "draftQuit": {
+      "anyway": "Trotzdem beenden",
+      "message": "Änderungen und Anhänge können verloren gehen.",
+      "wait": "Weiter warten"
     },
     "notifications": {
       "actionFailedMessage": "{action} wurde lokal gespeichert. Der Serverabgleich wird weiter versucht.",

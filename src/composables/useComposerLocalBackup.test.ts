@@ -2,7 +2,7 @@
 import { defineComponent, h, nextTick, ref } from 'vue';
 import { mount } from '@vue/test-utils';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { composerBackupPersistence, type ComposerBackupContent } from '@/persistence/composerBackup';
+import { composerBackupPersistence, MAX_BACKUP_HTML_CHARS, type ComposerBackupContent } from '@/persistence/composerBackup';
 import { useComposerLocalBackup } from './useComposerLocalBackup';
 
 beforeEach(() => { vi.useFakeTimers(); localStorage.clear(); });
@@ -91,5 +91,19 @@ it('keeps the content on demand even when a save had cleared the copy', async ()
     expect(backup.keep()).toBe(true);
     expect(composerBackupPersistence.findOrphan({}, Date.now() + 20_000)?.content.body)
       .toBe('Saved once, then gone elsewhere');
+  } finally { wrapper.unmount(); }
+});
+
+it('only confirms a complete recovery copy', () => {
+  const { wrapper, content, backup } = editor();
+  try {
+    expect(backup.keep()).toBe(false);
+    content.value.body = 'Plain text fallback';
+    content.value.bodyHtml = 'x'.repeat(MAX_BACKUP_HTML_CHARS + 1);
+
+    expect(backup.keep()).toBe(false);
+    expect(composerBackupPersistence.findOrphan({}, Date.now() + 20_000)?.content).toMatchObject({
+      body: 'Plain text fallback', bodyHtml: null,
+    });
   } finally { wrapper.unmount(); }
 });

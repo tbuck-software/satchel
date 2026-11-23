@@ -9,6 +9,7 @@ import type { BackendSendMessageResult } from '@/types/composer';
 import type { Message } from '@/types/mail';
 import type { ComposerDraftPersistenceOptions } from '@/composables/useComposerDraftPersistence';
 import { normalizeInvokeError } from '@/services/backend/core';
+import { COMPOSER_BACKUP_STORAGE_KEY, composerBackupPersistence } from '@/persistence/composerBackup';
 
 const harness = vi.hoisted(() => ({
   sendMessage: vi.fn(),
@@ -30,6 +31,7 @@ const harness = vi.hoisted(() => ({
   composePlainText: true,
   realEditor: false,
   draftSetup: vi.fn<(options: ComposerDraftPersistenceOptions) => void>(),
+  initialDraftIdentity: 'draft-1' as string | null,
   signatures: [] as Array<{ id: string; name: string }>,
 }));
 
@@ -93,10 +95,11 @@ vi.mock('@/composables/useComposerDraftPersistence', () => ({
   useComposerDraftPersistence: (options: ComposerDraftPersistenceOptions) => {
     harness.draftSetup(options);
     return {
-      draftId: ref<string | null>('draft-1'),
+      draftId: ref(harness.initialDraftIdentity),
       serverRevision: ref<number | null>(null),
       saveError: ref(null),
       recordDraftConflict: vi.fn(() => false),
+      noteLoadedDraft: vi.fn(),
       saveAsNewDraft: vi.fn().mockResolvedValue(null),
       persist: vi.fn().mockResolvedValue(null),
       startAutosave: harness.startAutosave,
@@ -225,6 +228,7 @@ beforeEach(() => {
   harness.templatesLoad.mockResolvedValue(undefined);
   harness.templatesLoadFailed = false;
   harness.fetchDraft.mockResolvedValue(null);
+  harness.initialDraftIdentity = 'draft-1';
   harness.isPopout.mockReturnValue(false);
   harness.getByThread.mockReturnValue([]);
   harness.loadAttachmentsForMessages.mockResolvedValue(undefined);
@@ -243,6 +247,68 @@ describe('composer fields and actions', () => {
     expect(sendButton(wrapper).attributes('disabled')).toBeDefined();
     expect(wrapper.get('[data-testid="compose-send-wrap"]').attributes('title')).toBeTruthy();
     wrapper.unmount();
+  });
+
+  it.each(['removed@example.com', ''])('requires explicit sender selection for a restored backup from %j', async (fromAddress) => {
+    const draft = {
+      accountId: 'removed-account', fromAddress, fromName: null,
+      threadId: null, replyTo: null, sendOptions: {}, to: ['restored@example.com'],
+      cc: ['cc@example.com'], bcc: ['bcc@example.com'], subject: 'Restored subject',
+      body: 'Restored draft body', bodyHtml: null, plainText: true, scheduledFor: null,
+      signatureId: null, signatureVariant: 'none' as const,
+      signatureOverrideText: null, signatureOverrideHtml: null,
+    };
+    composerBackupPersistence.write({
+      key: 'removed-sender-backup',
+      draftId: 'draft-1',
+      savedAt: new Date().toISOString(),
+      aliveAt: 0,
+      content: draft,
+    });
+    harness.initialDraftIdentity = null;
+    const wrapper = render([], false, { initialBody: '' });
+    try {
+      await flushPromises();
+      const picker = wrapper.get<HTMLSelectElement>('select.sender-select');
+      expect(picker.element.value).toBe('account-1|me@example.com');
+
+      const restore = wrapper.findAll('button').find((button) => button.text() === 'Restore')!;
+      await restore.trigger('click');
+      await flushPromises();
+
+      expect(harness.fetchDraft).toHaveBeenCalledExactlyOnceWith('draft-1');
+      expect(wrapper.text()).toContain(fromAddress
+        ? 'The original sender account (removed@example.com) is unavailable.'
+        : 'The original sender account is unavailable.');
+      expect(wrapper.get<HTMLTextAreaElement>('.plain-editor').element.value).toBe(draft.body);
+      expect(picker.element.value).toBe('');
+      expect(sendButton(wrapper).attributes('disabled')).toBeDefined();
+      const options = harness.draftSetup.mock.calls[0]![0];
+      expect(options.canSave?.()).toBe(false);
+      expect(options.buildInput()).toMatchObject({
+        accountId: draft.accountId, fromAddress, to: draft.to, cc: draft.cc, bcc: draft.bcc,
+      });
+      expect(composerBackupPersistence.findOrphan({}, Date.now() + 20_000)?.content).toMatchObject({
+        accountId: draft.accountId, fromAddress,
+      });
+
+      await wrapper.get('.compose-subject').trigger('keydown', { key: 'Enter', metaKey: true });
+      expect(harness.sendMessage).not.toHaveBeenCalled();
+
+      await picker.setValue('account-1|me@example.com');
+      expect(wrapper.text()).not.toContain('The original sender account');
+      expect(options.canSave?.()).toBe(true);
+      expect(sendButton(wrapper).attributes('disabled')).toBeUndefined();
+      harness.sendMessage.mockResolvedValueOnce({ status: 'sent' });
+      await send(wrapper);
+      expect(harness.sendMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        accountId: 'account-1', fromAddress: 'me@example.com', to: draft.to,
+        cc: draft.cc, bcc: draft.bcc, subject: draft.subject, body: draft.body,
+      }));
+    } finally {
+      wrapper.unmount();
+      localStorage.removeItem(COMPOSER_BACKUP_STORAGE_KEY);
+    }
   });
 
   it('keeps the sender and recipients before the subject and body in DOM order', async () => {

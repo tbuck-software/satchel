@@ -244,6 +244,10 @@
       "backup": {
         "title": "Unsaved text from {time} was kept on this device.",
         "detail": "Attachments are not part of this copy.",
+        "missingSender": "The original sender account ({address}) is unavailable.",
+        "missingSenderUnknown": "The original sender account is unavailable.",
+        "chooseSender": "Choose a sender account before sending this draft.",
+        "selectSender": "Choose a sender",
         "restore": "Restore"
       },
       "replace": {
@@ -633,6 +637,10 @@
       "backup": {
         "title": "Ungespeicherter Text von {time} wurde auf diesem Gerät aufbewahrt.",
         "detail": "Anhänge sind in dieser Kopie nicht enthalten.",
+        "missingSender": "Das ursprüngliche Absenderkonto ({address}) ist nicht verfügbar.",
+        "missingSenderUnknown": "Das ursprüngliche Absenderkonto ist nicht verfügbar.",
+        "chooseSender": "Wähle ein Absenderkonto aus, bevor du diesen Entwurf sendest.",
+        "selectSender": "Absender auswählen",
         "restore": "Wiederherstellen"
       },
       "replace": {

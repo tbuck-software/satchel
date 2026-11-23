@@ -1061,8 +1061,12 @@
       "undoHint": "This window closes when the message goes out."
     },
     "backup": {
+      "chooseSender": "Choose a sender account before sending this draft.",
       "detail": "Attachments are not part of this copy.",
+      "missingSender": "The original sender account ({address}) is unavailable.",
+      "missingSenderUnknown": "The original sender account is unavailable.",
       "restore": "Restore",
+      "selectSender": "Choose a sender",
       "title": "Unsaved text from {time} was kept on this device."
     },
     "body": {
@@ -2065,6 +2069,11 @@
       "compose": "New email",
       "settings": "Settings…",
       "sync": "Sync email"
+    },
+    "draftQuit": {
+      "anyway": "Quit Anyway",
+      "message": "Quitting now may lose unsaved drafts and attachments.",
+      "wait": "Keep Waiting"
     },
     "notifications": {
       "actionFailedMessage": "{action} was saved locally. Server sync will keep trying.",

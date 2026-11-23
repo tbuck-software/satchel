@@ -617,9 +617,6 @@
     "you": "Du"
   },
   "compose": {
-    "quit": {
-      "blocked": "Satchel bleibt geöffnet: Ein Entwurf konnte nicht gespeichert werden."
-    },
     "status": {
       "saveFailed": "Speichern fehlgeschlagen: {error}"
     },
@@ -805,6 +802,11 @@
       "compose": "Neue E-Mail",
       "settings": "Einstellungen…",
       "sync": "E-Mails synchronisieren"
+    },
+    "draftQuit": {
+      "anyway": "Trotzdem beenden",
+      "message": "Änderungen und Anhänge können verloren gehen.",
+      "wait": "Weiter warten"
     },
     "notifications": {
       "actionFailedMessage": "{action} wurde lokal gespeichert. Der Serverabgleich wird weiter versucht.",

@@ -165,6 +165,11 @@
     },
     "nativeUi": {
       "composeWindowTitle": "New message — Satchel",
+      "draftQuit": {
+        "message": "Quitting now may lose unsaved drafts and attachments.",
+        "wait": "Keep Waiting",
+        "anyway": "Quit Anyway"
+      },
       "dock": {
         "calendar": "Open calendar",
         "closeOtherWindows": "Close all other windows",
@@ -496,6 +501,11 @@
     },
     "nativeUi": {
       "composeWindowTitle": "Neue Nachricht — Satchel",
+      "draftQuit": {
+        "message": "Änderungen und Anhänge können verloren gehen.",
+        "wait": "Weiter warten",
+        "anyway": "Trotzdem beenden"
+      },
       "dock": {
         "calendar": "Kalender öffnen",
         "closeOtherWindows": "Alle weiteren Fenster schließen",

@@ -195,7 +195,7 @@ describe('useComposerDraftPersistence', () => {
   });
 
   it('reports exactly what each successful save put on disk', async () => {
-    const pending = deferred<BackendDraft | null>();
+    const pending = deferred<BackendDraft>();
     const onSaved = vi.fn();
     const editor = harness({ save: async () => pending.promise, onSaved });
     editor.body.value = 'Hello world';
@@ -204,7 +204,7 @@ describe('useComposerDraftPersistence', () => {
     const saving = editor.persistence.persist();
     // Typed while the save is in flight: not part of what was saved.
     editor.body.value = 'Hello';
-    pending.resolve(null);
+    pending.resolve(savedDraft(editor.save.mock.calls[0]![0]));
     await saving;
 
     expect(onSaved).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ body: 'Hello world' }));
@@ -577,6 +577,31 @@ describe('flushing before the app exits', () => {
     expect(composer.status.value).toBeNull();
   });
 
+  it('withholds the quit acknowledgement past one second while the draft is still writing', async () => {
+    vi.useFakeTimers();
+    try {
+      const write = deferred<BackendDraft>();
+      const composer = open();
+      composer.save.mockReturnValueOnce(write.promise);
+      composer.subject.value = 'Draft being saved';
+      const finished = vi.fn();
+      const flush = flushOpenComposerDrafts().then(finished);
+
+      await vi.advanceTimersByTimeAsync(1_100);
+      expect(composer.save).toHaveBeenCalledOnce();
+      expect(finished).not.toHaveBeenCalled();
+
+      composer.subject.value = 'Edited while saving';
+      write.resolve(savedDraft(composer.save.mock.calls[0]![0]));
+      await flush;
+      expect(composer.save).toHaveBeenCalledTimes(2);
+      expect(composer.save).toHaveBeenLastCalledWith(expect.objectContaining({ subject: 'Edited while saving' }));
+      expect(finished).toHaveBeenCalledExactlyOnceWith(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('answers without writing when there is nothing unsaved', async () => {
     const composer = open();
 
@@ -618,6 +643,47 @@ describe('flushing before the app exits', () => {
 
     keepLocalCopy.mockReturnValue(false);
     await expect(flushOpenComposerDrafts()).resolves.toBe(false);
+  });
+
+  it('blocks quit for a conflicting draft containing only a new PDF until saved as new', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const keepLocalCopy = vi.fn(() => true);
+    const composer = open({ keepLocalCopy });
+    composer.persistence.draftId.value = 'conflicting-draft';
+    composer.persistence.serverRevision.value = 3;
+    composer.save.mockRejectedValueOnce({ key: 'backend.errors.draftGoneElsewhere' });
+    const pdf = { filename: 'report.pdf', mime_type: 'application/pdf', content_base64: 'JVBERi0=' };
+    composer.attachments.value = [pdf];
+
+    await expect(flushOpenComposerDrafts()).resolves.toBe(false);
+    expect(keepLocalCopy).not.toHaveBeenCalled();
+    expect(composer.persistence.saveError.value?.kind).toBe('conflict');
+
+    await expect(composer.persistence.saveAsNewDraft()).resolves.toBe('draft-stable-id');
+    expect(composer.save).toHaveBeenLastCalledWith(expect.objectContaining({
+      id: 'draft-stable-id', expectedRevision: null, attachments: [pdf],
+    }));
+    await expect(flushOpenComposerDrafts()).resolves.toBe(true);
+  });
+
+  it('blocks quit when recovery would reload a PDF the editor removed', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const keepLocalCopy = vi.fn(() => true);
+    const composer = open({ keepLocalCopy, initialized: false });
+    composer.persistence.draftId.value = 'conflicting-draft';
+    composer.persistence.serverRevision.value = 3;
+    composer.subject.value = 'Earlier draft with a PDF';
+    composer.attachments.value = [
+      { filename: 'report.pdf', mime_type: 'application/pdf', content_base64: 'JVBERi0=' },
+    ];
+    composer.persistence.noteLoadedDraft(composer.attachments.value);
+    composer.initialized.value = true;
+
+    composer.attachments.value = [];
+    composer.save.mockRejectedValueOnce({ key: 'backend.errors.draftChangedElsewhere' });
+
+    await expect(flushOpenComposerDrafts()).resolves.toBe(false);
+    expect(keepLocalCopy).not.toHaveBeenCalled();
   });
 
   it('reaches every open composer and forgets the closed ones', async () => {

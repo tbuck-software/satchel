@@ -617,9 +617,6 @@
     "you": "You"
   },
   "compose": {
-    "quit": {
-      "blocked": "Satchel stayed open: a draft could not be saved."
-    },
     "status": {
       "saveFailed": "Saving failed: {error}"
     },
@@ -805,6 +802,11 @@
       "compose": "New email",
       "settings": "Settings…",
       "sync": "Sync email"
+    },
+    "draftQuit": {
+      "anyway": "Quit Anyway",
+      "message": "Quitting now may lose unsaved drafts and attachments.",
+      "wait": "Keep Waiting"
     },
     "notifications": {
       "actionFailedMessage": "{action} was saved locally. Server sync will keep trying.",

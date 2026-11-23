@@ -40,6 +40,10 @@ export type UiStrings = {
      */
     notification_action_not_applied_message: string;
     compose_window_title: string;
+    draft_quit_message: string;
+    draft_quit_wait: string;
+    draft_quit_anyway: string;
+    draft_quit_cancel: string;
     oauth_invalid_title: string;
     oauth_invalid_callback: string;
     oauth_invalid_state: string;
