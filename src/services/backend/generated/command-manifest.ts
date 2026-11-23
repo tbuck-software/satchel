@@ -80,6 +80,12 @@ export default {
         "acknowledge_draft_flush": {
             "kind": "object",
             "fields": {
+                "roundId": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
                 "saved": {
                     "required": true,
                     "shape": {
@@ -6439,6 +6445,30 @@ export default {
                     }
                 },
                 "dock_sync": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "draft_quit_anyway": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "draft_quit_cancel": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "draft_quit_message": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "draft_quit_wait": {
                     "required": false,
                     "shape": {
                         "kind": "value"

@@ -42,6 +42,8 @@ export interface ComposerDraftPersistenceOptions {
   status: Ref<ComposerStatus | null>;
   buildInput: () => Omit<BackendDraftInput, 'id' | 'expectedRevision'> | null;
   drafts: ComposerDraftPersistenceAdapter;
+  /** A restored draft stays in local recovery storage until a sender is chosen. */
+  canSave?: () => boolean;
   t: ComposerDraftTranslator;
   autosaveIntervalMs?: number;
   /** How long typing has to pause before the draft is compared again. */
@@ -93,6 +95,10 @@ export async function flushOpenComposerDrafts(): Promise<boolean> {
   return results.every((result) => result.status === 'fulfilled' && result.value);
 }
 
+export function draftFlushFailureMessage(t: ComposerDraftTranslator): string {
+  return t('compose.quit.blocked');
+}
+
 /** Owns draft identity, save coalescing, autosave, and terminal cleanup. */
 export function useComposerDraftPersistence(options: ComposerDraftPersistenceOptions) {
   const draftId = ref<string | null>(null);
@@ -102,9 +108,10 @@ export function useComposerDraftPersistence(options: ComposerDraftPersistenceOpt
   const saveError = ref<ComposerSaveError | null>(null);
   let revision = 0;
   let paused = false;
+  let savedWithAttachments = false;
   let autosaveTimer: ReturnType<typeof setInterval> | null = null;
 
-  const runner = createCoalescingRunner(saveOnce, () => dirty.value);
+  const runner = createCoalescingRunner(saveOnce, () => dirty.value && saveError.value?.kind !== 'conflict');
 
   // Building the input serialises the whole body, so it is not done per
   // keystroke. Every path that reads `dirty` settles the tracker first.
@@ -121,6 +128,10 @@ export function useComposerDraftPersistence(options: ComposerDraftPersistenceOpt
   watch(options.initialized, (initialized) => {
     if (initialized) changes.rebaseline();
   }, { flush: 'sync' });
+
+  function noteLoadedDraft(attachments: BackendDraftInput['attachments']) {
+    savedWithAttachments = Boolean(attachments?.length);
+  }
 
   /** Whether the editor holds anything the disk does not, as of right now. */
   function hasUnsavedChanges() {
@@ -146,7 +157,7 @@ export function useComposerDraftPersistence(options: ComposerDraftPersistenceOpt
   async function saveOnce(): Promise<DraftSaveOutcome> {
     changes.settle();
     const input = options.buildInput();
-    if (!input || isEmptyNewDraft(input)) {
+    if (!input || isEmptyNewDraft(input) || options.canSave?.() === false) {
       return { id: null, remoteError: null, error: null };
     }
 
@@ -161,10 +172,10 @@ export function useComposerDraftPersistence(options: ComposerDraftPersistenceOpt
         id: draftId.value,
         expectedRevision: serverRevision.value,
       });
-      if (draft) {
-        draftId.value = draft.id;
-        serverRevision.value = draft.revision ?? null;
-      }
+      if (!draft) return { id: null, remoteError: null, error: null };
+      draftId.value = draft.id;
+      serverRevision.value = draft.revision ?? null;
+      noteLoadedDraft(input.attachments);
       // Edits made while the save ran count as changes now, not after a pause.
       changes.settle();
       dirty.value = revision !== revisionAtStart;
@@ -174,9 +185,9 @@ export function useComposerDraftPersistence(options: ComposerDraftPersistenceOpt
       // The local copy is durable even when the provider rejects its remote
       // copy. Report that state without turning a successful local save into
       // a failure that would keep the composer open.
-      const remoteError = draft?.remote_error?.trim();
+      const remoteError = draft.remote_error?.trim();
       return {
-        id: draft?.id ?? null,
+        id: draft.id,
         remoteError: remoteError || null,
         error: null,
       };
@@ -293,14 +304,25 @@ export function useComposerDraftPersistence(options: ComposerDraftPersistenceOpt
 
   /** What a quit waits for. `false` keeps the app open: the edit is not on disk. */
   async function flushBeforeExit(): Promise<boolean> {
-    if (options.sending.value || paused) return true;
-    if (hasUnsavedChanges() && saveError.value?.kind !== 'conflict') {
-      await persist({ silent: true });
+    const activeSave = runner.settle();
+    if (activeSave) await activeSave;
+    if (options.sending.value || paused) {
+      return !hasUnsavedChanges() && saveError.value === null;
     }
-    // Sent or discarded elsewhere: no save can succeed, so a quit waiting for
-    // one would never happen. The next composer offers the device copy back.
-    if (saveError.value?.kind === 'conflict') return options.keepLocalCopy?.() ?? false;
-    return saveError.value === null;
+
+    while (saveError.value?.kind !== 'conflict' && options.canSave?.() !== false && hasUnsavedChanges()) {
+      const input = options.buildInput();
+      if (!input) return false;
+      if (isEmptyNewDraft(input)) return true;
+      if (!await persist({ silent: true })) break;
+    }
+    if (saveError.value?.kind === 'conflict' || options.canSave?.() === false) {
+      // Recovery omits attachments and can load the conflicting draft's old
+      // files back. Save as new is the only way to retain this editor's set.
+      if (savedWithAttachments || options.buildInput()?.attachments?.length) return false;
+      return options.keepLocalCopy?.() ?? false;
+    }
+    return !hasUnsavedChanges() && saveError.value === null;
   }
 
   openComposerFlushes.add(flushBeforeExit);
@@ -320,6 +342,7 @@ export function useComposerDraftPersistence(options: ComposerDraftPersistenceOpt
     hasUnsavedChanges,
     saveError,
     recordDraftConflict,
+    noteLoadedDraft,
     saveAsNewDraft,
     persist,
     startAutosave,

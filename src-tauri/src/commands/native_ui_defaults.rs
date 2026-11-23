@@ -46,6 +46,10 @@ fn english() -> UiStrings {
         notification_action_not_applied_message:
             "{action} was not applied. Please open Satchel and try again.".into(),
         compose_window_title: "New message — Satchel".into(),
+        draft_quit_message: "Quitting now may lose unsaved drafts and attachments.".into(),
+        draft_quit_wait: "Keep Waiting".into(),
+        draft_quit_anyway: "Quit Anyway".into(),
+        draft_quit_cancel: "Cancel".into(),
         oauth_invalid_title: "Invalid OAuth callback".into(),
         oauth_invalid_callback: "Satchel could not process the callback.".into(),
         oauth_invalid_state: "Satchel received an invalid state value.".into(),
@@ -99,6 +103,10 @@ fn german() -> UiStrings {
         notification_action_not_applied_message:
             "{action} wurde nicht ausgeführt. Bitte Satchel öffnen und erneut versuchen.".into(),
         compose_window_title: "Neue Nachricht — Satchel".into(),
+        draft_quit_message: "Änderungen und Anhänge können verloren gehen.".into(),
+        draft_quit_wait: "Weiter warten".into(),
+        draft_quit_anyway: "Trotzdem beenden".into(),
+        draft_quit_cancel: "Abbrechen".into(),
         oauth_invalid_title: "OAuth-Rückruf ungültig".into(),
         oauth_invalid_callback: "Satchel konnte die Rückleitung nicht verarbeiten.".into(),
         oauth_invalid_state: "Satchel hat einen ungültigen Statuswert erhalten.".into(),

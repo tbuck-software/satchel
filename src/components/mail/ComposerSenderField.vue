@@ -23,6 +23,7 @@ defineProps<{
   choices: ComposerIdentityGroup[];
   value: string;
   disabled: boolean;
+  needsSelection?: boolean;
 }>();
 
 const emit = defineEmits<{ change: [key: string] }>();
@@ -39,6 +40,7 @@ const emit = defineEmits<{ change: [key: string] }>();
       :value="value"
       @change="emit('change', ($event.target as HTMLSelectElement).value)"
     >
+      <option v-if="needsSelection" value="" disabled>{{ $t('compose.backup.selectSender') }}</option>
       <template v-if="choices.length > 1">
         <optgroup
           v-for="group in choices"

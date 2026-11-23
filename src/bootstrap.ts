@@ -99,6 +99,10 @@ function useNativeUiStrings(): void {
       tray_hide: t('nativeUi.tray.hide'),
       tray_quit: t('nativeUi.tray.quit'),
       tray_briefing: t('nativeUi.tray.briefing'),
+      draft_quit_message: t('nativeUi.draftQuit.message'),
+      draft_quit_wait: t('nativeUi.draftQuit.wait'),
+      draft_quit_anyway: t('nativeUi.draftQuit.anyway'),
+      draft_quit_cancel: t('common.cancel'),
       dock_compose: t('nativeUi.dock.compose'),
       dock_calendar: t('nativeUi.dock.calendar'),
       dock_sync: t('nativeUi.dock.sync'),
@@ -183,13 +187,8 @@ function useNativeUiStrings(): void {
 /**
  * Answer the backend's last question before it quits.
  *
- * Quitting through the tray menu or ⌘Q ended the process outright, so up to ten
- * seconds of typing — the autosave interval — went with it, without a word. The
- * backend now asks every window that can hold a draft to write, and leaves once
- * they have all answered or its grace period runs out. A window with no
- * composer open answers straight away: the backend waits for a count of
- * windows, not for content. A window whose draft could not be written says
- * so, and the backend stays open instead of exiting over it.
+ * Each window answers after its composers finish saving. If a reply takes
+ * longer than the grace period, the native prompt lets the user decide.
  */
 function useDraftFlushOnExit(): void {
   if (!backendSupportsNativeCommands()) return;
@@ -200,26 +199,20 @@ function useDraftFlushOnExit(): void {
   void (async () => {
     try {
       const mod = await import('@tauri-apps/api/event');
-      const stop = await mod.listen('app:flush-drafts', async () => {
+      async function flushDrafts(acknowledge: (saved: boolean) => Promise<void>) {
         let saved = false;
         try {
-          const { flushOpenComposerDrafts } = await import('@/composables/useComposerDraftPersistence');
+          const { flushOpenComposerDrafts, draftFlushFailureMessage } = await import('@/composables/useComposerDraftPersistence');
           saved = await flushOpenComposerDrafts();
+          if (!saved) toast.error(draftFlushFailureMessage(t));
         } finally {
-          await backendAcknowledgeDraftFlush(saved);
-          if (!saved) toast.error(t('compose.quit.blocked'));
+          await acknowledge(saved);
         }
-      });
-      const stopUpdate = await mod.listen<string>('app-update:flush', async ({ payload }) => {
-        let saved = false;
-        try {
-          const { flushOpenComposerDrafts } = await import('@/composables/useComposerDraftPersistence');
-          saved = await flushOpenComposerDrafts();
-        } finally {
-          await backendAcknowledgeAppUpdateFlush(payload, saved);
-          if (!saved) toast.error(t('compose.quit.blocked'));
-        }
-      });
+      }
+      const stop = await mod.listen<string>('app:flush-drafts', ({ payload }) =>
+        flushDrafts((saved) => backendAcknowledgeDraftFlush(payload, saved)));
+      const stopUpdate = await mod.listen<string>('app-update:flush', ({ payload }) =>
+        flushDrafts((saved) => backendAcknowledgeAppUpdateFlush(payload, saved)));
       const stopUpdateError = await mod.listen<string>('app-update:failed', ({ payload }) => {
         toast.error(backendErrorLabel(payload));
       });

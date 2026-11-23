@@ -152,6 +152,7 @@ const mailMergeStore = useMailMergeStore();
 const supportsBackend = composerTransport.commandsAvailable();
 
 const accountId = ref<string>('');
+const missingBackupSender = ref<string | null>(null);
 const aliasEmail = ref<string | null>(null);
 const to = ref<string[]>([...props.initialTo]);
 const cc = ref<string[]>([...props.initialCc]);
@@ -405,7 +406,9 @@ watch(initialized, (ready) => {
 
 const accounts = computed(() => accountsStore.emailAccounts);
 const activeAccount = computed(() =>
-  accounts.value.find((a) => a.id === accountId.value) ?? accounts.value[0],
+  missingBackupSender.value !== null
+    ? undefined
+    : accounts.value.find((a) => a.id === accountId.value) ?? accounts.value[0],
 );
 const accountAliases = computed(() =>
   activeAccount.value ? aliasesStore.aliasesFor(activeAccount.value.id) : [],
@@ -436,7 +439,7 @@ const identityChoices = computed(() =>
 );
 
 const currentIdentityKey = computed(
-  () => `${accountId.value}|${fromAddress.value.toLowerCase()}`,
+  () => missingBackupSender.value === null ? `${accountId.value}|${fromAddress.value.toLowerCase()}` : '',
 );
 
 function onIdentitySelected(key: string) {
@@ -447,8 +450,9 @@ function onIdentitySelected(key: string) {
   if (choice.accountId !== accountId.value) contextThreadId.value = null;
   accountId.value = choice.accountId;
   aliasEmail.value = choice.aliasEmail;
+  missingBackupSender.value = null;
 }
-const fromAddress = computed(() => aliasEmail.value ?? activeAccount.value?.email ?? '');
+const fromAddress = computed(() => missingBackupSender.value ?? aliasEmail.value ?? activeAccount.value?.email ?? '');
 const draftReplyTo = ref<string | null>(null);
 const replyTo = computed(() => draftReplyTo.value ?? (aliasEmail.value ? activeAccount.value?.email ?? null : null));
 const {
@@ -500,6 +504,7 @@ const {
   serverRevision: draftRevision,
   saveError,
   recordDraftConflict,
+  noteLoadedDraft,
   saveAsNewDraft,
   persist: persistDraft,
   startAutosave,
@@ -512,7 +517,10 @@ const {
   initialized,
   sending,
   status,
-  buildInput: () => activeAccount.value && !draftLoadFailed.value ? composerDraftInput(currentDraftState()) : null,
+  buildInput: () => (activeAccount.value || missingBackupSender.value !== null) && !draftLoadFailed.value
+    ? composerDraftInput(currentDraftState())
+    : null,
+  canSave: () => missingBackupSender.value === null,
   drafts: draftsStore,
   t,
   onCaughtUp: () => localBackup.clear(),
@@ -615,6 +623,13 @@ const sendBlocker = computed(() => composerSendBlocker({
   mergeRecipients: mergeSource.value ? mergeSource.value.rows.length : null,
 }, scheduleClock.now.value));
 const canSend = computed(() => sendBlocker.value === null && !draftConflict());
+const missingBackupSenderNotice = computed(() => {
+  const address = missingBackupSender.value;
+  if (address === null) return null;
+  return address
+    ? t('compose.backup.missingSender', { address })
+    : t('compose.backup.missingSenderUnknown');
+});
 /** What the sender can do about a disabled Send button, if anything. */
 const sendBlockedHint = computed(() => {
   if (draftConflict()) return saveError.value?.message ?? null;
@@ -622,7 +637,7 @@ const sendBlockedHint = computed(() => {
   if (!blocker) return null;
   switch (blocker.reason) {
     case 'draftLoadFailed': return t('compose.sendBlocked.draftLoadFailed');
-    case 'noAccount': return t('compose.sendBlocked.noAccount');
+    case 'noAccount': return missingBackupSender.value === null ? t('compose.sendBlocked.noAccount') : t('compose.backup.chooseSender');
     case 'noRecipients': return t('compose.sendBlocked.noRecipients');
     case 'invalidRecipients':
       return t('compose.sendBlocked.invalidRecipients', { addresses: blocker.invalid.join(', ') });
@@ -702,6 +717,7 @@ async function applyDraft(draft: BackendDraft) {
   body.value = draft.body ?? '';
   plainTextCompose.value = !draft.body_html;
   attachments.value = draft.attachments ?? [];
+  noteLoadedDraft(draft.attachments);
   bodyHtml.value = composerInlineAttachments.hydrateInlineImages(
     draft.body_html ?? null,
     attachments.value,
@@ -953,12 +969,13 @@ async function restoreBackup() {
     if (draft) await applyDraft(draft);
   }
   const { content } = offer;
-  if (accounts.value.some((account) => account.id === content.accountId)) {
-    accountId.value = content.accountId;
-    aliasEmail.value = content.fromAddress && content.fromAddress !== activeAccount.value?.email
-      ? content.fromAddress
-      : null;
-  }
+  const originalAccount = accounts.value.find((account) => account.id === content.accountId);
+  missingBackupSender.value = originalAccount ? null : content.fromAddress;
+  accountId.value = content.accountId;
+  aliasEmail.value = originalAccount && content.fromAddress && content.fromAddress !== originalAccount.email
+    ? content.fromAddress
+    : null;
+  if (!originalAccount) phoneFoldOpen.value = true;
   to.value = [...content.to];
   cc.value = [...content.cc];
   bcc.value = [...content.bcc];
@@ -984,7 +1001,7 @@ async function restoreBackup() {
   signatureVariant.value = content.signatureVariant;
   signatureOverrideText.value = content.signatureOverrideText;
   signatureOverrideHtml.value = content.signatureOverrideHtml;
-  localBackup.discardOrphan(offer);
+  if (originalAccount || localBackup.keep()) localBackup.discardOrphan(offer);
 }
 
 function dismissBackup() {
@@ -1163,7 +1180,9 @@ async function send() {
   scheduleClock.refresh();
   if (!canSend.value || !activeAccount.value) {
     // The shortcut has no greyed-out button to look at; say why nothing happened.
-    if (sendBlockedHint.value) status.value = { tone: 'warning', text: sendBlockedHint.value };
+    if (sendBlockedHint.value && missingBackupSender.value === null) {
+      status.value = { tone: 'warning', text: sendBlockedHint.value };
+    }
     return;
   }
   // A mail merge never sends from here: the review comes first.
@@ -1178,7 +1197,7 @@ async function send() {
   try {
     await pauseDraftPersistence();
     // A save already in flight can discover a conflict while Send is waiting.
-    if (draftConflict()) return;
+    if (draftConflict() || !activeAccount.value) return;
     status.value = null;
     const result = await composerTransport.sendMessage(sendPayload(activeAccount.value));
     sendCommitted = true;
@@ -1342,6 +1361,7 @@ async function startMailMerge(delaySeconds: number, count: number) {
   let committed = false;
   try {
     await pauseDraftPersistence();
+    if (activeAccount.value?.id !== account.id) return;
     const job = await mailMergeStore.createJob({
       message: { ...sendPayload(account), to: [], cc: [], bcc: [], scheduledFor: null, followUpAt: null },
       sourceLabel: source.label,
@@ -1583,7 +1603,13 @@ defineExpose({
     </div>
 
     <template v-else>
-    <div v-if="saveError || failedSetupParts.length > 0 || backupOffer" class="compose-notices">
+    <div v-if="saveError || failedSetupParts.length > 0 || backupOffer || missingBackupSenderNotice" class="compose-notices">
+      <AppBanner
+        v-if="missingBackupSenderNotice"
+        tone="warning"
+        :title="missingBackupSenderNotice"
+        :detail="$t('compose.backup.chooseSender')"
+      />
       <AppBanner
         v-if="saveError"
         tone="danger"
@@ -1630,6 +1656,7 @@ defineExpose({
         :id="senderFieldId"
         :choices="identityChoices"
         :value="currentIdentityKey"
+        :needs-selection="missingBackupSender !== null"
         :disabled="sending"
         @change="onIdentitySelected"
       />
@@ -1727,6 +1754,7 @@ defineExpose({
           :id="senderFieldId"
           :choices="identityChoices"
           :value="currentIdentityKey"
+          :needs-selection="missingBackupSender !== null"
           :disabled="sending"
           @change="onIdentitySelected"
         />

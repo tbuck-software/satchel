@@ -304,8 +304,8 @@ export function backendTakePendingNotificationThread(): Promise<string | null> {
   return invoke<string | null>('take_pending_notification_thread');
 }
 
-export async function backendAcknowledgeDraftFlush(saved: boolean): Promise<void> {
-  return invoke<void>('acknowledge_draft_flush', { saved });
+export async function backendAcknowledgeDraftFlush(roundId: string, saved: boolean): Promise<void> {
+  return invoke<void>('acknowledge_draft_flush', { roundId, saved });
 }
 
 export type { PushDevices as BackendPushDevices } from './generated/app/commands/background_sync/PushDevices';

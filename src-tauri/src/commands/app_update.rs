@@ -483,12 +483,14 @@ async fn flush_composers(app: &tauri::AppHandle, state: &UpdateState) -> Result<
 }
 
 #[cfg(desktop)]
-async fn install_pending_update(app: &tauri::AppHandle) -> CommandResult<()> {
+async fn install_pending_update(app: &tauri::AppHandle, drafts_flushed: bool) -> CommandResult<()> {
     use std::sync::atomic::Ordering::Relaxed;
     let state = app.state::<UpdateState>();
     let mut pending = state.pending.lock().await;
     let pending = pending.as_mut().ok_or("backend.errors.updateUnavailable")?;
-    flush_composers(app, &state).await?;
+    if !drafts_flushed {
+        flush_composers(app, &state).await?;
+    }
     if !pending.installed {
         let bytes = pending
             .bytes
@@ -539,7 +541,7 @@ pub async fn install_app_update(app: tauri::AppHandle) -> CommandResult<()> {
         if state.installing.swap(true, Relaxed) {
             return Err("backend.errors.updateUnavailable".into());
         }
-        let result = install_pending_update(&app).await;
+        let result = install_pending_update(&app, false).await;
         state.installing.store(false, Relaxed);
         result?;
         app.request_restart();
@@ -559,8 +561,15 @@ pub(crate) fn exit_is_prepared(app: &tauri::AppHandle) -> bool {
         .load(std::sync::atomic::Ordering::Relaxed)
 }
 
-/// Install only a complete, signature-verified download. No network work is
-/// started by Quit; failed saves or installation leave the app open to retry.
+#[cfg(desktop)]
+pub(crate) fn installation_in_progress(app: &tauri::AppHandle) -> bool {
+    app.state::<UpdateState>()
+        .installing
+        .load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The regular quit has already flushed drafts. Install only a complete,
+/// signature-verified download and leave the app open if installation fails.
 #[cfg(desktop)]
 pub(crate) fn install_on_exit(app: &tauri::AppHandle) -> bool {
     use std::sync::atomic::Ordering::Relaxed;
@@ -576,7 +585,7 @@ pub(crate) fn install_on_exit(app: &tauri::AppHandle) -> bool {
     }
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        let result = install_pending_update(&app).await;
+        let result = install_pending_update(&app, true).await;
         app.state::<UpdateState>().installing.store(false, Relaxed);
         match result {
             Ok(()) => crate::exit_now(&app),

@@ -48,7 +48,7 @@ const COMMANDS: &[&str] = &[
     "list_messages_preview",
     "transition_threads",
     "take_pending_open_with",
-    "acknowledge_draft_flush",
+    "acknowledge_draft_flush", // Each reply carries its quit round ID.
     "abort_oauth_flow",
     "list_open_oauth_flows",
     "list_message_bodies",

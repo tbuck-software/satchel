@@ -1027,7 +1027,7 @@ pub fn run() {
             #[cfg(desktop)]
             if let tauri::RunEvent::ExitRequested { api, .. } = &event {
                 if !commands::app_update::exit_is_prepared(app)
-                    && (commands::app_update::install_on_exit(app) || request_draft_flush(app)) {
+                    && commands::draft_flush::request_exit(app) {
                     api.prevent_exit();
                 }
             }
@@ -1035,123 +1035,6 @@ pub fn run() {
                 app.state::<AppState>().delivery_reconciler.shutdown();
             }
         });
-}
-
-/// How long a quit waits for open composers to put their drafts on disk.
-///
-/// One IPC round trip and one write, no more. A window that never answers — a
-/// frozen webview, a page mid-navigation — must not turn Quit into a hang.
-#[cfg(desktop)]
-const DRAFT_FLUSH_GRACE: std::time::Duration = std::time::Duration::from_millis(1000);
-
-/// Set once the flush round has been asked for, so the exit that follows it is
-/// not held back a second time. Cleared again when a window reports a failed
-/// save, so the next quit asks again.
-#[cfg(desktop)]
-static DRAFT_FLUSH_REQUESTED: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
-
-#[cfg(desktop)]
-#[derive(Debug, PartialEq, Eq)]
-enum DraftFlushStep {
-    Wait,
-    Exit,
-    /// A window could not save its draft: stay open and show it.
-    Abort,
-}
-
-/// One quit attempt waiting for the composer windows to answer.
-#[cfg(desktop)]
-#[derive(Debug)]
-struct DraftFlushRound {
-    outstanding: usize,
-    settled: bool,
-}
-
-#[cfg(desktop)]
-impl DraftFlushRound {
-    fn new(windows: usize) -> Self {
-        Self {
-            outstanding: windows,
-            settled: false,
-        }
-    }
-
-    fn acknowledge(&mut self, saved: bool) -> DraftFlushStep {
-        if self.settled {
-            return DraftFlushStep::Wait;
-        }
-        if !saved {
-            self.settled = true;
-            return DraftFlushStep::Abort;
-        }
-        self.outstanding = self.outstanding.saturating_sub(1);
-        if self.outstanding == 0 {
-            self.settled = true;
-            DraftFlushStep::Exit
-        } else {
-            DraftFlushStep::Wait
-        }
-    }
-
-    /// A window that never answers must not turn Quit into a hang.
-    fn deadline(&mut self) -> DraftFlushStep {
-        if self.settled {
-            return DraftFlushStep::Wait;
-        }
-        self.settled = true;
-        DraftFlushStep::Exit
-    }
-}
-
-/// Ask every window that can hold an unsaved draft to write it, and answer
-/// whether the exit has to wait.
-///
-/// Only `main` and the composer popouts are asked: the message viewer and the
-/// tray popover hold nothing that could be lost. The exit follows the last
-/// acknowledgement or the deadline; a window that reports a failed save stops
-/// it and is brought to the front.
-#[cfg(desktop)]
-fn request_draft_flush(app: &tauri::AppHandle) -> bool {
-    use std::sync::atomic::Ordering;
-
-    if DRAFT_FLUSH_REQUESTED.swap(true, Ordering::SeqCst) {
-        return false;
-    }
-    let windows: Vec<_> = app
-        .webview_windows()
-        .into_keys()
-        .filter(|label| label == "main" || label.starts_with("compose-"))
-        .collect();
-    if windows.is_empty() {
-        return false;
-    }
-
-    let round = commands::draft_flush::begin(windows);
-    let _ = app.emit("app:flush-drafts", ());
-
-    let app = app.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(DRAFT_FLUSH_GRACE);
-        let step = round
-            .lock()
-            .map(|mut round| round.progress.deadline())
-            .unwrap_or(DraftFlushStep::Exit);
-        settle_draft_flush(&app, step, None);
-    });
-    true
-}
-
-#[cfg(desktop)]
-fn settle_draft_flush(app: &tauri::AppHandle, step: DraftFlushStep, window: Option<&str>) {
-    match step {
-        DraftFlushStep::Wait => {}
-        DraftFlushStep::Exit => exit_now(app),
-        DraftFlushStep::Abort => {
-            DRAFT_FLUSH_REQUESTED.store(false, std::sync::atomic::Ordering::SeqCst);
-            commands::draft_editors::focus_window(app, window.unwrap_or("main"));
-        }
-    }
 }
 
 /// Leave, from whichever thread got there first. A second call after the app is
@@ -1289,30 +1172,7 @@ fn plugin_event_payload(
 
 #[cfg(all(test, desktop))]
 mod tests {
-    use super::{
-        classify_open_with, opens_a_file_of_its_own, DraftFlushRound, DraftFlushStep, OpenWithKind,
-    };
-
-    #[test]
-    fn a_failed_draft_save_stops_the_quit() {
-        let mut round = DraftFlushRound::new(2);
-        assert_eq!(round.acknowledge(true), DraftFlushStep::Wait);
-        assert_eq!(round.acknowledge(false), DraftFlushStep::Abort);
-        // The deadline must not exit behind the window that asked to stay.
-        assert_eq!(round.deadline(), DraftFlushStep::Wait);
-    }
-
-    #[test]
-    fn the_quit_follows_the_last_successful_save_or_the_deadline() {
-        let mut round = DraftFlushRound::new(2);
-        assert_eq!(round.acknowledge(true), DraftFlushStep::Wait);
-        assert_eq!(round.acknowledge(true), DraftFlushStep::Exit);
-        assert_eq!(round.deadline(), DraftFlushStep::Wait);
-
-        let mut silent = DraftFlushRound::new(1);
-        assert_eq!(silent.deadline(), DraftFlushStep::Exit);
-        assert_eq!(silent.acknowledge(false), DraftFlushStep::Wait);
-    }
+    use super::{classify_open_with, opens_a_file_of_its_own, OpenWithKind};
 
     #[test]
     fn thread_change_payload_carries_the_whole_batch() {

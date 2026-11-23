@@ -508,8 +508,8 @@ describe('bootstrap entries', () => {
         .mock.calls.find(([event]) => event === 'app:flush-drafts');
       expect(registration, entry.name).toBeDefined();
 
-      await (registration![1] as (event: unknown) => Promise<void>)({});
-      expect(backendAcknowledgeDraftFlush, entry.name).toHaveBeenCalledWith(true);
+      await registration![1]({ event: 'app:flush-drafts', id: 1, payload: 'round-1' });
+      expect(backendAcknowledgeDraftFlush, entry.name).toHaveBeenCalledWith('round-1', true);
 
       wrapper.unmount();
     }
@@ -524,9 +524,9 @@ describe('bootstrap entries', () => {
         .mocked(listen)
         .mock.calls.find(([event]) => event === 'app:flush-drafts');
 
-      await (registration![1] as (event: unknown) => Promise<void>)({});
+      await registration![1]({ event: 'app:flush-drafts', id: 1, payload: 'round-2' });
 
-      expect(backendAcknowledgeDraftFlush).toHaveBeenCalledWith(false);
+      expect(backendAcknowledgeDraftFlush).toHaveBeenCalledWith('round-2', false);
       expect(useToast().state.toasts.map((toast) => toast.message)).toContain(
         'Satchel stayed open: a draft could not be saved.',
       );

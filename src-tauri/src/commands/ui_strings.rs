@@ -52,6 +52,10 @@ pub struct UiStrings {
     /// Desktop quick actions fail before anything is saved, unlike Android's.
     pub notification_action_not_applied_message: String,
     pub compose_window_title: String,
+    pub draft_quit_message: String,
+    pub draft_quit_wait: String,
+    pub draft_quit_anyway: String,
+    pub draft_quit_cancel: String,
     pub oauth_invalid_title: String,
     pub oauth_invalid_callback: String,
     pub oauth_invalid_state: String,
