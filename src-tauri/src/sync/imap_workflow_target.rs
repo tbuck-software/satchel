@@ -1166,6 +1166,7 @@ mod tests {
             remote_uidvalidity: Some(uidvalidity),
             reset_folder: false,
             snapshot_required: false,
+            interruption: None,
             next: SyncCheckpoint { cursor: None },
         }
     }
@@ -1270,6 +1271,7 @@ mod tests {
                     remote_uidvalidity: Some(7),
                     reset_folder: true,
                     snapshot_required: true,
+                    interruption: None,
                     next: SyncCheckpoint {
                         cursor: Some(
                             serde_json::json!({
@@ -1286,6 +1288,7 @@ mod tests {
                     remote_uidvalidity: Some(7),
                     reset_folder: false,
                     snapshot_required: true,
+                    interruption: None,
                     next: SyncCheckpoint {
                         cursor: Some(
                             serde_json::json!({

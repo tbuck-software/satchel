@@ -95,6 +95,7 @@ pub(crate) async fn upsert_provider_message(
     )
     .await?
     .remove(0)
+    .map(|_| ())
 }
 
 struct StoredMessage {
@@ -229,6 +230,8 @@ async fn provider_draft_attachments_changed(
 
 pub(crate) const INGEST_BATCH_SIZE: usize = 100;
 
+/// The per-message boolean says whether a row was stored. Preserving a local
+/// draft counts as a handled envelope, but cannot authorize remote deletion.
 pub(crate) async fn upsert_provider_messages(
     app: Option<&AppHandle>,
     pool: &SqlitePool,
@@ -243,7 +246,7 @@ pub(crate) async fn upsert_provider_messages(
     messages: &[MessageEnvelope],
     events: Option<&Arc<EventBus>>,
     cutoff: Option<&str>,
-) -> Result<Vec<Result<(), String>>, String> {
+) -> Result<Vec<Result<bool, String>>, String> {
     let mut results = Vec::with_capacity(messages.len());
     for chunk in messages.chunks(INGEST_BATCH_SIZE) {
         let body_html = prepare_message_html(chunk).await?;
@@ -276,10 +279,10 @@ pub(crate) async fn upsert_provider_messages(
                         .commit()
                         .await
                         .map_err(|error| error.to_string())?;
+                    results.push(Ok(value.is_some()));
                     if let Some(value) = value {
                         stored.push((message, value));
                     }
-                    results.push(Ok(()));
                 }
                 Err(error) => {
                     savepoint
@@ -2510,7 +2513,7 @@ mod tests {
     async fn ingest_many(
         pool: &sqlx::SqlitePool,
         messages: &[MessageEnvelope],
-    ) -> Vec<Result<(), String>> {
+    ) -> Vec<Result<bool, String>> {
         let cutoff: Option<String> = sqlx::query_scalar(
             "SELECT COALESCE(NULLIF(COALESCE(incoming_effects_cutoff, last_sync_at), ''),
                          NULLIF(created_at, ''))

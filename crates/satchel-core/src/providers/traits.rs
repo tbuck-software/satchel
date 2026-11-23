@@ -305,6 +305,10 @@ pub struct SyncBatch {
     /// only when their incremental cursor expired (or flags require it), so an
     /// ordinary poll stays proportional to the changes.
     pub snapshot_required: bool,
+    /// A fetch stopped after making progress. Commit its messages and cursor
+    /// before reporting the failure so the next sync can retry what remains.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interruption: Option<String>,
     pub next: SyncCheckpoint,
 }
 

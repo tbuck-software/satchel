@@ -1405,6 +1405,7 @@ mod tests {
             remote_uidvalidity: Some(111),
             reset_folder: false,
             snapshot_required: false,
+            interruption: None,
             next: Default::default(),
         };
         super::reconcile_imap_folder_rename(

@@ -2089,6 +2089,7 @@ impl ImapProvider {
                 remote_uidvalidity: Some(server_uidvalidity),
                 reset_folder,
                 snapshot_required: true,
+                interruption: None,
                 next: SyncCheckpoint { cursor },
             });
         }
@@ -2287,6 +2288,7 @@ impl ImapProvider {
             remote_uidvalidity: Some(server_uidvalidity),
             reset_folder,
             snapshot_required: true,
+            interruption: None,
             next: SyncCheckpoint {
                 cursor: Some(next_cursor),
             },
@@ -2379,6 +2381,7 @@ impl MailProvider for ImapProvider {
             remote_uidvalidity: Some(server_uidvalidity),
             reset_folder: false,
             snapshot_required: false,
+            interruption: None,
             next: SyncCheckpoint { cursor: None },
         }))
     }
