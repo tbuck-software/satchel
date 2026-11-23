@@ -70,37 +70,6 @@ impl fmt::Debug for UnlockedSmimeSession {
     }
 }
 
-#[cfg(test)]
-mod unlock_session_tests {
-    use super::{UnlockedPgpSession, UnlockedSmimeSession, Zeroizing};
-
-    #[test]
-    fn pgp_session_debug_redacts_passphrase() {
-        let passphrase = "synthetic-openpgp-passphrase";
-        let session = UnlockedPgpSession {
-            key_id: "fixture-key".into(),
-            passphrase: Zeroizing::new(passphrase.into()),
-            unlocked_at: chrono::Utc::now(),
-        };
-        let debug = format!("{session:?}");
-        assert!(!debug.contains(passphrase));
-        assert!(debug.contains("[redacted]"));
-    }
-
-    #[test]
-    fn smime_session_debug_redacts_passphrase() {
-        let passphrase = "synthetic-smime-passphrase";
-        let session = UnlockedSmimeSession {
-            cert_id: "fixture-cert".into(),
-            passphrase: Some(Zeroizing::new(passphrase.into())),
-            unlocked_at: chrono::Utc::now(),
-        };
-        let debug = format!("{session:?}");
-        assert!(!debug.contains(passphrase));
-        assert!(debug.contains("[redacted]"));
-    }
-}
-
 #[derive(Clone)]
 pub struct AppState {
     pub queue: Arc<SyncQueue>,
@@ -1274,5 +1243,36 @@ mod tests {
         for path in [invitation, message, other] {
             let _ = std::fs::remove_file(path);
         }
+    }
+}
+
+#[cfg(test)]
+mod unlock_session_tests {
+    use super::{UnlockedPgpSession, UnlockedSmimeSession, Zeroizing};
+
+    #[test]
+    fn pgp_session_debug_redacts_passphrase() {
+        let passphrase = "synthetic-openpgp-passphrase";
+        let session = UnlockedPgpSession {
+            key_id: "fixture-key".into(),
+            passphrase: Zeroizing::new(passphrase.into()),
+            unlocked_at: chrono::Utc::now(),
+        };
+        let debug = format!("{session:?}");
+        assert!(!debug.contains(passphrase));
+        assert!(debug.contains("[redacted]"));
+    }
+
+    #[test]
+    fn smime_session_debug_redacts_passphrase() {
+        let passphrase = "synthetic-smime-passphrase";
+        let session = UnlockedSmimeSession {
+            cert_id: "fixture-cert".into(),
+            passphrase: Some(Zeroizing::new(passphrase.into())),
+            unlocked_at: chrono::Utc::now(),
+        };
+        let debug = format!("{session:?}");
+        assert!(!debug.contains(passphrase));
+        assert!(debug.contains("[redacted]"));
     }
 }
