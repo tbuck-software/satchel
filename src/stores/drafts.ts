@@ -69,7 +69,12 @@ export const useDraftsStore = defineStore('drafts', () => {
       const draft = await backendLoadDraft(id);
       if (draft?.content_error) throw new Error(backendErrorLabel(draft.content_error), { cause: draft.content_error });
       const idx = items.value.findIndex((item) => item.id === id);
-      if (draft && idx >= 0) items.value.splice(idx, 1, draft);
+      // No row means the draft was sent or discarded elsewhere; keeping the
+      // entry would let Reply reopen it again and again.
+      if (idx >= 0) {
+        if (draft) items.value.splice(idx, 1, draft);
+        else items.value.splice(idx, 1);
+      }
       return draft;
     });
   }

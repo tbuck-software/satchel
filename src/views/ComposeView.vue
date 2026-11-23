@@ -1204,6 +1204,9 @@ async function send() {
     sendCommitted = true;
     finishDraftPersistence();
     localBackup.clear();
+    // The send took the draft row. Reply picks a thread's draft from this
+    // list, so a stale entry would reopen a draft that no longer exists.
+    void draftsStore.load();
     // The draft has left this editor; Undo in another window may reopen it.
     editorClaim.release();
     if (result.status === 'sent') {

@@ -246,6 +246,17 @@ describe('drafts store', () => {
     expect(drafts.lastError).toContain('Work/Drafts');
   });
 
+  it('forgets a listed draft the backend no longer has, so Reply stops reopening it', async () => {
+    listMock.mockResolvedValueOnce([storedDraft({ thread_id: 'thread-1' })]);
+    const drafts = useDraftsStore();
+    await drafts.load();
+    vi.mocked(backendLoadDraft).mockResolvedValueOnce(null);
+
+    await expect(drafts.fetchOne('draft-1')).resolves.toBeNull();
+
+    expect(drafts.items).toEqual([]);
+  });
+
   it('edits, deletes and undoes a valid draft while an unavailable row remains in the real store', async () => {
     const blocked = storedDraft({ id: 'blocked', body: '', content_error: 'backend.errors.imapUidValidityMissing' });
     const edited = storedDraft({ body: 'Edited beside an unavailable draft' });
