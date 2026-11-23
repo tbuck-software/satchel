@@ -65,7 +65,7 @@ zeroize = "1.8"
 # to `satchel-core` with the modules that use them.
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
 mdns-sd = "0.17.1"
-whoami = "1.6"
+whoami = "2.1"
 wasmtime = { version = "48.0.10", features = ["component-model"] }
 wasmtime-wasi = "48.0.10"
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
