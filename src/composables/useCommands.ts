@@ -37,16 +37,16 @@ const VIEW_ICONS: Partial<Record<string, CommandIconName>> = {
   later: 'clock',
   aside: 'aside',
   done: 'done',
-  sent: 'forward',
-  drafts: 'compose',
-  outbox: 'export',
+  sent: 'send',
+  drafts: 'drafts',
+  outbox: 'outbox',
   'new-senders': 'account',
   calendar: 'calendar',
-  contacts: 'account',
+  contacts: 'contacts',
   tasks: 'task',
   trash: 'trash',
   spam: 'spam',
-  notifications: 'envelope',
+  notifications: 'notifications',
   blocked: 'block',
 };
 
@@ -216,7 +216,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       },
       ...reader.moveTargets.map((target): OmniCommand => ({
         id: `thread:move:${target.id}`,
-        icon: 'folder',
+        icon: 'move',
         title: t('commands.moveToFolder', { folder: target.label }),
         context: 'mail',
         keywords: t('commands.keywords.moveToFolder'),
@@ -436,7 +436,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       },
       {
         id: 'thread:file',
-        icon: 'folder' as const,
+        icon: 'move' as const,
         title: t('thread.actions.fileTo'),
         context: 'mail' as const,
         shortcut: hint('fileTo'),
@@ -554,7 +554,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
     },
     {
       id: 'oauth:gmail',
-      icon: 'account',
+      icon: 'envelope',
       title: t('commands.oauthGmail'),
       context: 'app',
       keywords: t('commands.keywords.oauthGmail'),
@@ -562,7 +562,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
     },
     {
       id: 'oauth:outlook',
-      icon: 'account',
+      icon: 'envelope',
       title: t('commands.oauthOutlook'),
       context: 'app',
       keywords: t('commands.keywords.oauthOutlook'),
@@ -587,7 +587,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
     },
     ...accounts.emailAccounts.map((account): OmniCommand => ({
       id: `account:visibility:${account.id}`,
-      icon: 'account',
+      icon: 'envelope',
       title: accounts.isVisible(account.id)
         ? t('accountVisibility.hideAccount', { account: account.displayName })
         : t('accountVisibility.showAccount', { account: account.displayName }),

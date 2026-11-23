@@ -37,6 +37,7 @@ import AppButton from '@/components/ui/AppButton.vue';
 import SplitButton from '@/components/ui/SplitButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
+import { CalendarCheck, CalendarClock, ChevronDown, Ellipsis, FileText, Mails, Paperclip, Save, Send, Trash2, X } from 'lucide';
 import { composerHtmlFromText, hasComposerHtmlHistory, hasComposerTextHistory, isComposerHistoryIntro } from '@/utils/composerHistory';
 import { useComposerBody } from '@/composables/useComposerBody';
 import type { ComposerMode } from '@/stores/composer';
@@ -1665,7 +1666,7 @@ defineExpose({
         @click="showCcBcc = !showCcBcc"
       >
         {{ $t('compose.recipients.ccBcc') }}
-        <AppIcon :class="{ 'cc-link-icon--open': showCcBcc }"><path d="m4 6 4 4 4-4" /></AppIcon>
+        <AppIcon :icon="ChevronDown" :class="{ 'cc-link-icon--open': showCcBcc }" />
       </AppButton>
     </div>
 
@@ -1680,7 +1681,7 @@ defineExpose({
       <!-- One line, so the name reads "Cc/Bcc, From: address". -->
       <span class="label">{{ mergeSource ? $t('common.from') : $t('compose.recipients.ccBccFrom') }}</span> <span class="compose-fold-from">{{ fromAddress }}</span>
       <!-- Says the row opens; as bare text it read like a caption. -->
-      <AppIcon class="compose-fold-chevron"><path d="m4.5 6.5 3.5 3.5 3.5-3.5" /></AppIcon>
+      <AppIcon :icon="ChevronDown" class="compose-fold-chevron" />
     </AppButton>
 
     <div
@@ -1818,7 +1819,7 @@ defineExpose({
           <!-- Named, not a bare ×: it drops the whole quote, and a lone glyph
                beside a sentence read as closing the note. -->
           <AppButton variant="ghost" size="sm" :title="$t('compose.context.remove')" :disabled="sending" @click="removeQuotedHistory">
-            <template #icon><AppIcon size="sm"><path d="m4 4 8 8M12 4l-8 8" /></AppIcon></template>
+            <template #icon><AppIcon :icon="X" size="sm" /></template>
             {{ $t('common.remove') }}
           </AppButton>
         </div>
@@ -1869,28 +1870,28 @@ defineExpose({
       </div>
       <p v-if="scheduledFor" class="schedule-info">
         {{ $t('compose.schedule.scheduled', { time: formatScheduled(scheduledFor) }) }}
-        <AppButton size="sm" variant="ghost" @click="scheduledFor = null"><template #icon><AppIcon><path d="m4 4 8 8M12 4l-8 8"/></AppIcon></template>{{ $t('compose.schedule.remove') }}</AppButton>
+        <AppButton size="sm" variant="ghost" @click="scheduledFor = null"><template #icon><AppIcon :icon="X" /></template>{{ $t('compose.schedule.remove') }}</AppButton>
       </p>
       <p v-if="followUpAt" class="schedule-info">
         {{ $t('compose.schedule.followUp', { time: formatScheduled(followUpAt) }) }}
-        <AppButton size="sm" variant="ghost" @click="followUpAt = null"><template #icon><AppIcon><path d="m4 4 8 8M12 4l-8 8"/></AppIcon></template>{{ $t('compose.schedule.remove') }}</AppButton>
+        <AppButton size="sm" variant="ghost" @click="followUpAt = null"><template #icon><AppIcon :icon="X" /></template>{{ $t('compose.schedule.remove') }}</AppButton>
       </p>
       <div class="footer-actions">
         <!-- The attachment label folds away when the composer is narrow. -->
         <AppButton variant="ghost" class="tool-button" :title="attachTitle" :aria-label="attachTitle" @click="attachmentZoneRef?.openPicker()">
-          <template #icon><AppIcon size="lg"><path d="M13.5 7.5l-6.2 6.2a3.5 3.5 0 01-5-5l6.5-6.5a2.5 2.5 0 013.5 3.5L5.8 12.2a1.5 1.5 0 01-2.1-2.1l6.1-6.1"/></AppIcon></template>
+          <template #icon><AppIcon :icon="Paperclip" size="lg" /></template>
           <span class="tool-label">{{ $t('compose.toolbar.attachShort') }}</span>
           <span v-if="attachments.length > 0" class="tool-count" aria-hidden="true">{{ attachments.length }}</span>
         </AppButton>
         <IconButton size="lg" v-if="supportsBackend" :title="$t('compose.toolbar.template')" :aria-label="$t('compose.toolbar.template')" @click="showTemplatePicker = true">
-          <AppIcon size="lg"><path d="M3 1.5h7l3 3v10H3z"/><path d="M10 1.5v3h3M5.5 8h5M5.5 11h4"/></AppIcon>
+          <AppIcon :icon="FileText" size="lg" />
         </IconButton>
         <IconButton size="lg" v-if="supportsBackend && !isPhone" :title="$t('availability.insert.button')" :aria-label="$t('availability.insert.button')" :disabled="sending" data-testid="compose-insert-availability" @click="showAvailability = true">
-          <AppIcon size="lg"><rect x="2" y="3" width="12" height="11" rx="1.5"/><path d="M5 1.5v3M11 1.5v3M2 6.5h12M5.5 10l1.5 1.5 3-3"/></AppIcon>
+          <AppIcon :icon="CalendarCheck" size="lg" />
         </IconButton>
         <details ref="moreSettingsRef" class="more-settings">
           <summary class="more-summary" :title="$t('compose.toolbar.more')" :aria-label="$t('compose.toolbar.more')">
-            <AppIcon size="lg"><circle cx="3" cy="8" r=".75" fill="currentColor" /><circle cx="8" cy="8" r=".75" fill="currentColor" /><circle cx="13" cy="8" r=".75" fill="currentColor" /></AppIcon><span v-if="advancedActive" class="tool-dot" aria-hidden="true" />
+            <AppIcon :icon="Ellipsis" size="lg" /><span v-if="advancedActive" class="tool-dot" aria-hidden="true" />
           </summary>
           <div class="advanced-panel">
             <div v-if="isPhone && supportsBackend && availableSignatures.length > 0" class="panel-row">
@@ -1905,7 +1906,7 @@ defineExpose({
                 @click="openSignatureMenu"
               >
                 <span class="panel-signature-name">{{ signatureName }}</span>
-                <AppIcon size="sm"><path d="m4 6 4 4 4-4" /></AppIcon>
+                <AppIcon :icon="ChevronDown" size="sm" />
               </AppButton>
             </div>
             <!-- A phone gets the words, not just an icon in the dock. -->
@@ -1917,7 +1918,7 @@ defineExpose({
                 data-testid="compose-insert-availability-panel"
                 @click="openAvailabilityFromPanel"
               >
-                <template #icon><AppIcon><rect x="2" y="3" width="12" height="11" rx="1.5"/><path d="M5 1.5v3M11 1.5v3M2 6.5h12M5.5 10l1.5 1.5 3-3"/></AppIcon></template>
+                <template #icon><AppIcon :icon="CalendarCheck" /></template>
                 {{ $t('availability.insert.button') }}
               </AppButton>
             </div>
@@ -1976,7 +1977,7 @@ defineExpose({
             <template v-if="supportsBackend && !contextThreadId && !mergeSource">
               <div class="panel-sep" role="separator" />
               <AppButton size="sm" variant="ghost" class="panel-merge" :disabled="sending" data-testid="compose-mail-merge" @click="openMailMerge">
-                <template #icon><AppIcon><path d="M2 4.5h8M2 8h8M2 11.5h5" /><path d="m11 9.5 3 2-3 2" /></AppIcon></template>
+                <template #icon><AppIcon :icon="Mails" /></template>
                 {{ $t('mailMerge.menuItem') }}
               </AppButton>
             </template>
@@ -1986,7 +1987,7 @@ defineExpose({
                 :disabled="sending || discarding"
                 @click="discardDraft()"
               >
-                <template #icon><AppIcon><path d="M2.5 4.5h11M6 2h4l.5 2.5h-5L6 2ZM4 4.5l.5 9h7l.5-9M6.5 7v4M9.5 7v4"/></AppIcon></template>
+                <template #icon><AppIcon :icon="Trash2" /></template>
                 {{ $t('compose.discardDraft') }}
               </AppButton>
             </template>
@@ -1999,7 +2000,7 @@ defineExpose({
           :disabled="sending || discarding"
           @click="persistDraft({})"
         >
-          <template #icon><AppIcon><path d="M2.5 2h9l2 2v10h-11z"/><path d="M5 2v4h6V2M5 14V9h6v5"/></AppIcon></template>
+          <template #icon><AppIcon :icon="Save" /></template>
           {{ $t('common.save') }}
         </AppButton>
         <!-- A disabled button gets no hover of its own; the wrapper carries the tooltip. -->
@@ -2011,7 +2012,7 @@ defineExpose({
             data-testid="compose-merge-review"
             @click="send"
           >
-            <template #icon><AppIcon><path d="m14 2-4.5 12L7 9 2 6.5 14 2ZM7 9l4-4"/></AppIcon></template>
+            <template #icon><AppIcon :icon="Send" /></template>
             {{ $t('mailMerge.reviewAndSend') }}
           </AppButton>
         </span>
@@ -2029,8 +2030,8 @@ defineExpose({
             @open="openSendLater"
           >
             <template #icon>
-              <AppIcon v-if="scheduledFor"><circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/></AppIcon>
-              <AppIcon v-else><path d="m14 2-4.5 12L7 9 2 6.5 14 2ZM7 9l4-4"/></AppIcon>
+              <AppIcon v-if="scheduledFor" :icon="CalendarClock" />
+              <AppIcon v-else :icon="Send" />
             </template>
             {{
               sending

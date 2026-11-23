@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Check, Clock, Ellipsis, Inbox, Mail, MailOpen, Reply } from 'lucide';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import ToolbarCell from '@/components/ui/ToolbarCell.vue';
@@ -42,7 +43,7 @@ const emit = defineEmits<{
         @click="emit('more')"
       >
         <template #icon>
-          <AppIcon size="lg"><circle cx="3" cy="8" r=".75" fill="currentColor" /><circle cx="8" cy="8" r=".75" fill="currentColor" /><circle cx="13" cy="8" r=".75" fill="currentColor" /></AppIcon>
+          <AppIcon :icon="Ellipsis" size="lg" />
         </template>
       </ToolbarCell>
       <ToolbarCell
@@ -52,10 +53,7 @@ const emit = defineEmits<{
         @click="emit('reply')"
       >
         <template #icon>
-          <AppIcon size="lg">
-            <path d="M6 3L1 8l5 5" />
-            <path d="M1 8h9a5 5 0 015 5" />
-          </AppIcon>
+          <AppIcon :icon="Reply" size="lg" />
         </template>
       </ToolbarCell>
       <ToolbarCell
@@ -65,15 +63,8 @@ const emit = defineEmits<{
         @click="emit('toggleRead')"
       >
         <template #icon>
-          <AppIcon size="lg" v-if="props.isUnread">
-            <path d="M2 4.5h12v7a2 2 0 01-2 2H4a2 2 0 01-2-2z" />
-            <path d="M2 5l6 4 6-4" />
-          </AppIcon>
-          <AppIcon size="lg" v-else>
-            <path d="M2 5.5l6 4 6-4" />
-            <path d="M2 5.5V12a2 2 0 002 2h8a2 2 0 002-2V5.5" />
-            <path d="M5 3.5h6" />
-          </AppIcon>
+          <AppIcon :icon="MailOpen" size="lg" v-if="props.isUnread" />
+          <AppIcon :icon="Mail" size="lg" v-else />
         </template>
       </ToolbarCell>
       <ToolbarCell
@@ -83,10 +74,7 @@ const emit = defineEmits<{
         @click="emit('snooze')"
       >
         <template #icon>
-          <AppIcon size="lg">
-            <circle cx="8" cy="8" r="6" />
-            <path d="M8 4v4l2.5 1.5" />
-          </AppIcon>
+          <AppIcon :icon="Clock" size="lg" />
         </template>
       </ToolbarCell>
     </div>
@@ -99,10 +87,7 @@ const emit = defineEmits<{
       @click="emit('moveToInbox')"
     >
       <template #icon>
-        <AppIcon size="lg" class="bar-done__icon">
-          <path d="M8 11V3.4M5.4 8.4 8 11l2.6-2.6" />
-          <path d="M2.8 11.2v1.2a1 1 0 0 0 1 1h8.4a1 1 0 0 0 1-1v-1.2" />
-        </AppIcon>
+        <AppIcon :icon="Inbox" size="lg" class="bar-done__icon" />
       </template>
       {{ selectionCount ? $t('thread.selection.toInbox', { count: selectionCount }) : $t('commands.moveToInbox') }}
     </AppButton>
@@ -114,9 +99,7 @@ const emit = defineEmits<{
       @click="emit('archive')"
     >
       <template #icon>
-        <AppIcon size="lg" class="bar-done__icon">
-          <path d="M3 8.5l3.5 3.5L13 5" />
-        </AppIcon>
+        <AppIcon :icon="Check" size="lg" class="bar-done__icon" />
       </template>
       {{ selectionCount ? $t('thread.selection.done', { count: selectionCount }) : $t('common.done') }}
     </AppButton>

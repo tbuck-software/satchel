@@ -15,6 +15,14 @@ The locally bundled fonts are unmodified Google Fonts distributions:
 The font notices are included in the built frontend alongside the font files.
 `scripts/vendor-fonts.mjs` preserves them when refreshing fonts.
 
+## Icons
+
+Interface icons come from [Lucide](https://lucide.dev), copyright Lucide Icons
+and Contributors, ISC License; the icons Lucide derived from Feather are
+copyright Cole Bemis, MIT License. The build copies their path data into the
+frontend bundle. Both notices ship in `JAVASCRIPT-DEPENDENCIES.txt` with the
+other JavaScript dependencies.
+
 ## Avatars
 
 The SVG icons for Sentry, Linear, Stripe, DHL, Kickstarter, Product Hunt,

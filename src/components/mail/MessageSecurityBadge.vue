@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import IconButton from '@/components/ui/IconButton.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
+import {
+  BadgeCheck, BadgeQuestionMark, BadgeX, Lock, ShieldCheck, ShieldQuestionMark, ShieldX,
+  type IconNode,
+} from 'lucide';
 import type { PgpIndicatorState, SmimeIndicatorState } from '@/types/mail';
 import type { AuthenticationTone } from '@/utils/messageAuthentication';
 
@@ -91,6 +96,13 @@ const badge = computed<{ glyph: Glyph; mark: Mark; tone: Tone; label: string } |
   }
   return null;
 });
+
+const ICONS: Record<Glyph, Record<Mark, IconNode>> = {
+  seal: { check: BadgeCheck, cross: BadgeX, question: BadgeQuestionMark },
+  lock: { check: Lock, cross: Lock, question: Lock },
+  shield: { check: ShieldCheck, cross: ShieldX, question: ShieldQuestionMark },
+};
+const badgeIcon = computed(() => (badge.value ? ICONS[badge.value.glyph][badge.value.mark] : null));
 </script>
 
 <template>
@@ -103,17 +115,7 @@ const badge = computed<{ glyph: Glyph; mark: Mark; tone: Tone; label: string } |
     :title="badge.label"
     @click.stop="emit('showDetails')"
   >
-    <svg viewBox="0 0 20 20" aria-hidden="true">
-      <path v-if="badge.glyph === 'seal'" d="M10 1.5 12 4l3.2.3-.3 3.2 2 2.5-2 2.5.3 3.2-3.2.3-2 2.5-2-2.5-3.2-.3.3-3.2-2-2.5 2-2.5-.3-3.2L8 4l2-2.5Z" />
-      <template v-else-if="badge.glyph === 'lock'">
-        <rect x="3" y="8" width="14" height="9" rx="2" />
-        <path d="M6 8V5.8a4 4 0 0 1 8 0V8" />
-      </template>
-      <path v-else d="M10 2.1 16 4.4V9c0 3.8-2.3 6.7-6 8.2C6.3 15.7 4 12.8 4 9V4.4z" />
-      <path v-if="badge.mark === 'check'" :d="badge.glyph === 'lock' ? 'm7.5 12.4 1.7 1.7 3.5-3.6' : 'm6.8 10 2 2 4.3-4.5'" />
-      <path v-else-if="badge.mark === 'cross'" d="m7.2 7.2 5.6 5.6m0-5.6-5.6 5.6" />
-      <path v-else d="M10 7.1v4m0 2.2h.01" />
-    </svg>
+    <AppIcon :icon="badgeIcon" />
   </IconButton>
 </template>
 
@@ -131,16 +133,6 @@ const badge = computed<{ glyph: Glyph; mark: Mark; tone: Tone; label: string } |
   color: var(--badge-color);
   cursor: pointer;
   transition: background var(--duration-fast) var(--ease-out);
-}
-
-.security-badge svg {
-  width: 15px;
-  height: 15px;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.7;
 }
 
 .security-badge:hover,

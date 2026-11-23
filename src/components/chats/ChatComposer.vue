@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
+import { Send } from 'lucide';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 
@@ -79,7 +80,7 @@ defineExpose({ focus: () => field.value?.focus() });
       :disabled="disabled || sending || !text.trim()"
       :shortcut="{ label: 'Enter', keys: ['Enter'], aria: 'Enter' }"
     >
-      <AppIcon><path d="M14 2 2.5 7.5l4 1L8 13.5 14 2Z" /><path d="M6.5 8.5 14 2" /></AppIcon>
+      <AppIcon :icon="Send" />
       {{ sending ? $t('chats.composer.sending') : $t('chats.composer.send') }}
     </AppButton>
     <p id="chat-composer-hint" class="chat-composer__hint">{{ $t('chats.composer.hint') }}</p>

@@ -11,10 +11,12 @@ import { useOutboxStore } from '@/stores/outbox';
 import { labsSidebarItems } from '@/labs/state';
 import { useThreadActions } from '@/composables/useThreadActions';
 import { matchesWorkflowFilter, type WorkflowFilter } from '@/types/workflow';
-import { MAILBOX_SECTIONS, type CounterMode, type SectionSpec } from '@/config/mailboxSections';
+import { MAILBOX_SECTIONS, type CounterMode, type SectionIcon, type SectionSpec } from '@/config/mailboxSections';
 import { showMailList } from '@/router/mailViews';
 import NavItem from '@/components/ui/NavItem.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
+import { Ban, Bell, Bookmark, Check, ChevronRight, Clock, FilePen, Folder, Inbox, Send, SendHorizontal, ShieldAlert, Trash2 } from 'lucide';
+import type { IconNode } from 'lucide';
 import SectionHeading from '@/components/ui/SectionHeading.vue';
 import { outboxVisibleCount } from '@/utils/outboxLabels';
 import { activeMailboxNavNode } from '@/utils/mailboxNav';
@@ -31,6 +33,21 @@ type FavoriteRow = {
   depth: number;
   accountId: string;
   accountEmail: string;
+};
+
+const SECTION_ICONS: Record<SectionIcon, IconNode> = {
+  inbox: Inbox,
+  drafts: FilePen,
+  sent: Send,
+  outbox: SendHorizontal,
+  trash: Trash2,
+  // The section is Done; it shows the archive folder.
+  archive: Check,
+  clock: Clock,
+  aside: Bookmark,
+  spam: ShieldAlert,
+  bell: Bell,
+  blocked: Ban,
 };
 
 const emit = defineEmits<{
@@ -230,72 +247,7 @@ async function onDropToFolder(folderId: string, event: DragEvent) {
           @click="selectSection(section)"
         >
           <template #icon>
-            <svg
-              v-if="section.icon === 'inbox'"
-              width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
-            >
-              <path d="M2 5.5h12" /><path d="M3 5.5v6.5A1.5 1.5 0 004.5 13.5h7A1.5 1.5 0 0013 12V5.5" /><path d="M5.5 8.5h5" />
-            </svg>
-            <svg
-              v-else-if="section.icon === 'drafts'"
-              width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
-            >
-              <path d="M2 4.5h12v8.5a1 1 0 01-1 1H3a1 1 0 01-1-1z" /><path d="M2 4.5L8 9l6-4.5" />
-            </svg>
-            <svg
-              v-else-if="section.icon === 'sent'"
-              width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
-            >
-              <path d="M14 2L2.5 7.5l4 1L8 13.5 14 2Z" /><path d="M6.5 8.5L14 2" />
-            </svg>
-            <svg
-              v-else-if="section.icon === 'outbox'"
-              width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
-            >
-              <path d="M2 11.5h12v2H2z" /><path d="M8 12V3" /><path d="M4.8 6.2L8 3l3.2 3.2" />
-            </svg>
-            <svg
-              v-else-if="section.icon === 'trash'"
-              width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
-            >
-              <path d="M2.5 4h11" /><path d="M6 2.5h4" /><path d="M4 4l.6 9a1 1 0 001 1h4.8a1 1 0 001-1L12 4" />
-            </svg>
-            <svg
-              v-else-if="section.icon === 'archive'"
-              width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
-            >
-              <path d="M3 8.5l3.3 3.3L13 5" />
-            </svg>
-            <svg
-              v-else-if="section.icon === 'clock'"
-              width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
-            >
-              <circle cx="8" cy="8" r="5.5" /><path d="M8 5.25v3.2L10.4 9.8" />
-            </svg>
-            <svg
-              v-else-if="section.icon === 'aside'"
-              width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
-            >
-              <path d="M2.5 5.5h11v7.5h-11z" /><path d="M5.5 8.5h5" /><path d="M8 1.8v4" /><path d="M6.2 4L8 5.8 9.8 4" />
-            </svg>
-            <svg
-              v-else-if="section.icon === 'spam'"
-              width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
-            >
-              <path d="M8 1.5l5 2.9v7.2L8 14.5l-5-2.9V4.4L8 1.5Z" /><path d="M8 5.1v3.5" /><circle cx="8" cy="11" r=".7" fill="currentColor" stroke="none" />
-            </svg>
-            <svg
-              v-else-if="section.icon === 'bell'"
-              width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
-            >
-              <path d="M4.5 11.5h7l-1-1.5V7a2.5 2.5 0 10-5 0v3l-1 1.5Z" /><path d="M6.5 12.5a1.5 1.5 0 003 0" />
-            </svg>
-            <svg
-              v-else
-              width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
-            >
-              <circle cx="8" cy="8" r="5.5" /><path d="M4.5 11.5l7-7" />
-            </svg>
+            <AppIcon :icon="SECTION_ICONS[section.icon]" />
           </template>
         </NavItem>
       </div>
@@ -314,10 +266,10 @@ async function onDropToFolder(folderId: string, event: DragEvent) {
         @click="emit('openFoldersPanel')"
       >
         <template #icon>
-          <AppIcon><path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h3l1.5 1.5h4.5A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z" /></AppIcon>
+          <AppIcon :icon="Folder" />
         </template>
         <template #trailing>
-          <AppIcon><path d="m6 3.5 4.5 4.5L6 12.5" /></AppIcon>
+          <AppIcon :icon="ChevronRight" />
         </template>
       </NavItem>
       <div v-else class="px-2.5 pt-1">
@@ -355,12 +307,7 @@ async function onDropToFolder(folderId: string, event: DragEvent) {
               :aria-label="$t('nav.toggleSection', { name: row.node.label })"
               @click="toggleOpen(`folder:${row.accountId}:${row.node.path}`, true)"
              :title="$t('nav.toggleSection', { name: row.node.label })">
-              <svg
-                :class="['transition-transform duration-100', isOpen(`folder:${row.accountId}:${row.node.path}`, true) ? 'rotate-90' : '']"
-                width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
-              >
-                <path d="M4 2.5L8 6 4 9.5" />
-              </svg>
+              <AppIcon :class="['transition-transform duration-100', isOpen(`folder:${row.accountId}:${row.node.path}`, true) ? 'rotate-90' : '']" :icon="ChevronRight" size="sm" />
             </IconButton>
             <span v-else class="inline-flex items-center justify-center w-4 h-4" />
 
@@ -371,11 +318,7 @@ async function onDropToFolder(folderId: string, event: DragEvent) {
               @click="selectFavoriteFolder(row.accountId, row.node.path)"
             >
               <template #icon>
-                <svg
-                  width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
-                >
-                  <path d="M2 4.5h4l1.2 1.5H14v6.5a1 1 0 01-1 1H3a1 1 0 01-1-1z" />
-                </svg>
+                <AppIcon :icon="Folder" />
               </template>
             </NavItem>
           </div>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import { Search } from 'lucide';
 import AppIcon from './AppIcon.vue';
 
 defineOptions({ inheritAttrs: false });
@@ -29,7 +30,7 @@ defineExpose({
 
 <template>
   <div class="search-input-field" :class="{ 'search-input-field--trailing': $slots.trailing }">
-    <AppIcon class="search-input-field__icon"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></AppIcon>
+    <AppIcon class="search-input-field__icon" :icon="Search" />
     <input
       v-bind="$attrs"
       ref="input"

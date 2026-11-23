@@ -14,6 +14,7 @@
  * no sidebar on screen, gets them as a row of pills here.
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { Bell, Circle, CircleCheck, Mail, Pencil, RefreshCw, Repeat, Trash2 } from 'lucide';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import AppButton from '@/components/ui/AppButton.vue';
@@ -310,14 +311,14 @@ const legend = computed(() => [
           :title="$t('tasks.lists.rename')"
           @click="renameList"
         >
-          <AppIcon><path d="M10.5 3.5l2 2L6 12H4v-2l6.5-6.5Z" /></AppIcon>
+          <AppIcon :icon="Pencil" />
         </IconButton>
         <IconButton
           v-if="activeList && (activeList.provider === 'local' || activeList.gone)"
           :title="$t('tasks.lists.delete')"
           @click="deleteList"
         >
-          <AppIcon><path d="M2.5 4h11M6 2.5h4M4 4l.6 9a1 1 0 001 1h4.8a1 1 0 001-1L12 4" /></AppIcon>
+          <AppIcon :icon="Trash2" />
         </IconButton>
         <IconButton
           v-if="tasks.lists.some((list) => list.provider !== 'local')"
@@ -325,7 +326,7 @@ const legend = computed(() => [
           :disabled="tasks.syncing"
           @click="syncNow()"
         >
-          <AppIcon><path d="M13 8a5 5 0 0 1-8.6 3.5M3 8a5 5 0 0 1 8.6-3.5M11.5 2v2.5H14M4.5 14v-2.5H2" /></AppIcon>
+          <AppIcon :icon="RefreshCw" />
         </IconButton>
         <AppButton variant="primary" size="sm" @click="editor.openNew({ listId: tasks.targetListId ?? undefined })">
           {{ $t('tasks.new') }}
@@ -412,8 +413,8 @@ const legend = computed(() => [
                 data-testid="task-check"
                 @click="actions.toggleCompleted(task)"
               >
-                <AppIcon v-if="task.completed_at"><path d="M8 2.5a5.5 5.5 0 1 1 0 11a5.5 5.5 0 1 1 0-11Z" /><path d="M5.5 8.2l1.8 1.8L10.7 6.4" /></AppIcon>
-                <AppIcon v-else><path d="M8 2.5a5.5 5.5 0 1 1 0 11a5.5 5.5 0 1 1 0-11Z" /></AppIcon>
+                <AppIcon v-if="task.completed_at" :icon="CircleCheck" />
+                <AppIcon v-else :icon="Circle" />
               </IconButton>
               <ListRowButton
                 class="task-row__main"
@@ -426,12 +427,12 @@ const legend = computed(() => [
                     {{ dueLabel(task.due_at) }}
                   </span>
                   <span v-if="task.recurrence" class="task-row__icon task-row__repeat" :title="$t('tasks.repeats')" data-testid="task-repeats">
-                    <AppIcon size="sm"><path d="M3 7a5 5 0 0 1 8.6-3.4L13 5M13 2v3h-3M13 9a5 5 0 0 1-8.6 3.4L3 11M3 14v-3h3" /></AppIcon>
+                    <AppIcon size="sm" :icon="Repeat" />
                     <span class="task-row__repeat-label">{{ $t('tasks.repeats') }}</span>
                   </span>
                   <span v-if="priorityLabel(task)" class="task-row__priority">{{ priorityLabel(task) }}</span>
                   <span v-if="task.reminder_at && !task.completed_at" class="task-row__icon" :title="$t('tasks.hasReminder')">
-                    <AppIcon size="sm"><path d="M4.5 11V7.5a3.5 3.5 0 0 1 7 0V11l1 1.5h-9Z" /><path d="M6.8 14h2.4" /></AppIcon>
+                    <AppIcon size="sm" :icon="Bell" />
                   </span>
                   <span v-if="!activeList && tasks.lists.length > 1" class="task-row__list">{{ listOf(task) }}</span>
                   <span v-if="task.pending" class="task-row__pending">{{ $t('tasks.pending') }}</span>
@@ -443,7 +444,7 @@ const legend = computed(() => [
                 :title="$t('tasks.openMail')"
                 @click="openMail(task)"
               >
-                <AppIcon><rect x="2" y="3.5" width="12" height="9" rx="1.5" /><path d="m2.5 4.5 5.5 4 5.5-4" /></AppIcon>
+                <AppIcon :icon="Mail" />
               </IconButton>
             </li>
           </ul>

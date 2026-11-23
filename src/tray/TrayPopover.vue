@@ -4,6 +4,8 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import Avatar from '@/components/common/Avatar.vue';
 import AppButton from '@/components/ui/AppButton.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
+import { Check, ChevronRight, Clock, Settings, SquarePen } from 'lucide';
 import IconButton from '@/components/ui/IconButton.vue';
 import SectionHeading from '@/components/ui/SectionHeading.vue';
 import SkeletonRow from '@/components/ui/SkeletonRow.vue';
@@ -273,10 +275,7 @@ onBeforeUnmount(() => {
         :title="t('tray.calendarSettings')"
         @click="openDestination('calendar_settings')"
       >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-          <circle cx="12" cy="12" r="3" />
-        </svg>
+        <AppIcon :icon="Settings" />
       </IconButton>
     </header>
 
@@ -337,9 +336,7 @@ onBeforeUnmount(() => {
                 :disabled="actingThreadId !== null"
                 @click="actOnThread(thread.id, 'done', $event)"
               >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M4 8l3 3 5-6" />
-                </svg>
+                <AppIcon :icon="Check" />
               </IconButton>
               <IconButton
                 size="sm"
@@ -347,10 +344,7 @@ onBeforeUnmount(() => {
                 :disabled="actingThreadId !== null"
                 @click="actOnThread(thread.id, 'waiting', $event)"
               >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <circle cx="8" cy="8" r="6" />
-                  <path d="M8 4v4l2.5 1.5" />
-                </svg>
+                <AppIcon :icon="Clock" />
               </IconButton>
             </div>
           </article>
@@ -361,9 +355,7 @@ onBeforeUnmount(() => {
 
         <div v-else class="all-clear">
           <span class="all-clear__mark" aria-hidden="true">
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-              <path d="m4 9 3 3 7-7" />
-            </svg>
+            <AppIcon :icon="Check" size="lg" />
           </span>
           <span>
             <strong>{{ t('tray.allClear.title') }}</strong>
@@ -400,9 +392,7 @@ onBeforeUnmount(() => {
                 {{ eventStatus(event) }}<template v-if="event.location"> · {{ eventLocation(event.location) }}</template>
               </small>
             </span>
-            <svg class="event-chevron" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="m6 3 5 5-5 5" />
-            </svg>
+            <AppIcon class="event-chevron" :icon="ChevronRight" size="sm" />
           </button>
         </div>
         <div v-else class="calendar-clear">
@@ -417,9 +407,7 @@ onBeforeUnmount(() => {
       </AppButton>
       <AppButton size="sm" variant="primary" @click="openDestination('compose')">
         <template #icon>
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M8 3v10M3 8h10" />
-          </svg>
+          <AppIcon :icon="SquarePen" size="sm" />
         </template>
         {{ t('tray.newMessage') }}
       </AppButton>

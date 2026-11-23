@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import AppIcon from '@/components/ui/AppIcon.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import { computed, ref } from 'vue';
+import { Search } from 'lucide';
 import { useI18n } from 'vue-i18n';
 import { useSettingsStore } from '@/stores/settings';
 import {
@@ -98,7 +100,7 @@ function displayStrokes(action: string): string[] {
     </header>
 
     <label class="search-box">
-      <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.7"/><path d="m10.7 10.7 3 3"/></svg>
+      <AppIcon :icon="Search" />
       <input v-model="filter" type="search" autocorrect="off" :placeholder="$t('settings.shortcuts.searchPlaceholder')" />
       <kbd>/</kbd>
     </label>
@@ -225,7 +227,7 @@ h2 {
   box-shadow: var(--focus-ring);
 }
 
-.search-box svg { width: 16px; fill: none; stroke: var(--text-tertiary); stroke-width: 1.5; }
+.search-box svg { color: var(--text-tertiary); }
 .search-box input { min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text-primary); font: inherit; }
 .search-box input::placeholder { color: var(--text-tertiary); }
 

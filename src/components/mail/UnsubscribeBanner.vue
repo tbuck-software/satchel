@@ -3,6 +3,7 @@ import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import { ref } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { MailX } from 'lucide';
 import { useToast } from '@/composables/useToast';
 import { useUnsubscribe } from '@/composables/useUnsubscribe';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
@@ -39,7 +40,7 @@ async function unsubscribe() {
   <!-- An offer, not a warning: a quiet row in the reader's own greys. The
        amber and red notices beside it mean "be careful"; this one does not. -->
   <aside v-if="!dismissed" class="unsub">
-    <AppIcon class="unsub__icon"><rect x="2" y="3.5" width="12" height="9" rx="1.5" /><path d="m2.5 4.5 5.5 4 5.5-4" /></AppIcon>
+    <AppIcon :icon="MailX" class="unsub__icon" />
     <span class="unsub__text">{{ $t('mail.unsubscribe.banner') }}</span>
     <div class="unsub__actions">
       <AppButton :disabled="busy" @click="unsubscribe" variant="secondary" size="sm">

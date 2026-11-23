@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import AppIcon from '@/components/ui/AppIcon.vue';
+import { Ban, Check, ChevronDown, ChevronRight, Globe, MailOpen, User, Zap } from 'lucide';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
@@ -802,9 +803,7 @@ onBeforeUnmount(() => {
                 variant="ghost"
                 size="sm"
               >
-                <AppIcon size="sm">
-                  <path d="M3.5 8.4l2.5 2.5 6.5-6.8" />
-                </AppIcon>
+                <AppIcon :icon="Check" size="sm" />
                 {{ $t('thread.list.checkAll') }}
               </AppButton>
             </template>
@@ -905,14 +904,10 @@ onBeforeUnmount(() => {
                 :title="$t('thread.list.showAllPriority')"
                 @click="emit('openBucket', item.bucket.id)"
               >
-                <AppIcon size="lg" class="priority-group__bolt shrink-0">
-                  <path d="M9.2 1.8L4.4 8.4h3.4l-1 5.8 4.8-7H8.2l1-5.4z" />
-                </AppIcon>
+                <AppIcon :icon="Zap" size="lg" class="priority-group__bolt shrink-0" />
                 <h3 class="priority-group__title m-0 text-sm font-strong tracking-[0.01em]">{{ item.bucket.label }}</h3>
                 <span class="pt-px text-2xs font-semibold text-tertiary tabular-nums">{{ item.bucket.count }}</span>
-                <AppIcon size="sm" class="shrink-0 text-tertiary">
-                  <path d="M6 3.5L10.5 8 6 12.5" />
-                </AppIcon>
+                <AppIcon :icon="ChevronRight" size="sm" class="shrink-0 text-tertiary" />
               </CardButton>
 
               <div role="listbox" :aria-label="item.bucket.label" aria-multiselectable="true">
@@ -947,9 +942,7 @@ onBeforeUnmount(() => {
                 @click="emit('openBucket', item.bucket.id)"
               >
                 {{ $t(props.phoneLayout ? 'thread.list.morePriorityRow' : 'thread.list.morePriority', { count: item.hiddenCount }) }}
-                <AppIcon v-if="props.phoneLayout" size="sm" class="shrink-0">
-                  <path d="M6 3.5L10.5 8 6 12.5" />
-                </AppIcon>
+                <AppIcon :icon="ChevronRight" v-if="props.phoneLayout" size="sm" class="shrink-0" />
               </CardButton>
             </section>
 
@@ -970,9 +963,7 @@ onBeforeUnmount(() => {
                     variant="ghost"
                     size="sm"
                   >
-                    <AppIcon size="sm">
-                      <path d="M3.5 8.4l2.5 2.5 6.5-6.8" />
-                    </AppIcon>
+                    <AppIcon :icon="Check" size="sm" />
                     {{ $t('thread.list.checkAll') }}
                   </AppButton>
                 </template>
@@ -1000,16 +991,11 @@ onBeforeUnmount(() => {
                     :aria-expanded="props.newSendersExpanded ? 'true' : 'false'"
                     @click="emit('toggleNewSenders')"
                   >
-                    <AppIcon size="lg" class="review-card__glyph shrink-0">
-                      <circle cx="8" cy="5.7" r="2.5" />
-                      <path d="M3.8 13a4.2 4.2 0 018.4 0" />
-                    </AppIcon>
+                    <AppIcon :icon="User" size="lg" class="review-card__glyph shrink-0" />
                     <h3 class="m-0 shrink-0 text-sm font-strong text-primary">{{ item.stack.label }}</h3>
                     <span class="shrink-0 pt-px text-2xs font-semibold text-tertiary tabular-nums">{{ item.stack.count }}</span>
                     <span class="review-card__preview min-w-0 truncate pl-1 text-xs text-tertiary">{{ senderNames(item.stack) }}</span>
-                    <AppIcon size="sm" class="review-card__chevron ml-auto shrink-0 text-tertiary" :class="{ 'review-card__chevron--open': props.newSendersExpanded }">
-                      <path d="M4 6l4 4 4-4" />
-                    </AppIcon>
+                    <AppIcon :icon="ChevronDown" size="sm" class="review-card__chevron ml-auto shrink-0 text-tertiary" :class="{ 'review-card__chevron--open': props.newSendersExpanded }" />
                   </CardButton>
                   <AppButton
                     class="review-card__open"
@@ -1064,9 +1050,7 @@ onBeforeUnmount(() => {
                           size="sm"
                         >
                           <template #icon>
-                            <AppIcon size="sm">
-                              <path d="M3.5 8.4l2.5 2.5 6.5-6.8" />
-                            </AppIcon>
+                            <AppIcon :icon="Check" size="sm" />
                           </template>
                           {{ $t('thread.newSenders.allow') }}
                         </AppButton>
@@ -1078,10 +1062,7 @@ onBeforeUnmount(() => {
                           size="sm"
                         >
                           <template #icon>
-                            <AppIcon size="sm">
-                              <circle cx="8" cy="8" r="5.5" />
-                              <path d="M4.1 11.9l7.8-7.8" />
-                            </AppIcon>
+                            <AppIcon :icon="Ban" size="sm" />
                           </template>
                           {{ $t('common.block') }}
                         </AppButton>
@@ -1095,10 +1076,7 @@ onBeforeUnmount(() => {
                     :title="$t('thread.newSenders.allowDomainTitle', { domain: item.stack.domainSuggestion.domain })"
                     @click="emit('acceptDomain', item.stack.domainSuggestion)"
                   >
-                    <AppIcon size="sm" class="shrink-0">
-                      <circle cx="8" cy="8" r="3.1" />
-                      <path d="M11.1 8v1.2a1.7 1.7 0 003.4 0V8a6.5 6.5 0 10-2.6 5.2" />
-                    </AppIcon>
+                    <AppIcon :icon="Globe" size="sm" class="shrink-0" />
                     <span class="min-w-0 truncate">{{ $t('thread.newSenders.allowDomain', { domain: item.stack.domainSuggestion.domain }) }}</span>
                     <span class="shrink-0 font-medium tabular-nums opacity-70">{{ $t('thread.newSenders.senderCount', { count: item.stack.domainSuggestion.senderCount }) }}</span>
                   </CardButton>
@@ -1162,10 +1140,7 @@ onBeforeUnmount(() => {
                   :aria-label="$t('thread.list.markAllRead')"
                   @click.stop="emit('bucketAction', { threadIds: item.bucket.threadIds, action: 'read' })"
                 >
-                  <AppIcon>
-                    <path d="M2.8 5.2L8 8.7l5.2-3.5" />
-                    <rect x="2.5" y="4" width="11" height="8.5" rx="1.7" />
-                  </AppIcon>
+                  <AppIcon :icon="MailOpen" />
                 </IconButton>
                 <IconButton
                   v-if="!props.allDone?.(item.bucket.threadIds)"
@@ -1173,16 +1148,12 @@ onBeforeUnmount(() => {
                   :aria-label="$t('thread.list.checkAll')"
                   @click.stop="emit('bucketAction', { threadIds: item.bucket.threadIds, action: 'done' })"
                 >
-                  <AppIcon>
-                    <path d="M3.5 8.4l2.5 2.5 6.5-6.8" />
-                  </AppIcon>
+                  <AppIcon :icon="Check" />
                 </IconButton>
               </div>
 
               <!-- The row opens a page of its own, and says so even at rest. -->
-              <AppIcon class="shrink-0 text-tertiary">
-                <path d="M6 3.5L10.5 8 6 12.5" />
-              </AppIcon>
+              <AppIcon :icon="ChevronRight" class="shrink-0 text-tertiary" />
             </section>
 
             <ThreadGroupCard

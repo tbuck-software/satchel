@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { ChevronRight, Monitor, Smartphone } from 'lucide';
 import { useI18n } from 'vue-i18n';
 import NasPushSetup from '@/components/settings/NasPushSetup.vue';
 import ModalShell from '@/components/ui/ModalShell.vue';
@@ -71,8 +72,8 @@ onBeforeUnmount(() => {
             <h3 v-if="state.phase === 'requested' || state.phase === 'verifying'">{{ t('settings.relay.pairWith', { name: state.name }) }}</h3>
             <h3 v-else>{{ desktop ? t('settings.relay.visibleTitle') : t('settings.relay.scanTitle') }}</h3>
             <span class="pair-icon">
-              <AppIcon v-if="desktop" :grid="24" size="lg"><rect x="6.5" y="2" width="11" height="20" rx="2.5"/><path d="M11 18h2"/></AppIcon>
-              <AppIcon v-else :grid="24" size="lg"><rect x="2" y="3.5" width="20" height="14" rx="2"/><path d="M12 17.5v3M8 21h8"/></AppIcon>
+              <AppIcon v-if="desktop" size="lg" :icon="Smartphone" />
+              <AppIcon v-else size="lg" :icon="Monitor" />
             </span>
           </div>
           <template v-if="state.phase === 'requested'">
@@ -84,7 +85,7 @@ onBeforeUnmount(() => {
             <p role="status">{{ state.nearby.length ? t('settings.relay.choose') : t('settings.relay.searching') }}</p>
             <div v-if="state.nearby.length" class="pair-list">
               <ListRowButton v-for="device in state.nearby" :key="device.id" class="pair-choice" :disabled="busy" @click="update('select', device.id)">
-                <span>{{ device.name }}</span><AppIcon><path d="m6 3 5 5-5 5"/></AppIcon>
+                <span>{{ device.name }}</span><AppIcon :icon="ChevronRight" />
               </ListRowButton>
             </div>
           </template>

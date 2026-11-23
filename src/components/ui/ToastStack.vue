@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { CircleAlert, CircleCheck, Info, TriangleAlert, X } from 'lucide';
 import { useI18n } from 'vue-i18n';
 import { useToast, type Toast, type ToastAction } from '@/composables/useToast';
 import { useShortcutHints } from '@/composables/useShortcutHints';
@@ -265,32 +266,16 @@ function showPreviousCompactUndo() {
         @focusout="item.sourceIds.forEach(toast.resume)"
       >
         <span class="toast__icon" aria-hidden="true">
-          <AppIcon v-if="item.tone === 'success'">
-            <path d="m3 8.4 3.2 3.2L13 4.8" />
-          </AppIcon>
-          <AppIcon v-else-if="item.tone === 'error'">
-            <circle cx="8" cy="8" r="5.8" />
-            <path d="M8 5v3.6" />
-            <path d="M8 10.8h.01" />
-          </AppIcon>
-          <AppIcon v-else-if="item.tone === 'warning'">
-            <path d="M8 2.4 14.2 13H1.8L8 2.4Z" />
-            <path d="M8 6.6v3" />
-            <path d="M8 11.6h.01" />
-          </AppIcon>
-          <AppIcon v-else>
-            <circle cx="8" cy="8" r="5.8" />
-            <path d="M8 7.4v3.4" />
-            <path d="M8 5.2h.01" />
-          </AppIcon>
+          <AppIcon v-if="item.tone === 'success'" :icon="CircleCheck" />
+          <AppIcon v-else-if="item.tone === 'error'" :icon="CircleAlert" />
+          <AppIcon v-else-if="item.tone === 'warning'" :icon="TriangleAlert" />
+          <AppIcon v-else :icon="Info" />
         </span>
 
         <span class="toast__message">{{ item.message }}</span>
 
         <IconButton class="toast__dismiss" size="sm" :title="$t('ui.dismissToast')" @click="dismissPresented(item)">
-          <AppIcon size="sm">
-            <path d="M4 4l8 8M12 4l-8 8" />
-          </AppIcon>
+          <AppIcon size="sm" :icon="X" />
         </IconButton>
 
         <!-- On a phone this is a row of its own under the message: beside it,

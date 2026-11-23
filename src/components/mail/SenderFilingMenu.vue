@@ -11,6 +11,7 @@
  */
 import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { BrushCleaning } from 'lucide';
 import { useRouter } from 'vue-router';
 import type { ThreadCategory } from '@/types/mail';
 import { useListSearchStore } from '@/stores/listSearch';
@@ -137,7 +138,7 @@ function showAll() {
   <div class="menu-group">
     <MenuItem icon="search" :label="$t('mail.senderFiling.showAllMail')" @select="showAll" />
     <MenuItem :label="$t('sweep.menuItem')" @select="cleanUp">
-      <template #icon><AppIcon><path d="M11 2.5 7.5 8" /><path d="M4 8h6l1 5.5H3z" /></AppIcon></template>
+      <template #icon><AppIcon :icon="BrushCleaning" /></template>
     </MenuItem>
   </div>
 </template>

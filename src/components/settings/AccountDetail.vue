@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, onMounted, ref } from 'vue';
+import { ChevronLeft } from 'lucide';
 import { useI18n } from 'vue-i18n';
 import { useAccountsStore } from '@/stores/accounts';
 import { useConnectionStore } from '@/stores/connection';
@@ -377,7 +378,7 @@ async function removeAccount() {
       size="sm"
       @click="location.showAccount(null)"
     >
-      <template #icon><AppIcon size="sm"><path d="m10 3-5 5 5 5" /></AppIcon></template>
+      <template #icon><AppIcon size="sm" :icon="ChevronLeft" /></template>
       {{ $t('settings.accounts.allAccounts') }}
     </AppButton>
 

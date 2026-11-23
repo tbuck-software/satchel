@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import AppIcon from '@/components/ui/AppIcon.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import { computed, onMounted } from 'vue';
+import { Check } from 'lucide';
 import { useInvitesStore } from '@/stores/invites';
 import { useCalendarUiStore } from '@/stores/calendarUi';
 import {
@@ -51,19 +53,7 @@ const sources = computed(() => {
         @click="calendarUi.toggleSource(source.key)"
       >
         <span class="cal-source__dot" :style="{ backgroundColor: source.color }" aria-hidden="true">
-          <svg
-            v-if="!calendarUi.isSourceHidden(source.key)"
-            width="8"
-            height="8"
-            viewBox="0 0 8 8"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.6"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <path d="M1.5 4.2l1.8 1.8 3.2-4" />
-          </svg>
+          <AppIcon v-if="!calendarUi.isSourceHidden(source.key)" size="sm" :icon="Check" />
         </span>
         <span class="cal-source__label">{{ source.label }}</span>
         <span class="cal-source__count">{{ source.count }}</span>

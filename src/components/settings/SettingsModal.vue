@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue';
+import { X } from 'lucide';
 import { useRoute, useRouter } from 'vue-router';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import IconButton from '@/components/ui/IconButton.vue';
@@ -99,7 +100,7 @@ watch(
           :shortcut="{ label: 'Esc', keys: ['Esc'], aria: 'Escape' }"
           @click="ui.closeSettings()"
         >
-          <AppIcon><path d="M4 4l8 8M12 4l-8 8" /></AppIcon>
+          <AppIcon :icon="X" />
         </IconButton>
       </div>
     </div>

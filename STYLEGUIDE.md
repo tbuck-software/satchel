@@ -27,7 +27,7 @@ and fails on:
 | UI comes from the kit | a hand-rolled `<button>` outside `src/components/ui/` |
 | Icon buttons carry a name | an icon-only button in the kit without `aria-label` |
 | Radii and type sizes from the scale | literal `border-radius:` or `font-size:`, `text-[13px]`, `font-[550]` |
-| Icons share one frame | an `<svg>` with `stroke-width="1.4"`, a non-square or off-scale `viewBox`, or a render size of 13/15/17/19px |
+| Icons come from Lucide | a raw `<svg>`, or a glyph drawn in `AppIcon`'s slot instead of `:icon` |
 | Transitions come from the motion tokens | a literal time in `transition:` or `transition-duration:` |
 | The focus ring stays on | `outline: none`, `outline: 0`, `outline-none` without a listed replacement |
 | Contrast | a rule that declares both its own background and a `--text-*` colour, measured against the resolved tokens in **both** themes: 4.5 : 1 for every text token, tertiary included. Primary, secondary, tertiary and accent text must also clear 4.5 : 1 on `--bg-base`, `--bg-list`, `--bg-surface`, `--bg-raised`, `--bg-overlay`, `--bg-hover`, `--bg-active` and `--bg-active-hover` |
@@ -461,7 +461,7 @@ Reusable building blocks — use these instead of hand-rolled buttons/rows:
 |---------------------|----------------------------------------------------------------|
 | `NavItem`           | Sidebar/tree row: icon or avatar, label, count. Active = a raised sheet (`--bg-surface` + `--shadow-sm`), not an accent pill. Pass `pressed` and the row becomes a toggle that says so. Grows to a 48px touch target below 1020px |
 | `IconButton`        | Icon-only button, sizes sm/md/lg, tones default/accent/danger/warning. Reserves a 44px target in the layout for coarse pointers |
-| `AppIcon`           | The frame for a stroke icon: 16 viewBox, stroke 1.5, round caps, `aria-hidden`. Sizes sm 14 / md 16 / lg 20; `grid="20"` or `"24"` for a glyph drawn on a larger grid. The glyph is the slot |
+| `AppIcon`           | The frame for every icon: `:icon` takes a Lucide icon, stroke 1.5, round caps, `aria-hidden`. Sizes sm 14 / md 16 / lg 20. The slot (with `grid`) is for a mark Lucide has no word for |
 | `AppButton`         | Text action, pill variants primary/soft/secondary/ghost/danger and inline variant link, sizes sm/md. `type="submit"` for the button that carries a form's Enter key |
 | `CardButton`        | A button that is a *region* — an attachment card, a row, a tile. Contributes the reset and the behaviour, no padding, fill, radius or border: the look stays with the caller |
 | `FilterPill`        | One pill in a filter strip: pressed state, optional identity dot and count. `pressed`, not `active` — a strip is a set of toggles |
@@ -518,21 +518,107 @@ single-pane breakpoint the shell ignores both and takes the screen.
 
 ## Icons
 
-Stroke icons, no icon font and no package — nothing is loaded from outside the
-bundle. Every icon is drawn in `AppIcon`:
+Icons come from [Lucide](https://lucide.dev) (`lucide`, ISC, pinned), ADR 0021.
+The package holds path data only; Vite bundles the icons a module imports and
+drops the rest, so nothing is loaded from outside the bundle. Every icon is
+drawn in `AppIcon`:
 
-- **Grid:** 16 × 16. A glyph drawn on 20 or 24 passes `grid`; the frame scales
-  it and keeps the line weight.
-- **Line:** 1.5, round caps and joins, `fill="none"`, `currentColor`.
+```vue
+<script setup lang="ts">
+import { Reply } from 'lucide';
+import AppIcon from '@/components/ui/AppIcon.vue';
+</script>
+
+<AppIcon size="lg" :icon="Reply" />
+```
+
+- **Line:** 1.5 at every size, round caps and joins, `currentColor`. Lucide's
+  own stroke of 2 does not apply; the frame compensates for the 24 grid.
 - **Sizes:** `sm` 14px (inline with small text, chips), `md` 16px (menus,
   buttons — the default), `lg` 20px (toolbar and header buttons). Nothing in
-  between: a 16-grid icon rendered at 13 or 17px loses its crisp edges.
+  between.
 - **Name:** never on the icon. The button around it carries it (`aria-label` or
   visible text); the icon is `aria-hidden`.
+- **Chosen from data:** a typed map to `IconNode` (`import type { IconNode }
+  from 'lucide'`), not a `v-if` chain of drawings.
+- **Imports that shadow globals** take a suffix: `File as FileIcon`,
+  `Image as ImageIcon`, `Link as LinkIcon` beside tiptap's `Link`.
 
-The design check freezes the older hand-written SVGs that still break this and
-lets the list only shrink. Illustrations and the undo ring are drawings, not
-icons, and are listed as such.
+The slot of `AppIcon` is for the few marks Lucide has no word for. The design
+check lists every raw `<svg>` and every slotted glyph and lets the list only
+shrink; illustrations, the undo ring and spinners are drawings and are listed
+as such.
+
+### Vocabulary
+
+One meaning, one icon. Pick by what the control does, not by what an old
+drawing looked like. A meaning that is not here gets added here with the change
+that introduces it.
+
+| Meaning | Icon |
+|---|---|
+| reply · reply all · forward | `Reply` · `ReplyAll` · `Forward` |
+| send, sent · outbox | `Send` · `SendHorizontal` |
+| compose, new message, edit a draft | `SquarePen` |
+| draft (state, folder) | `FilePen` |
+| rename, edit a note | `Pencil` |
+| done · done for a whole bundle | `Check` · `CheckCheck` |
+| archive (the folder) | `Archive` |
+| trash, delete, discard | `Trash2` |
+| undo, restore | `Undo2` |
+| snooze, later, follow-up, due | `Clock` |
+| send later | `CalendarClock` |
+| waiting for reply | `Hourglass` |
+| set aside | `Bookmark` |
+| inbox, move to inbox, not spam | `Inbox` |
+| pin · unpin (`isStarred` means pinned) | `Pin` · `PinOff` |
+| favourite folder | `Star` |
+| mark read · mark unread, mail, account | `MailOpen` · `Mail` |
+| mail merge | `Mails` |
+| mute · unmute, notifications, reminder | `BellOff` · `Bell` |
+| spam | `ShieldAlert` |
+| block sender, blocked, sender settings | `Ban` |
+| allow sender · allow domain | `Check` · `Globe` |
+| move, file to folder · folder | `FolderInput` · `Folder` |
+| topic | `Layers` |
+| priority | `Zap` |
+| rules | `Workflow` |
+| task · task open · task done | `ListTodo` · `Circle` · `CircleCheck` |
+| recurring | `Repeat` |
+| clean up sender | `BrushCleaning` |
+| print · copy link · copy | `Printer` · `Link` · `Copy` |
+| export · download, save attachments · import | `Share` · `Download` · `Upload` |
+| attachment · file · image | `Paperclip` · `File` · `Image` |
+| preview · open in another app | `Eye` · `ExternalLink` |
+| pop out into a window · maximize · minimize | `SquareArrowOutUpRight` · `Maximize2` · `Minimize2` |
+| all actions, command palette | `Command` |
+| text size | `ALargeSmall` |
+| unsubscribe | `MailX` |
+| newsletter | `Newspaper` |
+| assign and share | `UserPlus` |
+| person, sender, new senders · contacts · address book | `User` · `Users` · `BookUser` |
+| chat | `MessageSquare` |
+| calendar · insert availability | `Calendar` · `CalendarCheck` |
+| search · filter · recent | `Search` · `ListFilter` · `RotateCcwClock` |
+| settings · general settings | `Settings` · `SlidersHorizontal` |
+| sync, refresh, retry · reset | `RefreshCw` · `RotateCcw` |
+| add · remove, decrease | `Plus` · `Minus` |
+| more | `Ellipsis` |
+| close, dismiss, clear | `X` |
+| back · disclosure · previous/next | `ChevronLeft` · `ChevronRight`/`ChevronDown` · `ChevronUp`/`ChevronDown` |
+| expand · collapse a message | `ChevronsUpDown` · `ChevronsDownUp` |
+| warning · error · info · success | `TriangleAlert` · `CircleAlert` · `Info` · `CircleCheck` |
+| encrypted, decrypted · not encrypted | `Lock` · `LockOpen` |
+| PGP key | `KeyRound` |
+| signature valid · invalid · uncertain | `BadgeCheck` · `BadgeX` · `BadgeQuestionMark` |
+| authentication pass · fail · uncertain | `ShieldCheck` · `ShieldX` · `ShieldQuestionMark` |
+| remote images blocked, certificate exception | `Shield` |
+| resting account, dark rendering | `Moon` |
+| quota, storage · backup | `HardDrive` · `Database` |
+| translate | `Languages` |
+| show source | `Code` |
+| editor: bold, italic, strike, lists, link, table | `Bold`, `Italic`, `Strikethrough`, `List`, `ListOrdered`, `Link`, `Table` |
+| editor: insert row/column before · after, header row | `BetweenHorizontalStart`/`BetweenVerticalStart` · `…End`, `PanelTop` |
 
 ---
 

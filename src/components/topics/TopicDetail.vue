@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import AppIcon from '@/components/ui/AppIcon.vue';
 import { useConnectionStore } from '@/stores/connection';
 import { useAccountsStore } from '@/stores/accounts';
 import CardButton from '@/components/ui/CardButton.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { Check, ChevronUp, Circle, Clock, Copy, Download, Layers, Pencil, Plus, Trash2 } from 'lucide';
 import { useI18n } from 'vue-i18n';
 import { saveAttachmentWithDialog } from '@/utils/saveAttachment';
 import { useThreadReply } from '@/composables/useThreadReply';
@@ -584,9 +586,7 @@ async function copyAsMarkdown() {
           {{ $t('topics.detail.entries', { count: topic.item_count + topic.note_count }) }}
           · {{ $t('topics.detail.attachmentsCount', { count: allAttachments.length + topicFiles.length }) }}
         </span>
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M3.5 10L8 5.5L12.5 10" />
-        </svg>
+        <AppIcon size="sm" :icon="ChevronUp" />
       </span>
     </CardButton>
     <div ref="scrollEl" class="topic-scroll" @scroll.passive="onScroll">
@@ -635,9 +635,7 @@ async function copyAsMarkdown() {
           <h1 v-else class="issue-title">
             {{ topic.name }}
             <IconButton size="sm" :title="$t('topics.detail.rename')" @click="startTitleEdit">
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 1.5L14.5 4L5.5 13H3V10.5L12 1.5Z" />
-              </svg>
+              <AppIcon size="sm" :icon="Pencil" />
             </IconButton>
           </h1>
           <span class="issue-spacer" />
@@ -649,18 +647,12 @@ async function copyAsMarkdown() {
               :title="topic.due_date ? $t('topics.detail.dueSet', { date: dueLabel }) : $t('topics.detail.dueAdd')"
               @click="duePickerOpen = !duePickerOpen"
             >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="8" cy="8.5" r="6" />
-                <path d="M8 5.5V8.5L10.2 10" />
-              </svg>
+              <AppIcon :icon="Clock" />
             </IconButton>
             <SnoozePicker :open="duePickerOpen" @choose="setDueDate($event)" @close="duePickerOpen = false" />
           </span>
           <IconButton size="md" :title="$t('topics.detail.copyMarkdown')" @click="void copyAsMarkdown()">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="2" y="2.5" width="12" height="11" rx="1.6" />
-              <path d="M4.5 10.5V6L6.5 8.2L8.5 6V10.5M11.5 6V10.5M11.5 10.5L10 9M11.5 10.5L13 9" />
-            </svg>
+            <AppIcon :icon="Copy" />
           </IconButton>
           <AppButton
             v-if="confirmingDelete"
@@ -672,27 +664,18 @@ async function copyAsMarkdown() {
             {{ $t('topics.detail.confirmDelete') }}
           </AppButton>
           <IconButton v-else size="md" tone="danger" :title="$t('topics.detail.delete')" @click="deleteTopic">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M2.5 4H13.5M6.5 4V2.5H9.5V4M4 4L4.8 13.5H11.2L12 4" />
-            </svg>
+            <AppIcon :icon="Trash2" />
           </IconButton>
         </div>
         <div class="issue-meta">
           <span class="state-badge" :class="isDone ? 'state-badge--done' : 'state-badge--open'">
-            <svg v-if="isDone" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M2.5 8.5L6.5 12.5L13.5 4" />
-            </svg>
-            <svg v-else width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="8" cy="8" r="5" />
-            </svg>
+            <AppIcon v-if="isDone" size="sm" :icon="Check" />
+            <AppIcon v-else size="sm" :icon="Circle" />
             {{ isDone ? $t('common.done') : $t('topics.detail.stateOpen') }}
           </span>
           <span class="issue-count">{{ $t('topics.detail.entries', { count: topic.item_count + topic.note_count }) }}</span>
           <span v-if="topic.due_date" class="due-chip" :class="{ 'due-chip--due': isDue }">
-            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="8" cy="8.5" r="6" />
-              <path d="M8 5.5V8.5L10.2 10" />
-            </svg>
+            <AppIcon size="sm" :icon="Clock" />
             {{ dueLabel }}
             <IconButton class="due-chip__clear" :title="$t('topics.detail.dueClear')" @click="void setDueDate(null)">×</IconButton>
           </span>
@@ -732,9 +715,7 @@ async function copyAsMarkdown() {
           <span class="attachments__label">
             {{ $t('topics.detail.attachments', { count: allAttachments.length + topicFiles.length }) }}
             <AppButton class="attachments__add" :disabled="uploadingFiles" @click="pickFiles" variant="link" size="sm">
-              <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
-                <path d="M8 3V13M3 8H13" />
-              </svg>
+              <AppIcon size="sm" :icon="Plus" />
               {{ $t('topics.detail.addFile') }}
             </AppButton>
             <input ref="fileInput" type="file" multiple class="attachments__input" :aria-label="$t('topics.detail.fileInputLabel')" @change="onFilesPicked" />
@@ -751,15 +732,10 @@ async function copyAsMarkdown() {
                 <span class="topic-file__size">{{ formatBytes(file.size) }}</span>
               </div>
               <IconButton size="sm" :title="$t('topics.detail.saveFile')" @click="void downloadTopicFile(file)">
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M8 2.5V10.5M8 10.5L4.8 7.3M8 10.5L11.2 7.3" />
-                  <path d="M3 13.5H13" />
-                </svg>
+                <AppIcon size="sm" :icon="Download" />
               </IconButton>
               <IconButton size="sm" tone="danger" :title="$t('topics.detail.deleteFile')" @click="void deleteTopicFile(file)">
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M2.5 4H13.5M6.5 4V2.5H9.5V4M4 4L4.8 13.5H11.2L12 4" />
-                </svg>
+                <AppIcon size="sm" :icon="Trash2" />
               </IconButton>
             </div>
           </div>
@@ -788,9 +764,7 @@ async function copyAsMarkdown() {
         :description="$t('topics.detail.emptyDescription')"
       >
         <template #icon>
-      <svg width="44" height="44" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.55">
-        <path d="M2 4.5C2 3.7 2.7 3 3.5 3H6L7.5 4.5H12.5C13.3 4.5 14 5.2 14 6V11.5C14 12.3 13.3 13 12.5 13H3.5C2.7 13 2 12.3 2 11.5V4.5Z" />
-      </svg>
+      <AppIcon size="lg" :icon="Layers" />
     </template>
       </EmptyState>
 
@@ -828,9 +802,7 @@ async function copyAsMarkdown() {
     @action="emit('deleted')"
   >
     <template #icon>
-      <svg width="44" height="44" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.55">
-        <path d="M2 4.5C2 3.7 2.7 3 3.5 3H6L7.5 4.5H12.5C13.3 4.5 14 5.2 14 6V11.5C14 12.3 13.3 13 12.5 13H3.5C2.7 13 2 12.3 2 11.5V4.5Z" />
-      </svg>
+      <AppIcon size="lg" :icon="Layers" />
     </template>
   </EmptyState>
 </template>

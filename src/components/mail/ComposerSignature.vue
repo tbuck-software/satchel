@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import AppButton from '@/components/ui/AppButton.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
 import MenuItem from '@/components/ui/MenuItem.vue';
 import { useDismissable } from '@/composables/useDismissable';
 import { useUiStore } from '@/stores/ui';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { ChevronDown } from 'lucide';
 import { useI18n } from 'vue-i18n';
 import type { BackendSignature } from '@/types/composer';
 import { placePopoverAgainstAnchor, type PopoverPlacement } from '@/utils/popoverPlacement';
@@ -214,18 +216,7 @@ useDismissable(
         size="sm"
       >
         <span class="sig-switch-name">{{ currentName }}</span>
-        <svg
-          :class="['sig-chevron', { 'sig-chevron--open': menuOpen }]"
-          width="11"
-          height="11"
-          viewBox="0 0 12 12"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.5"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        ><path d="m3.5 4.5 2.5 2.5 2.5-2.5" /></svg>
+        <AppIcon :icon="ChevronDown" size="sm" :class="['sig-chevron', { 'sig-chevron--open': menuOpen }]" />
       </AppButton>
     </div>
 

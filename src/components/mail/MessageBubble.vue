@@ -2,6 +2,10 @@
 import CardButton from '@/components/ui/CardButton.vue';
 import { computed, defineAsyncComponent, inject, onBeforeUnmount, provide, ref, shallowRef, watch, watchEffect } from 'vue';
 import { useI18n } from 'vue-i18n';
+import {
+  ChevronsDownUp, ChevronsUpDown, Code, Ellipsis, Forward, Languages, Layers, Moon, Paperclip,
+  PanelsTopLeft, Reply, TextAlignStart, TriangleAlert, type IconNode,
+} from 'lucide';
 import type {
   Message,
   PgpIndicatorState,
@@ -359,6 +363,13 @@ function chooseBodyView(mode: string) {
   headerBodyView.value?.set(mode);
 }
 
+/** The glyph for one of the body's render modes. */
+function bodyViewIcon(mode: string): IconNode {
+  if (mode === 'auto-dark') return Moon;
+  if (mode === 'text' || mode === 'markdown') return TextAlignStart;
+  return PanelsTopLeft;
+}
+
 /* The phone's blocked-images notice keeps only Show; its always-allow
    choices join this message's actions (ImageGuardPhoneActions reports them). */
 const imageGuard = shallowRef<ImageGuardChoices | null>(null);
@@ -695,10 +706,10 @@ function openSenderDetails() {
           <template v-if="!props.collapsed">
             <template v-if="props.canReply">
               <IconButton size="sm" :title="$t('common.reply')" @click="emit('reply')">
-                <AppIcon size="sm"><path d="M6 3L1 8l5 5" /><path d="M1 8h9a5 5 0 015 5" /></AppIcon>
+                <AppIcon :icon="Reply" size="sm" />
               </IconButton>
               <IconButton size="sm" :title="$t('common.forward')" @click="emit('forward')">
-                <AppIcon size="sm"><path d="M10 3l5 5-5 5" /><path d="M15 8H6a5 5 0 00-5 5" /></AppIcon>
+                <AppIcon :icon="Forward" size="sm" />
               </IconButton>
             </template>
             <IconButton
@@ -711,7 +722,7 @@ function openSenderDetails() {
               :disabled="messageTranslation.busy.value"
               @click.stop="messageTranslation.toggle()"
             >
-              <AppIcon size="sm"><path d="M2.5 3.5h6M5.5 2v1.5M4 3.5c.4 2.3 1.9 4.2 4 5.2M7.5 3.5c-.5 2.6-2.4 4.8-5 5.8" /><path d="m8.5 14 2.75-6.5L14 14M9.4 12h3.7" /></AppIcon>
+              <AppIcon :icon="Languages" size="sm" />
             </IconButton>
             <IconButton
               v-if="headerBodyView"
@@ -723,11 +734,7 @@ function openSenderDetails() {
               :active="viewMenuAnchor !== null"
               @click.stop="toggleViewMenu"
             >
-              <AppIcon size="sm">
-                <path v-if="headerBodyView.mode === 'auto-dark'" d="M12.4 9.9A5 5 0 0 1 6.1 3.6a5 5 0 1 0 6.3 6.3z" />
-                <path v-else-if="headerBodyView.mode === 'text' || headerBodyView.mode === 'markdown'" d="M3 4h10M3 7.3h10M3 10.6h6.5" />
-                <template v-else><rect x="2.5" y="2.5" width="11" height="11" rx="1.8" /><path d="M2.5 6.5h11M6.5 6.5v7" /></template>
-              </AppIcon>
+              <AppIcon :icon="bodyViewIcon(headerBodyView.mode)" size="sm" />
             </IconButton>
             <IconButton
               v-if="openDraftTarget && !props.message.isDraft"
@@ -735,10 +742,10 @@ function openSenderDetails() {
               :title="$t('composeDrop.attach')"
               @click="attachToDraft"
             >
-              <AppIcon size="sm"><path d="M10.5 5.5 6.2 9.8a1.4 1.4 0 0 0 2 2l4.6-4.6a2.8 2.8 0 0 0-4-4L4.2 7.8a4.2 4.2 0 0 0 6 6l3.3-3.3" /></AppIcon>
+              <AppIcon :icon="Paperclip" size="sm" />
             </IconButton>
             <IconButton size="sm" :title="$t('mail.message.showSource')" @click="sourceDialogOpen = true">
-              <AppIcon size="sm"><path d="M6 4L2.5 8 6 12" /><path d="M10 4l3.5 4L10 12" /></AppIcon>
+              <AppIcon :icon="Code" size="sm" />
             </IconButton>
           </template>
           <IconButton
@@ -746,10 +753,7 @@ function openSenderDetails() {
             :title="$t('mail.message.addToTopicSingle')"
             @click="topicsStore.openPicker({ itemType: 'message', itemIds: [props.message.id] })"
           >
-            <AppIcon size="sm">
-              <path d="M2.5 4.5C2.5 3.7 3.2 3 4 3H6.5L8 4.5H12C12.8 4.5 13.5 5.2 13.5 6V11.5C13.5 12.3 12.8 13 12 13H4C3.2 13 2.5 12.3 2.5 11.5V4.5Z" />
-              <path d="M8 7V11M6 9H10" />
-            </AppIcon>
+            <AppIcon :icon="Layers" size="sm" />
           </IconButton>
           <IconButton
             class="message-collapse-toggle"
@@ -758,10 +762,7 @@ function openSenderDetails() {
             :aria-expanded="!props.collapsed"
             @click.stop="emit('toggleCollapsed')"
           >
-            <AppIcon size="sm">
-              <path v-if="props.collapsed" d="m4.5 6 3.5 3.5L11.5 6" />
-              <path v-else d="m4.5 10 3.5-3.5 3.5 3.5" />
-            </AppIcon>
+            <AppIcon :icon="props.collapsed ? ChevronsUpDown : ChevronsDownUp" size="sm" />
           </IconButton>
         </div>
         <IconButton
@@ -770,7 +771,7 @@ function openSenderDetails() {
           :title="$t('mail.message.actions')"
           @click="messageActionsOpen = true"
         >
-          <AppIcon size="lg"><circle cx="3" cy="8" r=".75" fill="currentColor" /><circle cx="8" cy="8" r=".75" fill="currentColor" /><circle cx="13" cy="8" r=".75" fill="currentColor" /></AppIcon>
+          <AppIcon :icon="Ellipsis" size="lg" />
         </IconButton>
       </div>
     </div>
@@ -779,11 +780,7 @@ function openSenderDetails() {
     <template v-if="!props.collapsed">
     <!-- Sender spoofing / authentication warning -->
     <aside v-if="spoofingWarning" class="spoofing-notice message-notice" role="alert">
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M8 2.2 14.4 13H1.6L8 2.2Z" />
-        <path d="M8 6.4v3.2" />
-        <path d="M8 11.6h.01" />
-      </svg>
+      <AppIcon :icon="TriangleAlert" />
       <span>{{ spoofingWarning.text }}</span>
     </aside>
 

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ChevronDown } from 'lucide';
 import AppIcon from './AppIcon.vue';
 import CardButton from './CardButton.vue';
 
@@ -26,7 +27,7 @@ const emit = defineEmits<{ switch: [] }>();
   <header class="large-title">
     <CardButton class="large-title__switch" :aria-label="switchLabel" aria-haspopup="dialog" @click="emit('switch')">
       <span class="large-title__text">{{ title }}</span>
-      <AppIcon class="large-title__chevron" size="lg"><path d="m4.5 6.5 3.5 3.5 3.5-3.5" /></AppIcon>
+      <AppIcon class="large-title__chevron" size="lg" :icon="ChevronDown" />
     </CardButton>
     <div v-if="$slots.actions" class="large-title__actions">
       <slot name="actions" />

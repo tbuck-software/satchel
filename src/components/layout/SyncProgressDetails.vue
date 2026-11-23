@@ -9,6 +9,7 @@ import BottomSheet from '@/components/ui/BottomSheet.vue';
 import PaneHeader from '@/components/ui/PaneHeader.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
+import { X } from 'lucide';
 import ProgressBar from '@/components/ui/ProgressBar.vue';
 
 const props = defineProps<{ open: boolean }>();
@@ -48,7 +49,7 @@ const meta = (account: AccountProgress) => [importing(account) ? counts(account)
         <PaneHeader :title="t('app.sync.progress.title')">
           <template #actions>
             <IconButton :title="t('common.close')" @click="emit('close')">
-              <AppIcon><path d="m4 4 8 8m0-8-8 8" /></AppIcon>
+              <AppIcon :icon="X" />
             </IconButton>
           </template>
         </PaneHeader>

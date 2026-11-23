@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import AppIcon from '@/components/ui/AppIcon.vue';
 import NavItem from '@/components/ui/NavItem.vue';
 import { computed } from 'vue';
+import { BookUser, Pin, RotateCcwClock, Users, type IconNode } from 'lucide';
 import { useRoute, useRouter } from 'vue-router';
 import { useContactsStore } from '@/stores/contacts';
 import { useSettingsStore } from '@/stores/settings';
@@ -26,31 +28,31 @@ const sections = computed<Array<{
   id: ContactsSection;
   label: string;
   count: number;
-  icon: string;
+  icon: IconNode;
 }>>(() => [
   {
     id: 'all',
     label: t('contacts.sections.all.title'),
     count: allCount.value,
-    icon: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+    icon: Users,
   },
   {
     id: 'address-book',
     label: t('contacts.sections.addressBook.title'),
     count: addressBook.contacts.length,
-    icon: '<path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5zM4 4.5v15M8 7h8M8 11h6"/>',
+    icon: BookUser,
   },
   {
     id: 'frequent',
     label: t('contacts.sections.frequent.title'),
     count: threads.allContactSummaries.length,
-    icon: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    icon: RotateCcwClock,
   },
   {
     id: 'pinned',
     label: t('contacts.sections.pinned.title'),
     count: settings.pinnedContacts.length,
-    icon: '<path d="M9 3h6l-.8 7 4.3 3.5V15h-13v-1.5L9.8 10zM12 15v7"/>',
+    icon: Pin,
   },
 ]);
 
@@ -77,7 +79,7 @@ function selectSection(section: ContactsSection) {
           :aria-current="activeSection === section.id ? 'page' : undefined"
           @click="selectSection(section.id)"
         >
-          <template #icon><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" v-html="section.icon" /></template>
+          <template #icon><AppIcon :icon="section.icon" /></template>
 
         </NavItem>
       </li>

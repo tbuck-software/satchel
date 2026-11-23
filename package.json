@@ -74,6 +74,7 @@
     "@tiptap/vue-3": "^3.33.1",
     "@vueuse/core": "^15.0.0",
     "date-fns": "^4.4.0",
+    "lucide": "1.70.0",
     "marked": "^18.2.0",
     "pdfjs-dist": "^6.5.438",
     "pinia": "^3.0.1",

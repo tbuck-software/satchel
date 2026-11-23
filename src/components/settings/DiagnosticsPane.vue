@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { Bell, CircleCheck, LockOpen } from 'lucide';
 import { useI18n } from 'vue-i18n';
 import {
   backendAppBuildInfo,
@@ -292,7 +293,7 @@ onMounted(() => {
           :description="$t('settings.diagnostics.syncErrors.emptyDescription')"
         >
           <template #icon>
-            <AppIcon size="lg"><path d="M3.5 8.4 6.5 11.4 12.5 5" /></AppIcon>
+            <AppIcon size="lg" :icon="CircleCheck" />
           </template>
         </EmptyState>
         <ul v-else class="rows">
@@ -366,7 +367,7 @@ onMounted(() => {
           :description="$t('settings.diagnostics.queue.noFailuresDescription')"
         >
           <template #icon>
-            <AppIcon size="lg"><path d="M3.5 8.4 6.5 11.4 12.5 5" /></AppIcon>
+            <AppIcon size="lg" :icon="CircleCheck" />
           </template>
         </EmptyState>
         <ul v-else class="rows">
@@ -407,7 +408,7 @@ onMounted(() => {
           :description="$t('settings.diagnostics.outbox.emptyDescription')"
         >
           <template #icon>
-            <AppIcon size="lg"><path d="M5 7.2a3 3 0 0 1 6 0c0 2 .8 2.8 1.4 3.4H3.6C4.2 10 5 9.2 5 7.2z" /><path d="M6.8 12.4a1.4 1.4 0 0 0 2.4 0" /><path d="M2.4 2.4 13.6 13.6" /></AppIcon>
+            <AppIcon size="lg" :icon="Bell" />
           </template>
         </EmptyState>
         <template v-else>
@@ -496,7 +497,7 @@ onMounted(() => {
           :description="$t('settings.diagnostics.notifications.emptyDescription')"
         >
           <template #icon>
-            <AppIcon size="lg"><path d="M5 7.2a3 3 0 0 1 6 0c0 2 .8 2.8 1.4 3.4H3.6C4.2 10 5 9.2 5 7.2z" /><path d="M6.8 12.4a1.4 1.4 0 0 0 2.4 0" /></AppIcon>
+            <AppIcon size="lg" :icon="Bell" />
           </template>
         </EmptyState>
         <template v-else>
@@ -552,7 +553,7 @@ onMounted(() => {
           :description="$t('settings.diagnostics.leases.emptyDescription')"
         >
           <template #icon>
-            <AppIcon size="lg"><rect x="3.2" y="7.2" width="9.6" height="6.4" rx="1.4" /><path d="M5.6 7.2V5.2a2.4 2.4 0 0 1 4.6-1" /></AppIcon>
+            <AppIcon size="lg" :icon="LockOpen" />
           </template>
         </EmptyState>
         <ul v-else class="rows">
@@ -593,7 +594,7 @@ onMounted(() => {
           :description="$t('settings.diagnostics.rateLimits.emptyDescription')"
         >
           <template #icon>
-            <AppIcon size="lg"><path d="M3.5 8.4 6.5 11.4 12.5 5" /></AppIcon>
+            <AppIcon size="lg" :icon="CircleCheck" />
           </template>
         </EmptyState>
         <ul v-else class="rows">

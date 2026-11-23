@@ -1,5 +1,7 @@
 <script setup lang="ts">
+import AppIcon from '@/components/ui/AppIcon.vue';
 import { computed, onMounted, ref } from 'vue';
+import { Users } from 'lucide';
 import { useI18n } from 'vue-i18n';
 import Avatar from '@/components/common/Avatar.vue';
 import { backendSupportsNativeCommands, type BackendContact } from '@/services/backend';
@@ -180,10 +182,7 @@ async function clearAvatar(contact: BackendContact, locked: boolean) {
 
     <div v-if="canImport" class="permission-note">
       <div class="note-icon" aria-hidden="true">
-        <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="8" cy="5" r="2.5" />
-          <path d="M3 14c0-2.6 2.2-4.5 5-4.5s5 1.9 5 4.5" />
-        </svg>
+        <AppIcon size="lg" :icon="Users" />
       </div>
       <div>
         <strong>{{ $t('settings.contacts.noAutoImportTitle') }}</strong>

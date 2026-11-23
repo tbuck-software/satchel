@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
+import {
+  ALargeSmall, Ban, Bell, BellOff, Bookmark, BrushCleaning, Check, ChevronDown, ChevronLeft,
+  ChevronUp, Clock, Command, Copy, Download, Ellipsis, FolderInput, Forward, Globe, Inbox, Link,
+  ListTodo, Mail, MailOpen, MessageSquare, Minus, Pin, PinOff, Plus, Printer, Reply, RotateCcw,
+  Send, Share, ShieldAlert, Trash2, User, UserPlus,
+} from 'lucide';
 import IconButton from '@/components/ui/IconButton.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
@@ -214,7 +220,7 @@ function runExport(format: ExportFormat) {
     <div class="thread-toolbar__group">
       <template v-if="showBack">
         <IconButton size="lg" :title="$t('common.back')" :shortcut="hint('leaveItem')" @click="emit('back')">
-          <AppIcon size="lg"><path d="M10 3L5 8l5 5"/></AppIcon>
+          <AppIcon :icon="ChevronLeft" size="lg" />
         </IconButton>
         <span class="divider" />
       </template>
@@ -232,7 +238,7 @@ function runExport(format: ExportFormat) {
         @click="emit('moveToInbox')"
       >
         <template #icon>
-          <AppIcon size="lg"><path d="M8 11V3.4M5.4 8.4 8 11l2.6-2.6" /><path d="M2.8 11.2v1.2a1 1 0 0 0 1 1h8.4a1 1 0 0 0 1-1v-1.2" /></AppIcon>
+          <AppIcon :icon="Inbox" size="lg" />
         </template>
         {{ selectionCount ? $t('thread.selection.toInbox', { count: selectionCount }) : $t('commands.moveToInbox') }}
       </AppButton>
@@ -245,15 +251,15 @@ function runExport(format: ExportFormat) {
         @click="emit('archive')"
       >
         <template #icon>
-          <AppIcon size="lg"><path d="M3 8.5l3.2 3.2L13 5"/></AppIcon>
+          <AppIcon :icon="Check" size="lg" />
         </template>
         {{ selectionCount ? $t('thread.selection.done', { count: selectionCount }) : $t('common.done') }}
       </AppButton>
       <IconButton size="lg" :title="targetLabel($t('thread.toolbar.setReminder'))" :shortcut="hint('moveSnoozed')" @click="emit('snooze')">
-        <AppIcon size="lg"><circle cx="8" cy="8" r="6"/><path d="M8 4v4l2.5 1.5"/></AppIcon>
+        <AppIcon :icon="Clock" size="lg" />
       </IconButton>
       <IconButton v-if="canDelete" size="lg" tone="danger" :title="targetLabel($t('common.delete'))" :shortcut="hint('trash')" @click="emit('delete')">
-        <AppIcon size="lg"><path d="M2 4h12M5 4V2.5A1.5 1.5 0 016.5 1h3A1.5 1.5 0 0111 2.5V4"/><path d="M13 4v9.5a1.5 1.5 0 01-1.5 1.5h-7A1.5 1.5 0 013 13.5V4"/></AppIcon>
+        <AppIcon :icon="Trash2" size="lg" />
       </IconButton>
     </div>
 
@@ -269,7 +275,7 @@ function runExport(format: ExportFormat) {
           :shortcut="hint('prevThread')"
           @click="emit('previous')"
         >
-          <AppIcon size="lg"><path d="M11 3.5 6 8l5 4.5"/></AppIcon>
+          <AppIcon :icon="ChevronUp" size="lg" />
         </IconButton>
         <IconButton
           size="lg"
@@ -278,13 +284,13 @@ function runExport(format: ExportFormat) {
           :shortcut="hint('nextThread')"
           @click="emit('next')"
         >
-          <AppIcon size="lg"><path d="M5 3.5 10 8l-5 4.5"/></AppIcon>
+          <AppIcon :icon="ChevronDown" size="lg" />
         </IconButton>
       </template>
 
       <PluginSlotHost slot-name="top_toolbar" :context="{ threadId, subject }" />
       <AppButton v-if="canReply && !replyInReader" variant="soft" :title="$t('common.reply')" :shortcut="hint('reply')" @click="emit('reply')">
-        <template #icon><AppIcon size="lg"><path d="M6 3L1 8l5 5"/><path d="M1 8h9a5 5 0 015 5"/></AppIcon></template>
+        <template #icon><AppIcon :icon="Reply" size="lg" /></template>
         {{ $t('common.reply') }}
       </AppButton>
 
@@ -296,7 +302,7 @@ function runExport(format: ExportFormat) {
           :aria-expanded="menuOpen"
           @click="toggleMenu"
         >
-          <AppIcon size="lg"><circle cx="3" cy="8" r=".75" fill="currentColor" /><circle cx="8" cy="8" r=".75" fill="currentColor" /><circle cx="13" cy="8" r=".75" fill="currentColor" /></AppIcon>
+          <AppIcon :icon="Ellipsis" size="lg" />
         </IconButton>
       </span>
     </div>
@@ -311,14 +317,14 @@ function runExport(format: ExportFormat) {
   >
     <div v-if="canReply" class="menu-group" @mouseenter="closeSubmenu">
       <MenuItem :label="$t('common.reply')" :aria-keyshortcuts="hint('reply')?.aria" @select="run('reply')">
-        <template #icon><AppIcon :grid="20"><path d="M8 5 3 10l5 5M3 10h8a5 5 0 0 1 5 5" /></AppIcon></template>
+        <template #icon><AppIcon :icon="Reply" /></template>
         <template v-if="hint('reply')" #trailing><kbd class="menu-shortcut" aria-hidden="true">{{ hint('reply')?.label }}</kbd></template>
       </MenuItem>
       <MenuItem :label="$t('thread.toolbar.resend')" @select="run('resend')">
-        <template #icon><AppIcon :grid="20"><path d="m3 10 14-7-4.5 14-2.7-5.4L3 10Z" /><path d="m9.8 11.6 3-3" /></AppIcon></template>
+        <template #icon><AppIcon :icon="Send" /></template>
       </MenuItem>
       <MenuItem :label="$t('common.forward')" :aria-keyshortcuts="hint('forward')?.aria" @select="run('forward')">
-        <template #icon><AppIcon :grid="20"><path d="m12 5 5 5-5 5M17 10H9a5 5 0 0 0-5 5" /></AppIcon></template>
+        <template #icon><AppIcon :icon="Forward" /></template>
         <template v-if="hint('forward')" #trailing><kbd class="menu-shortcut" aria-hidden="true">{{ hint('forward')?.label }}</kbd></template>
       </MenuItem>
     </div>
@@ -330,7 +336,7 @@ function runExport(format: ExportFormat) {
         @mouseenter="closeSubmenu"
         @select="run('fileTo')"
       >
-        <template #icon><AppIcon :grid="20"><path d="M2.5 6h6l1.7 2H17v8.5H2.5V6Z" /></AppIcon></template>
+        <template #icon><AppIcon :icon="FolderInput" /></template>
         <template v-if="hint('fileTo')" #trailing><kbd class="menu-shortcut" aria-hidden="true">{{ hint('fileTo')?.label }}</kbd></template>
       </MenuItem>
       <MenuItem
@@ -339,7 +345,7 @@ function runExport(format: ExportFormat) {
         @mouseenter="closeSubmenu"
         @select="run('toggleRead')"
       >
-        <template #icon><AppIcon :grid="20"><rect x="3" y="5" width="14" height="11" rx="2" /><path d="m4 7 6 4 6-4" /></AppIcon></template>
+        <template #icon><AppIcon :icon="isUnread ? MailOpen : Mail" /></template>
         <template v-if="hint('toggleRead')" #trailing><kbd class="menu-shortcut" aria-hidden="true">{{ hint('toggleRead')?.label }}</kbd></template>
       </MenuItem>
       <MenuItem
@@ -348,7 +354,7 @@ function runExport(format: ExportFormat) {
         @mouseenter="closeSubmenu"
         @select="run('togglePin')"
       >
-        <template #icon><AppIcon :grid="20"><path d="M6.5 3h7l-1 5 2.5 2.5V12H5v-1.5L7.5 8l-1-5Z" /><path d="M10 12v5" /></AppIcon></template>
+        <template #icon><AppIcon :icon="isStarred ? PinOff : Pin" /></template>
         <template v-if="hint('pin')" #trailing><kbd class="menu-shortcut" aria-hidden="true">{{ hint('pin')?.label }}</kbd></template>
       </MenuItem>
       <MenuItem
@@ -357,7 +363,7 @@ function runExport(format: ExportFormat) {
         @mouseenter="closeSubmenu"
         @select="run('setAside')"
       >
-        <template #icon><AppIcon :grid="20"><path d="M3 7h14v9H3z" /><path d="M7 10h6" /><path d="M10 2v5" /><path d="m8 5 2 2 2-2" /></AppIcon></template>
+        <template #icon><AppIcon :icon="isAside ? Inbox : Bookmark" /></template>
         <template v-if="hint(isAside ? 'moveInbox' : 'setAside')" #trailing><kbd class="menu-shortcut" aria-hidden="true">{{ hint(isAside ? 'moveInbox' : 'setAside')?.label }}</kbd></template>
       </MenuItem>
       <MenuItem
@@ -366,7 +372,7 @@ function runExport(format: ExportFormat) {
         @mouseenter="closeSubmenu"
         @select="run('toggleMuted')"
       >
-        <template #icon><AppIcon :grid="20"><path d="M5 8v4h3l4 3V5L8 8H5Z" /><path v-if="!isMuted" d="M15 7a4 4 0 0 1 0 6" /><path v-else d="m15 8 3 4m0-4-3 4" /></AppIcon></template>
+        <template #icon><AppIcon :icon="isMuted ? Bell : BellOff" /></template>
         <template v-if="hint('toggleMute')" #trailing><kbd class="menu-shortcut" aria-hidden="true">{{ hint('toggleMute')?.label }}</kbd></template>
       </MenuItem>
     </div>
@@ -378,7 +384,7 @@ function runExport(format: ExportFormat) {
         @mouseenter="closeSubmenu"
         @select="runSweep"
       >
-        <template #icon><AppIcon :grid="20"><path d="M13.5 3 9 10" /><path d="M5 10h7l1.5 7h-10z" /><path d="M7.5 13.5v3M10.5 13.5v3" /></AppIcon></template>
+        <template #icon><AppIcon :icon="BrushCleaning" /></template>
         <template v-if="hint('sweepSender')" #trailing><kbd class="menu-shortcut" aria-hidden="true">{{ hint('sweepSender')?.label }}</kbd></template>
       </MenuItem>
       <MenuItem
@@ -387,7 +393,7 @@ function runExport(format: ExportFormat) {
         @mouseenter="closeSubmenu"
         @select="runAddTask"
       >
-        <template #icon><AppIcon :grid="20"><path d="M10 3.5a6.5 6.5 0 1 1 0 13a6.5 6.5 0 1 1 0-13Z" /><path d="M7 10.2l2.2 2.2L13.3 8" /></AppIcon></template>
+        <template #icon><AppIcon :icon="ListTodo" /></template>
         <template v-if="hint('createTask')" #trailing><kbd class="menu-shortcut" aria-hidden="true">{{ hint('createTask')?.label }}</kbd></template>
       </MenuItem>
       <MenuItem
@@ -397,7 +403,7 @@ function runExport(format: ExportFormat) {
         @mouseenter="openSubmenu('block', $event)"
         @select="openSubmenu('block', $event)"
       >
-        <template #icon><AppIcon :grid="20"><path d="M6 4.5A6.5 6.5 0 0 1 16.5 10M5 7H2.5v4H5l3 3V6L5 7Z" /><path d="m4 3 13 14" /></AppIcon></template>
+        <template #icon><AppIcon :icon="Ban" /></template>
       </MenuItem>
       <MenuItem
         :label="$t('thread.toolbar.organize')"
@@ -406,7 +412,7 @@ function runExport(format: ExportFormat) {
         @mouseenter="openSubmenu('organize', $event)"
         @select="openSubmenu('organize', $event)"
       >
-        <template #icon><AppIcon :grid="20"><circle cx="8" cy="7" r="3" /><path d="M2.5 16a5.5 5.5 0 0 1 11 0" /><path d="M14 8.5h4M16 6.5v4" /></AppIcon></template>
+        <template #icon><AppIcon :icon="UserPlus" /></template>
       </MenuItem>
       <MenuItem
         v-if="canMarkNotSpam"
@@ -415,7 +421,7 @@ function runExport(format: ExportFormat) {
         @mouseenter="closeSubmenu"
         @select="run('notSpam')"
       >
-        <template #icon><AppIcon :grid="20"><path d="M3 7.5h14M4.5 7.5v7A1.5 1.5 0 0 0 6 16h8a1.5 1.5 0 0 0 1.5-1.5v-7M7.5 11h5" /></AppIcon></template>
+        <template #icon><AppIcon :icon="Inbox" /></template>
         <template v-if="hint('markNotSpam')" #trailing><kbd class="menu-shortcut" aria-hidden="true">{{ hint('markNotSpam')?.label }}</kbd></template>
       </MenuItem>
       <MenuItem
@@ -425,7 +431,7 @@ function runExport(format: ExportFormat) {
         @mouseenter="closeSubmenu"
         @select="run('spam')"
       >
-        <template #icon><AppIcon :grid="20"><path d="M3 5.5h14v11H3v-11ZM6 3.5h8M7 9l6 4m0-4-6 4" /></AppIcon></template>
+        <template #icon><AppIcon :icon="ShieldAlert" /></template>
         <template v-if="hint('markSpam')" #trailing><kbd class="menu-shortcut" aria-hidden="true">{{ hint('markSpam')?.label }}</kbd></template>
       </MenuItem>
       <MenuItem
@@ -435,7 +441,7 @@ function runExport(format: ExportFormat) {
         @mouseenter="openSubmenu('print', $event)"
         @select="openSubmenu('print', $event)"
       >
-        <template #icon><AppIcon :grid="20"><path d="M6 7V3h8v4M5 15H3V8h14v7h-2M6 12h8v5H6v-5Z" /><path d="M14.5 10h.01" /></AppIcon></template>
+        <template #icon><AppIcon :icon="Printer" /></template>
       </MenuItem>
       <MenuItem
         :label="$t('thread.link.copy')"
@@ -443,7 +449,7 @@ function runExport(format: ExportFormat) {
         @mouseenter="closeSubmenu"
         @select="run('copyLink')"
       >
-        <template #icon><AppIcon :grid="20"><path d="M8.5 11.5a3.2 3.2 0 0 0 4.6 0l2.6-2.6a3.2 3.2 0 0 0-4.6-4.6l-1.1 1.1" /><path d="M11.5 8.5a3.2 3.2 0 0 0-4.6 0l-2.6 2.6a3.2 3.2 0 0 0 4.6 4.6l1.1-1.1" /></AppIcon></template>
+        <template #icon><AppIcon :icon="Link" /></template>
         <template v-if="hint('copyLink')" #trailing><kbd class="menu-shortcut" aria-hidden="true">{{ hint('copyLink')?.label }}</kbd></template>
       </MenuItem>
       <MenuItem
@@ -453,13 +459,13 @@ function runExport(format: ExportFormat) {
         @mouseenter="openSubmenu('markdown', $event)"
         @select="openSubmenu('markdown', $event)"
       >
-        <template #icon><AppIcon :grid="20"><rect x="5" y="5" width="12" height="12" rx="2" /><path d="M3 14V5a2 2 0 0 1 2-2h9" /></AppIcon></template>
+        <template #icon><AppIcon :icon="Copy" /></template>
       </MenuItem>
     </div>
 
     <div class="menu-group" @mouseenter="closeSubmenu">
       <div class="zoom-row" role="group" :aria-label="$t('thread.toolbar.textSize')">
-        <AppIcon :grid="20" class="zoom-row__icon"><circle cx="9" cy="9" r="5" /><path d="M13 13l4 4" /></AppIcon>
+        <AppIcon :icon="ALargeSmall" class="zoom-row__icon" />
         <span>{{ $t('thread.toolbar.textSize') }}</span>
         <span class="zoom-controls">
           <IconButton
@@ -468,7 +474,7 @@ function runExport(format: ExportFormat) {
             :title="$t('thread.toolbar.smaller')"
             :aria-label="$t('thread.toolbar.decreaseText')"
             @click.stop="emit('zoom', -10)"
-          ><AppIcon><path d="M3 8h10" /></AppIcon></IconButton>
+          ><AppIcon :icon="Minus" /></IconButton>
           <span class="zoom-value">{{ props.readerZoom }}%</span>
           <IconButton
             class="zoom-btn"
@@ -476,14 +482,14 @@ function runExport(format: ExportFormat) {
             :title="$t('thread.toolbar.larger')"
             :aria-label="$t('thread.toolbar.increaseText')"
             @click.stop="emit('zoom', 10)"
-          ><AppIcon><path d="M3 8h10M8 3v10" /></AppIcon></IconButton>
+          ><AppIcon :icon="Plus" /></IconButton>
           <IconButton
             class="zoom-btn"
             role="menuitem"
             :title="$t('common.reset')"
             :aria-label="$t('thread.toolbar.resetTextSize')"
             @click.stop="emit('zoom', 0)"
-          ><AppIcon><path d="M3 6a5.5 5.5 0 1 1 0 5M3 2v4h4" /></AppIcon></IconButton>
+          ><AppIcon :icon="RotateCcw" /></IconButton>
         </span>
       </div>
     </div>
@@ -495,7 +501,7 @@ function runExport(format: ExportFormat) {
         @mouseenter="closeSubmenu"
         @select="runSaveAttachments"
       >
-        <template #icon><AppIcon :grid="20"><path d="M10 3v10m0 0-4-4m4 4 4-4" /><path d="M4 15v2h12v-2" /></AppIcon></template>
+        <template #icon><AppIcon :icon="Download" /></template>
       </MenuItem>
       <MenuItem
         :label="$t('thread.toolbar.exportTo')"
@@ -504,10 +510,10 @@ function runExport(format: ExportFormat) {
         @mouseenter="openSubmenu('export', $event)"
         @select="openSubmenu('export', $event)"
       >
-        <template #icon><AppIcon :grid="20"><path d="M10 13V3m0 0L6 7m4-4 4 4" /><path d="M4 10v7h12v-7" /></AppIcon></template>
+        <template #icon><AppIcon :icon="Share" /></template>
       </MenuItem>
       <MenuItem :label="$t('thread.toolbar.allActions')" :aria-keyshortcuts="hint('openCommandPalette')?.aria" @mouseenter="closeSubmenu" @select="run('allActions')">
-        <template #icon><AppIcon :grid="20"><rect x="3" y="4" width="14" height="12" rx="2" /><path d="M6 8h8M6 12h5" /></AppIcon></template>
+        <template #icon><AppIcon :icon="Command" /></template>
         <template v-if="hint('openCommandPalette')" #trailing><kbd class="menu-shortcut" aria-hidden="true">{{ hint('openCommandPalette')?.label }}</kbd></template>
       </MenuItem>
     </div>
@@ -530,30 +536,30 @@ function runExport(format: ExportFormat) {
     <template v-else-if="activeSubmenu === 'block'">
       <p class="submenu-title">{{ $t('thread.actions.blockSender') }}</p>
       <MenuItem :label="$t('thread.toolbar.blockAddress')" @select="runBlock('address')">
-        <template #icon><AppIcon :grid="20"><circle cx="10" cy="7" r="3" /><path d="M4 17a6 6 0 0 1 12 0" /></AppIcon></template>
+        <template #icon><AppIcon :icon="User" /></template>
         <span class="stacked-label"><strong>{{ $t('thread.toolbar.blockAddress') }}</strong><small>{{ senderAddress || $t('thread.toolbar.currentSender') }}</small></span>
       </MenuItem>
       <MenuItem :label="$t('thread.toolbar.blockDomain')" @select="runBlock('domain')">
-        <template #icon><AppIcon :grid="20"><circle cx="10" cy="10" r="7" /><path d="M3 10h14M10 3a11 11 0 0 1 0 14M10 3a11 11 0 0 0 0 14" /></AppIcon></template>
+        <template #icon><AppIcon :icon="Globe" /></template>
       </MenuItem>
     </template>
 
     <template v-else-if="activeSubmenu === 'print'">
       <MenuItem :label="$t('thread.toolbar.latestMessageOnly')" @select="runPrint('latest')">
-        <template #icon><AppIcon :grid="20"><path d="M6 7V3h8v4M5 15H3V8h14v7h-2M6 12h8v5H6v-5Z" /></AppIcon></template>
+        <template #icon><AppIcon :icon="Mail" /></template>
       </MenuItem>
       <MenuItem :label="$t('thread.toolbar.wholeConversation')" :aria-keyshortcuts="hint('print')?.aria" @select="runPrint('conversation')">
-        <template #icon><AppIcon :grid="20"><rect x="3" y="3" width="11" height="11" rx="2" /><path d="M7 17h8a2 2 0 0 0 2-2V7" /></AppIcon></template>
+        <template #icon><AppIcon :icon="MessageSquare" /></template>
         <template v-if="hint('print')" #trailing><kbd class="menu-shortcut" aria-hidden="true">{{ hint('print')?.label }}</kbd></template>
       </MenuItem>
     </template>
 
     <template v-else-if="activeSubmenu === 'markdown'">
       <MenuItem :label="$t('thread.toolbar.copyLatest')" @select="runCopyMarkdown('latest')">
-        <template #icon><AppIcon :grid="20"><rect x="5" y="5" width="12" height="12" rx="2" /><path d="M3 14V5a2 2 0 0 1 2-2h9" /></AppIcon></template>
+        <template #icon><AppIcon :icon="Mail" /></template>
       </MenuItem>
       <MenuItem :label="$t('thread.toolbar.copyConversation')" @select="runCopyMarkdown('conversation')">
-        <template #icon><AppIcon :grid="20"><rect x="3" y="3" width="11" height="11" rx="2" /><path d="M7 17h8a2 2 0 0 0 2-2V7" /></AppIcon></template>
+        <template #icon><AppIcon :icon="MessageSquare" /></template>
       </MenuItem>
     </template>
 

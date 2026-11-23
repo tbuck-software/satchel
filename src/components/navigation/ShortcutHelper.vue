@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import AppIcon from '@/components/ui/AppIcon.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import KeyCap from '@/components/ui/KeyCap.vue';
 import { useUiStore } from '@/stores/ui';
 import { useSettingsStore } from '@/stores/settings';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { X } from 'lucide';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import {
@@ -201,9 +203,7 @@ function editBindings() {
               <p>{{ $t('shortcuts.subtitle') }}</p>
             </div>
             <IconButton class="close-btn" :title="$t('common.close')" :aria-label="$t('shortcuts.close')" @click="ui.toggleShortcuts()">
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-                <path d="M4 4l8 8M12 4l-8 8"/>
-              </svg>
+              <AppIcon size="sm" :icon="X" />
             </IconButton>
           </header>
 

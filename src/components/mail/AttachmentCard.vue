@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
+import { Download, ExternalLink, Eye, File as FileIcon, Image as ImageIcon } from 'lucide';
 import type { Attachment } from '@/types/mail';
 import { useAttachmentActions } from '@/composables/useAttachmentActions';
 import { useAttachmentOpen } from '@/composables/useAttachmentOpen';
 import { formatBytes } from '@/utils/formatBytes';
+import AppIcon from '@/components/ui/AppIcon.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import AttachmentPreview from './AttachmentPreview.vue';
@@ -118,18 +120,11 @@ watch(
       <span v-if="isThumbnailable" class="attachment-card__tile attachment-card__tile--image" aria-hidden="true">
         <img v-if="thumbnailUrl" :src="thumbnailUrl" alt="">
         <!-- Until the bytes arrive, or if they never do: still a picture. -->
-        <svg v-else width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <rect x="2" y="3" width="12" height="10" rx="1.5" />
-          <circle cx="5.75" cy="6.25" r="1.25" />
-          <path d="m14 10.5-3.5-3.5L4 13" />
-        </svg>
+        <AppIcon v-else :icon="ImageIcon" />
       </span>
       <span v-else class="attachment-card__tile" :data-kind="fileKind" aria-hidden="true">
         <template v-if="extension">{{ extension }}</template>
-        <svg v-else width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M13 5.5V13a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 3 13V3a1.5 1.5 0 0 1 1.5-1.5H9L13 5.5Z" />
-          <path d="M9 1.5v4h4" />
-        </svg>
+        <AppIcon v-else :icon="FileIcon" />
       </span>
       <span class="attachment-card__meta">
         <span class="attachment-card__name">{{ props.attachment.filename }}</span>
@@ -144,14 +139,8 @@ watch(
         :disabled="open.busy.value"
         @click="open.openAlternate"
       >
-        <svg v-if="open.systemFirst.value" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M1.5 8s2.4-4 6.5-4 6.5 4 6.5 4-2.4 4-6.5 4-6.5-4-6.5-4z" />
-          <circle cx="8" cy="8" r="1.8" />
-        </svg>
-        <svg v-else width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M9.5 2.5h4v4M7 9l6.5-6.5" />
-          <path d="M13 9.5V13a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h3.5" />
-        </svg>
+        <AppIcon v-if="open.systemFirst.value" :icon="Eye" size="sm" />
+        <AppIcon v-else :icon="ExternalLink" size="sm" />
       </IconButton>
       <IconButton
         size="sm"
@@ -159,9 +148,7 @@ watch(
         :disabled="open.busy.value"
         @click="open.save"
       >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M8 2v8M4.5 6.5L8 10l3.5-3.5M2.5 13.5h11" />
-        </svg>
+        <AppIcon :icon="Download" size="sm" />
       </IconButton>
     </span>
 

@@ -18,6 +18,7 @@ import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
+import { ChevronLeft } from 'lucide';
 import CollectionLoadState from '@/components/ui/CollectionLoadState.vue';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import IconButton from '@/components/ui/IconButton.vue';
@@ -250,7 +251,7 @@ const legend = computed(() => [
     >
       <template #leading>
         <IconButton :title="$t('newSenders.backToInbox')" @click="router.push({ name: 'inbox' })">
-          <AppIcon><path d="M10 3.5 5.5 8l4.5 4.5" /></AppIcon>
+          <AppIcon :icon="ChevronLeft" />
         </IconButton>
       </template>
       <template v-if="scopedAccount && multipleAccounts" #actions>

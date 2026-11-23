@@ -9,6 +9,7 @@ import { useUiStore } from '@/stores/ui';
 import { ariaKeyshortcuts, bindingKeycaps } from '@/config/keybindings';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
+import { Command, SquarePen } from 'lucide';
 import IconButton from '@/components/ui/IconButton.vue';
 
 defineEmits<{ compose: [event: MouseEvent] }>();
@@ -31,7 +32,7 @@ const paletteHint = computed(() => {
       :title="$t('nav.composeNewWindow')"
       @click="$emit('compose', $event)"
     >
-      <template #icon><AppIcon><path d="M8 3v10M3 8h10" /></AppIcon></template>
+      <template #icon><AppIcon :icon="SquarePen" /></template>
       {{ $t('nav.newMessage') }}
     </AppButton>
     <!-- The palette is a keyboard tool; a phone has no ⌘ to press. -->
@@ -43,7 +44,7 @@ const paletteHint = computed(() => {
       :shortcut="paletteHint"
       @click="ui.openOmni()"
     >
-      <AppIcon><path d="M10 4v8a2 2 0 1 0 2-2H4a2 2 0 1 0 2 2V4a2 2 0 1 0-2 2h8a2 2 0 1 0-2-2" /></AppIcon>
+      <AppIcon :icon="Command" />
     </IconButton>
   </div>
 </template>

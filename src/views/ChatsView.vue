@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { MessageSquare } from 'lucide';
 import { useRoute, useRouter } from 'vue-router';
 import ListDetailLayout from '@/components/layout/ListDetailLayout.vue';
 import PaneHeader from '@/components/ui/PaneHeader.vue';
@@ -171,7 +172,7 @@ onBeforeUnmount(() => {
           :description="$t('chats.empty.description')"
         >
           <template #icon>
-            <AppIcon size="lg"><path d="M2.5 3.5h11v7h-7l-4 3z" /></AppIcon>
+            <AppIcon :icon="MessageSquare" size="lg" />
           </template>
         </EmptyState>
         <ul v-else ref="listRef" class="chats-list__body" role="list">
@@ -215,7 +216,7 @@ onBeforeUnmount(() => {
     <template #empty>
       <EmptyState :title="$t('chats.select.title')" :description="$t('chats.select.description')">
         <template #icon>
-          <AppIcon size="lg"><path d="M2.5 3.5h11v7h-7l-4 3z" /></AppIcon>
+          <AppIcon :icon="MessageSquare" size="lg" />
         </template>
       </EmptyState>
     </template>

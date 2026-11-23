@@ -3,6 +3,7 @@ import AppButton from '@/components/ui/AppButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { Check, ChevronLeft, ChevronsUpDown, Clock } from 'lucide';
 import { useAccountsStore } from '@/stores/accounts';
 import { useConnectionStore } from '@/stores/connection';
 import { useMessagesStore } from '@/stores/messages';
@@ -1095,7 +1096,7 @@ function showEntireThread() {
     <!-- ═══ MOBILE TOP BAR ═══ -->
     <div v-else class="mobile-top-bar" data-tauri-drag-region>
       <IconButton class="mobile-back-btn" :title="$t('common.back')" :aria-label="$t('common.back')" @click="emit('back')">
-        <AppIcon size="lg"><path d="M10 3L5 8l5 5" /></AppIcon>
+        <AppIcon :icon="ChevronLeft" size="lg" />
       </IconButton>
       <div class="mobile-top-meta">
         <span class="mobile-top-count">{{ $t('thread.row.messages', { count: sentMessageCount }) }}</span>
@@ -1142,11 +1143,11 @@ function showEntireThread() {
             <!-- In Later the list row says when it comes back; the reader keeps
                  saying it once the row is out of sight. -->
             <span v-if="thread.workflowState === 'snoozed' && thread.snoozeUntil" class="thread-state thread-state--later">
-              <AppIcon size="sm"><circle cx="8" cy="8" r="6" /><path d="M8 4.5V8l2.5 1.5" /></AppIcon>
+              <AppIcon :icon="Clock" size="sm" />
               {{ $t('thread.row.back', { time: formatMessageTimestamp(thread.snoozeUntil) }) }}
             </span>
             <span v-if="thread.workflowState === 'done'" class="thread-state">
-              <AppIcon size="sm"><path d="M3 8.5l3.5 3.5L13 5" /></AppIcon>
+              <AppIcon :icon="Check" size="sm" />
               {{ $t('common.done') }}
             </span>
           </div>
@@ -1185,7 +1186,7 @@ function showEntireThread() {
         <div v-if="hiddenMessageCount > 0 && ui.isMobile" class="thread-earlier">
           <ListRowButton class="thread-earlier-row" @click="showEntireThread">
             <!-- Unfold, not a caret: an up caret read as "collapse". -->
-            <AppIcon size="sm"><path d="M5 6l3-3 3 3M5 10l3 3 3-3" /></AppIcon>
+            <AppIcon :icon="ChevronsUpDown" size="sm" />
             {{ $t('thread.view.showEarlier', { count: hiddenMessageCount }) }}
           </ListRowButton>
         </div>

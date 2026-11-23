@@ -2,6 +2,7 @@
 import AppButton from '@/components/ui/AppButton.vue';
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { BadgeCheck, Lock, TriangleAlert, type IconNode } from 'lucide';
 import type { SmimeMessageState } from '@/types/mail';
 import { translateBackendError } from '@/utils/backendErrors';
 import AppIcon from '@/components/ui/AppIcon.vue';
@@ -100,25 +101,19 @@ const config = computed(() => {
       };
   }
 });
+
+const stateIcon = computed<IconNode>(() => {
+  if (props.state === 'signature_partial') return TriangleAlert;
+  if (props.state === 'signature_valid') return BadgeCheck;
+  return Lock;
+});
 </script>
 
 <template>
   <div class="smime-card" :class="`tone-${config.tone}`" role="status">
     <div class="accent" />
     <div class="icon" aria-hidden="true">
-      <AppIcon v-if="state === 'signature_partial'" size="lg">
-        <path d="M8 2 1 14h14L8 2Z" />
-        <path d="M8 6v4" />
-        <path d="M8 12h.01" />
-      </AppIcon>
-      <svg v-else-if="state === 'signature_valid' || state === 'decrypted'" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M10 1.7 3.5 4.8v4.5c0 4.2 2.7 7.5 6.5 9 3.8-1.5 6.5-4.8 6.5-9V4.8L10 1.7Z" />
-        <path d="m6.8 10.2 2.1 2.1 4.4-4.8" />
-      </svg>
-      <svg v-else width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <rect x="3" y="8" width="14" height="9" rx="2" />
-        <path d="M6 8V5.8a4 4 0 0 1 8 0V8" />
-      </svg>
+      <AppIcon :icon="stateIcon" size="lg" />
     </div>
     <div class="content">
       <strong>{{ config.title }}</strong>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import AppIcon from '@/components/ui/AppIcon.vue';
+import { ChevronDown, ChevronLeft, ChevronUp, Search, X } from 'lucide';
 import SearchInput from '@/components/ui/SearchInput.vue';
 import { highlightMatches, searchHighlightTerms } from '@/utils/highlight';
 import CardButton from '@/components/ui/CardButton.vue';
@@ -246,7 +247,7 @@ function goBack() {
         <div class="search-title-row">
           <!-- A pushed screen on the phone: the tab bar steps aside, Back leads out. -->
           <IconButton v-if="ui.isMobile" :title="$t('common.back')" @click="goBack">
-            <AppIcon size="lg"><path d="m10.5 3-5 5 5 5" /></AppIcon>
+            <AppIcon :icon="ChevronLeft" size="lg" />
           </IconButton>
           <h2 class="search-title">{{ $t('search.title') }}</h2>
         </div>
@@ -260,7 +261,7 @@ function goBack() {
           >
             <template #trailing>
               <IconButton v-if="hasQuery" class="search-clear" :title="t('search.clear')" @click="query = ''; searchInput?.focus()">
-                <AppIcon><circle cx="8" cy="8" r="6" /><path d="m6 6 4 4m0-4-4 4" /></AppIcon>
+                <AppIcon :icon="X" />
               </IconButton>
             </template>
           </SearchInput>
@@ -274,7 +275,7 @@ function goBack() {
           aria-controls="search-operators"
           @click="tipsOpen = !tipsOpen"
         >
-          <template #icon><AppIcon><path :d="tipsOpen ? 'm4 10 4-4 4 4' : 'm4 6 4 4 4-4'" /></AppIcon></template>
+          <template #icon><AppIcon :icon="tipsOpen ? ChevronUp : ChevronDown" /></template>
           {{ t('search.tips') }}
         </AppButton>
         <div v-if="!hasQuery || tipsOpen" id="search-operators" class="operator-hints" :aria-label="t('search.tips')">
@@ -379,10 +380,7 @@ function goBack() {
           :description="$t('search.noResults.description')"
         >
           <template #icon>
-            <AppIcon size="lg">
-              <circle cx="7" cy="7" r="5" />
-              <path d="M11 11L14 14" />
-            </AppIcon>
+            <AppIcon :icon="Search" size="lg" />
           </template>
         </EmptyState>
         <EmptyState
@@ -391,10 +389,7 @@ function goBack() {
           :description="$t('search.intro.description')"
         >
           <template #icon>
-            <AppIcon size="lg">
-              <circle cx="7" cy="7" r="5" />
-              <path d="M11 11L14 14" />
-            </AppIcon>
+            <AppIcon :icon="Search" size="lg" />
           </template>
         </EmptyState>
 
@@ -467,10 +462,7 @@ function goBack() {
           :description="$t('search.detail.description')"
         >
           <template #icon>
-            <AppIcon size="lg">
-              <circle cx="7" cy="7" r="5" />
-              <path d="M11 11L14 14" />
-            </AppIcon>
+            <AppIcon :icon="Search" size="lg" />
           </template>
         </EmptyState>
       </div>

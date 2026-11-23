@@ -16,6 +16,7 @@
  * A danger banner announces itself: `status` waits for a pause in the screen
  * reader's queue, and a failure the user is about to work around cannot wait.
  */
+import { CircleAlert, Info, TriangleAlert } from 'lucide';
 import AppIcon from '@/components/ui/AppIcon.vue';
 withDefaults(
   defineProps<{
@@ -39,21 +40,9 @@ withDefaults(
     :role="tone === 'danger' ? 'alert' : 'status'"
   >
     <span class="banner__icon" aria-hidden="true">
-      <AppIcon v-if="tone === 'danger'">
-        <circle cx="8" cy="8" r="5.8" />
-        <path d="M8 5v3.6" />
-        <path d="M8 10.8h.01" />
-      </AppIcon>
-      <AppIcon v-else-if="tone === 'warning'">
-        <path d="M8 2.4 14.2 13H1.8L8 2.4Z" />
-        <path d="M8 6.6v3" />
-        <path d="M8 11.6h.01" />
-      </AppIcon>
-      <AppIcon v-else>
-        <circle cx="8" cy="8" r="5.8" />
-        <path d="M8 7.4v3.4" />
-        <path d="M8 5.2h.01" />
-      </AppIcon>
+      <AppIcon v-if="tone === 'danger'" :icon="CircleAlert" />
+      <AppIcon v-else-if="tone === 'warning'" :icon="TriangleAlert" />
+      <AppIcon v-else :icon="Info" />
     </span>
 
     <span class="banner__copy">

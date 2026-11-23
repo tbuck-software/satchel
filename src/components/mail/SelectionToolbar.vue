@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { Check, Clock, Ellipsis, FolderInput, Inbox, Mail, MailOpen, ShieldAlert, Trash2 } from 'lucide';
 import AppButton from '@/components/ui/AppButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
@@ -112,26 +113,26 @@ function run(action: 'pin' | 'aside' | 'waiting' | 'spam' | 'notSpam') {
         @click="void actions.toggleDone(ids())"
       >
         <template #icon>
-          <AppIcon v-if="allDone"><path d="M8 11V3.4M5.4 8.4 8 11l2.6-2.6" /><path d="M2.8 11.2v1.2a1 1 0 0 0 1 1h8.4a1 1 0 0 0 1-1v-1.2" /></AppIcon>
-          <AppIcon v-else><path d="M3 8.5 6.2 11.7 13 5" /></AppIcon>
+          <AppIcon :icon="Inbox" v-if="allDone" />
+          <AppIcon :icon="Check" v-else />
         </template>
         {{ allDone ? t('thread.selection.toInbox', { count: threads.selectedThreadIds.length }) : t('thread.selection.done', { count: threads.selectedThreadIds.length }) }}
       </AppButton>
       <AppButton variant="ghost" size="sm" :disabled="busy" :title="t('thread.actions.snooze')" :shortcut="hint('moveSnoozed')" @click="ui.openReminder(ids())">
-        <template #icon><AppIcon><circle cx="8" cy="8" r="6" /><path d="M8 4v4l2.5 1.5" /></AppIcon></template>
+        <template #icon><AppIcon :icon="Clock" /></template>
         {{ t('thread.actions.snooze') }}
       </AppButton>
       <IconButton v-if="actions.canTrash(threads.selectedThreadIds)" :title="t('common.delete')" :disabled="busy" :shortcut="hint('trash')" @click="void actions.trash(ids())">
-        <AppIcon><path d="M2 4h12M6 4V2h4v2M4 4l1 10h6l1-10" /></AppIcon>
+        <AppIcon :icon="Trash2" />
       </IconButton>
       <IconButton :title="anyUnread ? t('thread.actions.markRead') : t('thread.actions.markUnread')" :disabled="busy" :shortcut="hint('toggleRead')" @click="void actions.setRead(ids(), anyUnread, { undo: true })">
-        <AppIcon><rect x="2" y="3" width="12" height="10" rx="2" /><path d="m2 5 6 4 6-4" /></AppIcon>
+        <AppIcon :icon="anyUnread ? MailOpen : Mail" />
       </IconButton>
       <IconButton :title="t('thread.actions.fileTo')" :disabled="busy" :shortcut="hint('fileTo')" @click="openFile">
-        <AppIcon><path d="M2 4h5l2 2h5v7H2V4Z" /></AppIcon>
+        <AppIcon :icon="FolderInput" />
       </IconButton>
       <IconButton :title="t('thread.toolbar.moreActions')" :disabled="busy" aria-haspopup="menu" :aria-expanded="menuOpen" @click="openMenu">
-        <AppIcon><circle cx="3" cy="8" r=".75" fill="currentColor" /><circle cx="8" cy="8" r=".75" fill="currentColor" /><circle cx="13" cy="8" r=".75" fill="currentColor" /></AppIcon>
+        <AppIcon :icon="Ellipsis" />
       </IconButton>
     </div>
     <ContextMenu v-if="menuOpen" :open="menuOpen" :anchor="menuAnchor" :label="t('thread.toolbar.moreActions')" :width="280" @close="menuOpen = false">
@@ -140,7 +141,7 @@ function run(action: 'pin' | 'aside' | 'waiting' | 'spam' | 'notSpam') {
       <MenuItem icon="clock" :label="t('thread.state.waiting')" @select="run('waiting')" />
       <MenuItem v-if="anyNotSpam" icon="inbox" :label="t('thread.actions.notSpam')" @select="run('notSpam')" />
       <MenuItem :label="t('thread.toolbar.markSpam')" tone="danger" @select="run('spam')">
-        <template #icon><AppIcon><path d="M2 4h12v10H2V4ZM5 2h6M6 7l4 4m0-4-4 4" /></AppIcon></template>
+        <template #icon><AppIcon :icon="ShieldAlert" /></template>
       </MenuItem>
       <div class="selection-classification">
         <select v-model="selectedCategory" class="selection-select" :aria-label="$t('inbox.classifyAs')">

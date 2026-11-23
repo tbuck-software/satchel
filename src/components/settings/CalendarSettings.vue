@@ -1,5 +1,7 @@
 <script setup lang="ts">
+import AppIcon from '@/components/ui/AppIcon.vue';
 import { computed, onMounted, ref } from 'vue';
+import { Check } from 'lucide';
 import { useI18n } from 'vue-i18n';
 import AppButton from '@/components/ui/AppButton.vue';
 import NavItem from '@/components/ui/NavItem.vue';
@@ -90,9 +92,7 @@ async function syncNow() {
         >
           <template #leading>
             <span class="source-dot" :style="{ backgroundColor: source.color }" aria-hidden="true">
-              <svg v-if="!calendarUi.isSourceHidden(source.key)" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                <path d="m2 5.2 2 2 4-4" />
-              </svg>
+              <AppIcon v-if="!calendarUi.isSourceHidden(source.key)" size="sm" :icon="Check" />
             </span>
           </template>
           <template #trailing>

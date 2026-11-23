@@ -10,6 +10,7 @@ import { useRouter } from 'vue-router';
 import ContextMenu from '@/components/ui/ContextMenu.vue';
 import MenuItem from '@/components/ui/MenuItem.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
+import { BrushCleaning, Moon } from 'lucide';
 import { useToast } from '@/composables/useToast';
 import ColorSwatchPicker from '@/components/ui/ColorSwatchPicker.vue';
 import { ACCOUNT_COLORS } from '@/config/accountColors';
@@ -78,7 +79,7 @@ function openSettings() {
     <MenuItem v-if="!visible" :label="t('accountVisibility.showToday')" icon="clock" :disabled="accounts.visibilityBusy" @select="setShown(true)" />
     <MenuItem v-else-if="canHide" :label="t('accountVisibility.hide')" :disabled="accounts.visibilityBusy" @select="setShown(false)">
       <template #icon>
-        <AppIcon :grid="24"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401" /></AppIcon>
+        <AppIcon :icon="Moon" />
       </template>
     </MenuItem>
     <div v-if="account" class="account-menu__colors">
@@ -92,7 +93,7 @@ function openSettings() {
       />
     </div>
     <MenuItem v-if="account?.kind === 'email'" :label="t('cleanup.openForAccount')" @select="openCleanup">
-      <template #icon><AppIcon><path d="M11 2.5 7.5 8" /><path d="M4 8h6l1 5.5H3z" /></AppIcon></template>
+      <template #icon><AppIcon :icon="BrushCleaning" /></template>
     </MenuItem>
     <MenuItem :label="t('accountAppearance.settings')" @select="openSettings" />
   </ContextMenu>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { Layers, Plus } from 'lucide';
 import { useI18n } from 'vue-i18n';
 import type { Topic } from '@/stores/topics';
 import Avatar from '@/components/common/Avatar.vue';
@@ -57,9 +58,7 @@ const chips = computed(() =>
   >
     <template #icon>
       <span class="topics-glyph" aria-hidden="true">
-        <AppIcon size="lg">
-          <path d="M2 4.5C2 3.7 2.7 3 3.5 3H6L7.5 4.5H12.5C13.3 4.5 14 5.2 14 6V11.5C14 12.3 13.3 13 12.5 13H3.5C2.7 13 2 12.3 2 11.5V4.5Z" />
-        </AppIcon>
+        <AppIcon size="lg" :icon="Layers" />
       </span>
     </template>
     <template #chip="{ chip }">
@@ -70,9 +69,7 @@ const chips = computed(() =>
     <template #empty>{{ $t('topics.card.empty') }}</template>
     <template #actions>
       <IconButton size="sm" :title="$t('topics.card.new')" @click.stop="emit('create')">
-        <AppIcon size="sm">
-          <path d="M8 3V13M3 8H13" />
-        </AppIcon>
+        <AppIcon size="sm" :icon="Plus" />
       </IconButton>
     </template>
   </FolderPreviewCard>

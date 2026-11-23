@@ -41,6 +41,7 @@ import { useToast } from '@/composables/useToast';
 import AppBanner from '@/components/ui/AppBanner.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
+import { X } from 'lucide';
 import IconButton from '@/components/ui/IconButton.vue';
 
 // Mounted here rather than in App: this banner already loads on demand and is
@@ -204,7 +205,7 @@ function updatePassword(accountId: string) {
           {{ t('certificates.banner.details') }}
         </AppButton>
         <IconButton size="sm" :title="t('certificates.banner.hide')" @click="certificates.dismiss(certificateProblem.accountId)">
-          <AppIcon><path d="m4 4 8 8m0-8-8 8" /></AppIcon>
+          <AppIcon :icon="X" />
         </IconButton>
       </template>
       <template v-else>

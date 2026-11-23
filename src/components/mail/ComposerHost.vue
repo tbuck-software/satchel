@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import AppIcon from '@/components/ui/AppIcon.vue';
+import { ChevronLeft, Maximize2, Minimize2, SquareArrowOutUpRight, X } from 'lucide';
 import IconButton from '@/components/ui/IconButton.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
@@ -389,9 +390,7 @@ onBeforeUnmount(() => {
             :aria-label="$t('common.back')"
             @click.stop="requestCloseComposer()"
            :title="$t('common.back')">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M15 18l-6-6 6-6" />
-            </svg>
+            <AppIcon :icon="ChevronLeft" size="lg" />
           </IconButton>
           <div class="composer-heading">
             <strong>{{ composerHeading }}</strong>
@@ -402,14 +401,14 @@ onBeforeUnmount(() => {
               :aria-label="maximized ? $t('compose.window.restore') : $t('compose.window.maximize')"
               @click.stop="toggleMaximize"
             >
-              <AppIcon v-if="!maximized"><path d="M3 6V3h3M10 3h3v3M13 10v3h-3M6 13H3v-3"/></AppIcon>
-              <AppIcon v-else><rect x="2.5" y="5" width="8.5" height="8.5" rx="1.5"/><path d="M5 5V3.5A1.5 1.5 0 016.5 2h6A1.5 1.5 0 0114 3.5v6A1.5 1.5 0 0112.5 11H11"/></AppIcon>
+              <AppIcon v-if="!maximized" :icon="Maximize2" />
+              <AppIcon v-else :icon="Minimize2" />
             </IconButton>
             <IconButton :title="$t('compose.window.popOut')" :aria-label="$t('compose.window.popOut')" @click.stop="openInOwnWindow">
-              <AppIcon><rect x="2" y="4.5" width="9.5" height="9.5" rx="2"/><path d="M6 2h8v8M13.5 2.5L8 8"/></AppIcon>
+              <AppIcon :icon="SquareArrowOutUpRight" />
             </IconButton>
             <IconButton :title="$t('compose.window.close')" :aria-label="$t('compose.window.close')" @click.stop="requestCloseComposer()">
-              <AppIcon><path d="M3 3l10 10M13 3L3 13"/></AppIcon>
+              <AppIcon :icon="X" />
             </IconButton>
           </div>
         </header>

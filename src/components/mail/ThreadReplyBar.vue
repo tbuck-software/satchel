@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import { Reply } from 'lucide';
 import AccountAvatar from '@/components/common/AccountAvatar.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import CardButton from '@/components/ui/CardButton.vue';
@@ -50,7 +51,7 @@ useToastClearance(barRef);
       @click="$emit('reply')"
     >
       <span class="reply-bar__lead" aria-hidden="true">
-        <AppIcon><path d="M6 3L1 8l5 5" /><path d="M1 8h9a5 5 0 0 1 5 5" /></AppIcon>
+        <AppIcon :icon="Reply" />
       </span>
       <span class="reply-bar__prompt">
         {{ $t('thread.reply.to', { name: recipient }) }}

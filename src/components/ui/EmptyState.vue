@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Inbox } from 'lucide';
 import AppButton from './AppButton.vue';
 import AppIcon from './AppIcon.vue';
 
@@ -25,10 +26,7 @@ const emit = defineEmits<{
   <div class="empty">
     <div class="icon" aria-hidden="true">
       <slot name="icon">
-        <AppIcon size="lg">
-          <path d="M2.5 9.5 4.3 3.8A1 1 0 0 1 5.3 3h5.4a1 1 0 0 1 1 .8l1.8 5.7" />
-          <path d="M2.5 9.5V12a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V9.5h-3.2l-.8 1.5h-3l-.8-1.5H2.5Z" />
-        </AppIcon>
+        <AppIcon size="lg" :icon="Inbox" />
       </slot>
     </div>
     <h3>{{ title }}</h3>

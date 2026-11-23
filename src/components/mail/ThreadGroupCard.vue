@@ -3,6 +3,9 @@ import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { SimilarThreadGroup } from '@/stores/threads';
 import Avatar from '@/components/common/Avatar.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
+import { Bookmark, Check, Inbox, Mail, MailOpen, Minus, Pin, Trash2 } from 'lucide';
+import type { IconNode } from 'lucide';
 import AvatarUnreadDot from '@/components/ui/AvatarUnreadDot.vue';
 import CountBadge from '@/components/ui/CountBadge.vue';
 import ListRowButton from '@/components/ui/ListRowButton.vue';
@@ -92,6 +95,18 @@ const {
   },
 });
 
+/** The swipe track's glyph: what letting go does to the whole stack. */
+const swipeIcon = computed<IconNode>(() => {
+  switch (swipeCandidateAction.value) {
+    case 'toggle-read': return isUnread.value ? MailOpen : Mail;
+    case 'done': return isDone.value ? Inbox : Check;
+    case 'pin': return Pin;
+    case 'aside': return Bookmark;
+    case 'trash': return Trash2;
+    default: return Minus;
+  }
+});
+
 const formattedTime = computed(() => formatListTime(props.group.lastMessageAt));
 
 const bundleLabel = computed(() => t('thread.bundle.label', props.group.count));
@@ -165,31 +180,7 @@ function onDragStart(event: DragEvent) {
           :style="swipeRevealStyle"
         >
           <span class="bundle-card__swipe-icon">
-            <svg v-if="swipeCandidateAction === 'toggle-read'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="7.5" />
-              <path v-if="isUnread" d="m8.7 12.2 2.1 2.1 4.6-4.7" />
-            </svg>
-            <svg v-else-if="swipeCandidateAction === 'done' && isDone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 16.5V5.1M8.1 12.6 12 16.5l3.9-3.9" />
-              <path d="M4.2 16.8v1.8a1.5 1.5 0 0 0 1.5 1.5h12.6a1.5 1.5 0 0 0 1.5-1.5v-1.8" />
-            </svg>
-            <svg v-else-if="swipeCandidateAction === 'done'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="m5.5 12.4 4.1 4.1 8.9-9" />
-            </svg>
-            <svg v-else-if="swipeCandidateAction === 'pin'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M8 3.5h8l-1.1 5.8 3 3V14H6v-1.7l3-3L8 3.5Z" />
-              <path d="M12 14v6.5" />
-            </svg>
-            <svg v-else-if="swipeCandidateAction === 'aside'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M5 7.5h14v10H5z" />
-              <path d="M8 7.5V5h8v2.5M9 12h6" />
-            </svg>
-            <svg v-else-if="swipeCandidateAction === 'trash'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M4.5 7h15M9 7V4.5h6V7M7 7l.8 13h8.4L17 7M10 10.5v6M14 10.5v6" />
-            </svg>
-            <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
-              <path d="M7 12h10" />
-            </svg>
+            <AppIcon :icon="swipeIcon" />
           </span>
           <span class="bundle-card__swipe-label">{{ swipeActionLabel }}</span>
         </span>
@@ -432,11 +423,6 @@ function onDragStart(event: DragEvent) {
   background: color-mix(in srgb, var(--text-on-accent) 8%, transparent);
   transition: background-color var(--duration-fast) var(--ease-out),
     transform var(--duration-normal) cubic-bezier(0.2, 0.85, 0.3, 1.28);
-}
-
-.bundle-card__swipe-icon svg {
-  width: 17px;
-  height: 17px;
 }
 
 .bundle-card__swipe-action.is-armed .bundle-card__swipe-icon {

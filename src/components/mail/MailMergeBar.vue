@@ -5,6 +5,7 @@
  * (subject or body), and the way out.
  */
 import { ref, useId } from 'vue';
+import { Mails } from 'lucide';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import type { MailMergeSource } from '@/utils/mailMerge';
@@ -32,7 +33,7 @@ function onPick() {
 
 <template>
   <div class="merge-bar" data-testid="mail-merge-bar">
-    <AppIcon class="merge-bar__icon" aria-hidden="true"><path d="M2 4.5h8M2 8h8M2 11.5h5" /><path d="m11 9.5 3 2-3 2" /></AppIcon>
+    <AppIcon :icon="Mails" class="merge-bar__icon" aria-hidden="true" />
     <p class="merge-bar__label">
       <span class="merge-bar__title">{{ $t('mailMerge.bar.title') }}</span>
       <span class="merge-bar__count">{{ $t('mailMerge.bar.recipients', { count: source.rows.length, source: source.label }, source.rows.length) }}</span>

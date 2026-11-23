@@ -6,6 +6,9 @@ import { useI18n } from 'vue-i18n';
 import type { Thread } from '@/types/mail';
 import { formatListTime, formatMessageTimestamp, localeFormatter } from '@/utils/listTime';
 import Avatar from '@/components/common/Avatar.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
+import { BellOff, Bookmark, Check, Clock, FilePen, Inbox, Mail, MailOpen, Minus, Paperclip, Pin, PinOff, ShieldAlert, Trash2 } from 'lucide';
+import type { IconNode } from 'lucide';
 import AvatarUnreadDot from '@/components/ui/AvatarUnreadDot.vue';
 import ListRowMeta from '@/components/ui/ListRowMeta.vue';
 import CountBadge from '@/components/ui/CountBadge.vue';
@@ -166,6 +169,18 @@ const {
         break;
     }
   },
+});
+
+/** The swipe track's glyph: what letting go does, so a toggle shows its target state. */
+const swipeIcon = computed<IconNode>(() => {
+  switch (swipeCandidateAction.value) {
+    case 'toggle-read': return isUnread.value ? MailOpen : Mail;
+    case 'done': return isDone.value ? Inbox : Check;
+    case 'pin': return props.thread.isStarred ? PinOff : Pin;
+    case 'aside': return props.thread.workflowState === 'aside' ? Inbox : Bookmark;
+    case 'trash': return Trash2;
+    default: return Minus;
+  }
 });
 
 /** Playing the check-off exit animation; removal from the list follows. */
@@ -453,31 +468,7 @@ function onDragStart(event: DragEvent) {
           :style="swipeRevealStyle"
         >
           <span class="thread-row__swipe-icon">
-            <svg v-if="swipeCandidateAction === 'toggle-read'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="7.5" />
-              <path v-if="isUnread" d="m8.7 12.2 2.1 2.1 4.6-4.7" />
-            </svg>
-            <svg v-else-if="swipeCandidateAction === 'done' && isDone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 16.5V5.1M8.1 12.6 12 16.5l3.9-3.9" />
-              <path d="M4.2 16.8v1.8a1.5 1.5 0 0 0 1.5 1.5h12.6a1.5 1.5 0 0 0 1.5-1.5v-1.8" />
-            </svg>
-            <svg v-else-if="swipeCandidateAction === 'done'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="m5.5 12.4 4.1 4.1 8.9-9" />
-            </svg>
-            <svg v-else-if="swipeCandidateAction === 'pin'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M8 3.5h8l-1.1 5.8 3 3V14H6v-1.7l3-3L8 3.5Z" />
-              <path d="M12 14v6.5" />
-            </svg>
-            <svg v-else-if="swipeCandidateAction === 'aside'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M5 7.5h14v10H5z" />
-              <path d="M8 7.5V5h8v2.5M9 12h6" />
-            </svg>
-            <svg v-else-if="swipeCandidateAction === 'trash'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M4.5 7h15M9 7V4.5h6V7M7 7l.8 13h8.4L17 7M10 10.5v6M14 10.5v6" />
-            </svg>
-            <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
-              <path d="M7 12h10" />
-            </svg>
+            <AppIcon :icon="swipeIcon" />
           </span>
           <span class="thread-row__swipe-label">{{ swipeActionLabel }}</span>
         </span>
@@ -500,9 +491,7 @@ function onDragStart(event: DragEvent) {
     >
     <span v-if="isCheckingOff" class="thread-row__done-cue" aria-hidden="true">
       <span class="thread-row__done-seal">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-          <path d="m5.5 12.4 4.1 4.1 8.9-9" />
-        </svg>
+        <AppIcon :icon="Check" size="lg" />
       </span>
     </span>
 
@@ -516,9 +505,7 @@ function onDragStart(event: DragEvent) {
       <!-- Selected: the avatar is the checkbox it already acts as, so it
            shows the check. A tint alone read like a hover. -->
       <span v-if="props.selected" class="thread-row__checked" aria-hidden="true">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M3.5 8.5 6.5 11.5 12.5 5" />
-        </svg>
+        <AppIcon :icon="Check" />
       </span>
       <span v-else-if="props.thread.hasDraft" class="thread-row__draft-avatar" aria-hidden="true" />
       <Avatar
@@ -528,22 +515,7 @@ function onDragStart(event: DragEvent) {
         :size="36"
       />
       <AvatarUnreadDot v-if="isUnread" />
-      <svg
-        v-if="props.thread.hasDraft && !props.selected"
-        class="thread-row__draft-pencil absolute inset-[9px]"
-        width="18"
-        height="18"
-        viewBox="0 0 20 20"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.65"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
-      >
-        <path d="M13.8 3.2l3 3L7.1 15.9H4.2v-2.8L13.8 3.2Z" />
-        <path d="M12.3 4.8l3 3" />
-      </svg>
+      <AppIcon v-if="props.thread.hasDraft && !props.selected" class="thread-row__draft-pencil absolute inset-[8px]" :icon="FilePen" size="lg" />
     </span>
 
     <div class="relative flex min-h-0 min-w-0 flex-col justify-center">
@@ -588,11 +560,7 @@ function onDragStart(event: DragEvent) {
           class="spam-label"
           :title="props.thread.spamMoved ? $t('thread.spam.movedHint') : $t('thread.spam.rowHint')"
         >
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M8 1.5l5 2.9v7.2L8 14.5l-5-2.9V4.4L8 1.5Z" />
-            <path d="M8 5.1v3.5" />
-            <path d="M8 11h.01" />
-          </svg>
+          <AppIcon :icon="ShieldAlert" size="sm" />
           {{ props.thread.spamMoved ? $t('thread.spam.moved') : $t('thread.spam.likely') }}
         </span>
         <span
@@ -601,58 +569,15 @@ function onDragStart(event: DragEvent) {
           :class="{ 'follow-up-label--due': followUpDue, 'follow-up-label--later': !followUp }"
           :title="followUp ? $d(new Date(followUp.due_at), 'long') : undefined"
         >
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="8" cy="8" r="5.5" />
-            <path d="M8 5v3l2 1.5" />
-          </svg>
+          <AppIcon :icon="Clock" size="sm" />
           {{ followUp ? followUpLabel : laterLabel }}
         </span>
         <span class="min-w-0 flex-1 truncate text-xs leading-[1.5] text-tertiary">
           <template v-for="(segment, index) in snippetSegments" :key="index"><mark v-if="segment.marked" class="thread-row__match">{{ segment.text }}</mark><template v-else>{{ segment.text }}</template></template>
         </span>
-        <svg
-          v-if="props.thread.isStarred"
-          class="shrink-0"
-          style="color: var(--accent-yellow)"
-          width="14"
-          height="14"
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.5"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        >
-          <path d="M5.2 2.3h5.6l-.8 4 2.1 2.1v1.1H3.9V8.4L6 6.3l-.8-4Z"/><path d="M8 9.5v4.2"/>
-        </svg>
-        <svg
-          v-if="props.thread.isMuted"
-          class="shrink-0 text-tertiary"
-          width="14"
-          height="14"
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.5"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        >
-          <path d="M3 6v4h2.5l3 3V3l-3 3z"/>
-          <path d="M11 5l3 3M14 5l-3 3"/>
-        </svg>
-        <svg
-          v-if="props.thread.hasAttachments"
-          class="shrink-0 text-tertiary"
-          width="14"
-          height="14"
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.5"
-          stroke-linecap="round"
-        >
-          <path d="M14 8.5L8 14.5a3.5 3.5 0 01-5-5L9.5 3a2.5 2.5 0 013.5 3.5L6.5 13a1.5 1.5 0 01-2-2.1L11 4.5" />
-        </svg>
+        <AppIcon v-if="props.thread.isStarred" class="shrink-0" style="color: var(--accent-yellow)" :icon="Pin" size="sm" />
+        <AppIcon v-if="props.thread.isMuted" class="shrink-0 text-tertiary" :icon="BellOff" size="sm" />
+        <AppIcon v-if="props.thread.hasAttachments" class="shrink-0 text-tertiary" :icon="Paperclip" size="sm" />
       </div>
       <!-- In the text column, so the time sits on the sender line at any row height. -->
       <ListRowMeta class="thread-row__meta" :time="formattedTime">
@@ -970,11 +895,6 @@ function onDragStart(event: DragEvent) {
     transform var(--duration-normal) cubic-bezier(0.2, 0.85, 0.3, 1.28);
 }
 
-.thread-row__swipe-icon svg {
-  width: 17px;
-  height: 17px;
-}
-
 .thread-row__swipe-action.is-armed .thread-row__swipe-icon {
   background: rgba(255, 255, 255, .2);
   transform: scale(1.1);
@@ -1054,9 +974,9 @@ function onDragStart(event: DragEvent) {
   height: 22px;
 }
 
-.thread-row__done-seal path {
-  stroke-dasharray: 20;
-  stroke-dashoffset: 20;
+.thread-row__done-seal :deep(path) {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 24;
   animation: thread-row-done-check 170ms 45ms var(--ease-out) forwards;
 }
 @keyframes thread-row-leave {

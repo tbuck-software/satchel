@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { Puzzle } from 'lucide';
 import { useI18n } from 'vue-i18n';
 import { useConfirm } from '@/composables/useConfirm';
 import {
@@ -677,7 +678,7 @@ onMounted(() => {
       :description="$t('settings.plugins.noneFoundHint')"
     >
       <template #icon>
-        <AppIcon size="lg" :grid="24"><path d="M12 2v5M12 17v5M4.93 4.93l3.54 3.54M15.53 15.53l3.54 3.54M2 12h5M17 12h5M4.93 19.07l3.54-3.54M15.53 8.47l3.54-3.54" /><circle cx="12" cy="12" r="3" /></AppIcon>
+        <AppIcon size="lg" :icon="Puzzle" />
       </template>
     </EmptyState>
 

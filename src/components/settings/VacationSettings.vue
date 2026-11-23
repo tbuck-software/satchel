@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
+import { TriangleAlert } from 'lucide';
 import { useI18n } from 'vue-i18n';
 import { useAccountsStore } from '@/stores/accounts';
 import {
@@ -141,7 +142,7 @@ async function save() {
            its server rules (Sieve). -->
       <div v-if="!canSetReply" class="setting-row setting-row--single">
         <p class="notice" role="note">
-          <AppIcon class="notice__icon"><path d="M8 2.5 14 13H2Z" /><path d="M8 6.5v3M8 11.2h.01" /></AppIcon>
+          <AppIcon class="notice__icon" :icon="TriangleAlert" />
           <span v-if="isImapAccount && sieve?.server_active">{{ $t('settings.vacation.imapNoVacation') }}</span>
           <span v-else-if="isImapAccount">{{ $t('settings.vacation.imapServerRulesHint') }}</span>
           <span v-else>{{ $t('settings.vacation.imapWarning') }}</span>

@@ -3,6 +3,7 @@ import AppIcon from '@/components/ui/AppIcon.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import KeyCap from '@/components/ui/KeyCap.vue';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { Clock, RotateCcwClock, Search, X } from 'lucide';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { useUiStore } from '@/stores/ui';
@@ -416,10 +417,7 @@ function onEnter(event: KeyboardEvent) {
       <div v-if="ui.omniOpen" class="backdrop" :class="{ 'backdrop--dragging': dragging }" @click.self="close()">
         <section ref="panelRef" class="panel" role="dialog" aria-modal="true" :aria-label="$t('nav.omni.ariaLabel')">
           <div class="search-row">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.4" aria-hidden="true">
-              <circle cx="7" cy="7" r="5"/>
-              <path d="M11 11L14 14"/>
-            </svg>
+            <AppIcon size="sm" :icon="Search" opacity="0.4" />
             <input
               ref="inputRef"
               v-model="inputValue"
@@ -481,9 +479,7 @@ function onEnter(event: KeyboardEvent) {
               >
                 <template v-if="item.kind === 'command'">
                   <span class="row-icon" aria-hidden="true">
-                    <AppIcon v-if="item.command.icon" :grid="COMMAND_ICONS[item.command.icon].grid">
-                      <path v-for="path in COMMAND_ICONS[item.command.icon].paths" :key="path" :d="path" />
-                    </AppIcon>
+                    <AppIcon v-if="item.command.icon" :icon="COMMAND_ICONS[item.command.icon]" />
                   </span>
                   <span class="row-title">{{ item.command.title }}</span>
                   <span v-if="item.command.shortcut" class="command-shortcut">
@@ -493,10 +489,7 @@ function onEnter(event: KeyboardEvent) {
 
                 <template v-else-if="item.kind === 'recent'">
                   <span class="row-icon" aria-hidden="true">
-                    <AppIcon>
-                      <circle cx="8" cy="8" r="5.5"/>
-                      <path d="M8 5.5V8L10 9.5"/>
-                    </AppIcon>
+                    <AppIcon :icon="RotateCcwClock" />
                   </span>
                   <span class="row-title">{{ item.recentQuery }}</span>
                   <!-- span, not button: options must not nest interactive elements -->
@@ -508,9 +501,7 @@ function onEnter(event: KeyboardEvent) {
                     :title="$t('nav.omni.removeRecent')"
                     @click.stop="removeRecent(item.recentQuery)"
                   >
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
-                      <path d="M4 4L12 12M12 4L4 12"/>
-                    </svg>
+                    <AppIcon size="sm" :icon="X" />
                   </span>
                 </template>
 
@@ -549,7 +540,7 @@ function onEnter(event: KeyboardEvent) {
 
                 <template v-else-if="item.kind === 'reminder'">
                   <span class="reminder-icon" aria-hidden="true">
-                    <svg viewBox="0 0 20 20"><path d="M10 2.5v2M10 15.5v2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M2.5 10h2M15.5 10h2"/><circle cx="10" cy="10" r="4.5"/><path d="M10 7.5v2.8l1.8 1"/></svg>
+                    <AppIcon size="lg" :icon="Clock" />
                   </span>
                   <span class="reminder-copy">
                     <strong>{{ item.reminder.label }}</strong>
@@ -768,15 +759,6 @@ function onEnter(event: KeyboardEvent) {
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--accent-purple) 12%, var(--bg-base));
   color: var(--accent-purple);
-}
-
-.reminder-icon svg {
-  width: 18px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
 .reminder-copy {

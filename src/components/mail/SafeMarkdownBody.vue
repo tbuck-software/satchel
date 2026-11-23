@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, provide, ref } from 'vue';
+import { X } from 'lucide';
 import { parseSafeMarkdown } from '@/utils/safeMarkdown';
 import type { LinkInteraction } from '@/utils/externalLinks';
+import AppIcon from '@/components/ui/AppIcon.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import SafeMarkdownNode from './SafeMarkdownNode.vue';
 
@@ -77,9 +79,7 @@ function closeImagePreview() {
           :title="$t('mail.markdown.closeImagePreview')"
           @click="closeImagePreview"
         >
-          <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
-            <path d="m5 5 10 10M15 5 5 15" />
-          </svg>
+          <AppIcon :icon="X" size="lg" />
         </IconButton>
       </div>
     </Transition>
@@ -372,11 +372,6 @@ function closeImagePreview() {
 .md-lightbox .md-lightbox__close:hover:not(:disabled) {
   background: color-mix(in srgb, var(--lightbox-chrome) 76%, var(--lightbox-ink));
   color: var(--text-on-accent);
-}
-
-.md-lightbox__close svg {
-  width: 18px;
-  height: 18px;
 }
 
 .md-lightbox-enter-active,
