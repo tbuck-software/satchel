@@ -15,7 +15,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
-use tokio::time::{timeout, Duration};
+use tokio::time::{timeout, timeout_at, Duration, Instant};
 use tokio_rustls::TlsConnector;
 
 use super::imap::{
@@ -63,7 +63,7 @@ pub fn deletes_after_fetch(
         .unwrap_or(true))
 }
 
-/// Which UIDLs have already been ingested.
+/// Which UIDLs were downloaded or rejected by a previous sync.
 ///
 /// Stored rather than recomputed because POP3 offers no "since" query: the only
 /// way to tell new mail from old is to compare the server's UIDL list against
@@ -72,6 +72,8 @@ pub fn deletes_after_fetch(
 struct Pop3CursorState {
     #[serde(default)]
     seen_uidls: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    rejected_uidls: Vec<String>,
 }
 
 impl Pop3CursorState {
@@ -147,7 +149,14 @@ impl Pop3Provider {
         let username = pop3
             .username
             .as_deref()
-            .map(str::trim)
+            // Preserve command delimiters so validation can reject them.
+            .map(|username| {
+                if contains_command_control(username) {
+                    username
+                } else {
+                    username.trim()
+                }
+            })
             .filter(|value| !value.is_empty())
             .unwrap_or(fallback_username)
             .to_string();
@@ -217,16 +226,17 @@ impl Pop3Provider {
 
     /// Retrieve an existing message by its stable UIDL without deleting it.
     pub async fn fetch_raw_message(&self, uidl: &str) -> Result<Vec<u8>, String> {
-        let mut session = self.connect().await?;
-        let listing = parse_uidl_listing(&session.multiline_command("UIDL").await?);
+        let (mut session, listing) = self.connect_with_uidls().await?;
         let number = listing
             .iter()
             .find(|(_, listed)| listed == uidl)
             .map(|(number, _)| *number)
             .ok_or_else(|| "backend.errors.exportOriginalUnavailable".to_string())?;
-        let result = match session.retr(number).await? {
-            Retrieved::Body(lines) => Ok(join_crlf(&lines)),
-            Retrieved::Rejected(reason) => Err(reason),
+        let result = match session.retr(number).await.map_err(|err| err.to_string())? {
+            Retrieved::Body(raw) => Ok(raw),
+            Retrieved::Refused => Err(Pop3Error::Refused.to_string()),
+            // The response is still coming in. Close without sending QUIT.
+            Retrieved::Oversized(err) => return Err(err.to_string()),
         };
         let _ = session.quit().await;
         result
@@ -238,15 +248,24 @@ impl Pop3Provider {
             .ok_or_else(|| "POP3 provider config missing".to_string())
     }
 
+    async fn connect_with_uidls(&self) -> Result<(Pop3Session, Vec<(u32, String)>), String> {
+        let mut session = self.connect().await?;
+        let listing = session.uidls().await?;
+        Ok((session, listing))
+    }
+
     /// Connect and authenticate, then hang up. Used by account discovery to
     /// test a host/username combination without ingesting anything.
     pub async fn verify_credentials(&self) -> Result<(), String> {
         let mut session = self.connect().await?;
         // STAT proves the mailbox is actually readable, not just that the
         // login was accepted.
-        let result = session.command("STAT").await.map(|_| ());
+        session
+            .command("STAT")
+            .await
+            .map_err(|err| err.to_string())?;
         let _ = session.quit().await;
-        result
+        Ok(())
     }
 
     async fn connect(&self) -> Result<Pop3Session, String> {
@@ -254,6 +273,17 @@ impl Pop3Provider {
         if rejects_plaintext(cfg) {
             return Err(PLAINTEXT_REJECTED_KEY.to_string());
         }
+        if contains_command_control(&cfg.username) {
+            return Err(
+                "pop3 authentication failed: username contains a forbidden control byte".into(),
+            );
+        }
+        if contains_command_control(&cfg.password) {
+            return Err(
+                "pop3 authentication failed: password contains a forbidden control byte".into(),
+            );
+        }
+
         let tcp = timeout(
             Self::op_timeout(),
             TcpStream::connect((cfg.host.as_str(), cfg.port)),
@@ -281,7 +311,11 @@ impl Pop3Provider {
         };
 
         // Greeting first, then credentials.
-        session.read_status().await?;
+        let deadline = Instant::now() + session.op_timeout;
+        session
+            .read_status(deadline)
+            .await
+            .map_err(|err| err.to_string())?;
         session
             .command(&format!("USER {}", cfg.username))
             .await
@@ -294,9 +328,68 @@ impl Pop3Provider {
     }
 }
 
+// RFC 1939 allows 512 bytes for protocol response lines, including CRLF.
+// Mail content gets a more generous line limit for long lines in real mail.
+const PROTOCOL_LINE_BYTES: usize = 512;
+const MAX_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
+const MAX_BATCH_BYTES: usize = 64 * 1024 * 1024;
+// Bound work on maildrops with many failures. The cursor lets each new run
+// skip the permanent failures from earlier passes.
+const MAX_REJECTED_PER_BATCH: usize = 200;
+const MAX_OVERSIZED_PER_BATCH: usize = 4;
+
+struct MultilineLimits {
+    line_bytes: usize,
+    body_bytes: usize,
+    timeout_multiplier: u32,
+}
+
+const UIDL_LIMITS: MultilineLimits = MultilineLimits {
+    line_bytes: PROTOCOL_LINE_BYTES,
+    body_bytes: 16 * 1024 * 1024,
+    timeout_multiplier: 1,
+};
+const RETR_LIMITS: MultilineLimits = MultilineLimits {
+    line_bytes: 1024 * 1024,
+    body_bytes: MAX_MESSAGE_BYTES,
+    timeout_multiplier: 4,
+};
+
+#[derive(Debug, thiserror::Error)]
+enum Pop3Error {
+    #[error("pop3 command contains a forbidden control byte")]
+    InvalidCommand,
+    #[error("pop3 server refused the command")]
+    Refused,
+    #[error("pop3 server temporarily refused the command")]
+    TemporarilyRefused,
+    #[error("pop3 server sent an unexpected status")]
+    UnexpectedStatus,
+    #[error("pop3 response line size limit exceeded")]
+    LineTooLong,
+    #[error("pop3 multiline response size limit exceeded")]
+    BodyTooLarge,
+    #[error("pop3 connection closed before the end of a response line")]
+    Closed,
+    #[error("pop3 read timed out")]
+    ReadTimeout,
+    #[error("pop3 read failed: {0}")]
+    Read(std::io::Error),
+    #[error("pop3 write timed out")]
+    WriteTimeout,
+    #[error("pop3 write failed: {0}")]
+    Write(std::io::Error),
+}
+
+fn contains_command_control(line: &str) -> bool {
+    line.bytes()
+        .any(|byte| matches!(byte, b'\r' | b'\n' | b'\0'))
+}
+
 /// One POP3 connection. Boxed so plain and TLS streams share a type.
 struct Pop3Session {
     stream: BufReader<Box<dyn Pop3Stream>>,
+    op_timeout: Duration,
 }
 
 trait Pop3Stream: AsyncRead + AsyncWrite + Unpin + Send {}
@@ -306,132 +399,171 @@ impl Pop3Session {
     fn new(stream: Box<dyn Pop3Stream>) -> Self {
         Self {
             stream: BufReader::new(stream),
+            op_timeout: Pop3Provider::op_timeout(),
         }
     }
 
-    /// Read one CRLF-terminated line as bytes.
-    ///
-    /// Mail bodies are not UTF-8: a single 8-bit byte would abort a decoding
-    /// read *after* consuming the bytes, leaving the session out of step.
-    async fn read_response_line(&mut self) -> Result<Vec<u8>, String> {
+    /// Read bytes up to and including LF, checking the budget before copying
+    /// from the fixed-size socket buffer. A partial line is never successful.
+    async fn read_response_line(
+        &mut self,
+        line: &mut Vec<u8>,
+        limit: usize,
+        response_deadline: Instant,
+    ) -> Result<(), Pop3Error> {
+        line.clear();
+        let deadline = response_deadline.min(Instant::now() + self.op_timeout);
+        loop {
+            if Instant::now() >= deadline {
+                return Err(Pop3Error::ReadTimeout);
+            }
+            let available = timeout_at(deadline, self.stream.fill_buf())
+                .await
+                .map_err(|_| Pop3Error::ReadTimeout)?
+                .map_err(Pop3Error::Read)?;
+            if available.is_empty() {
+                return Err(Pop3Error::Closed);
+            }
+            let newline = available.iter().position(|&byte| byte == b'\n');
+            let count = newline.map_or(available.len(), |index| index + 1);
+            let remaining = limit - line.len();
+            if count > remaining || (count == remaining && newline.is_none()) {
+                return Err(Pop3Error::LineTooLong);
+            }
+            line.extend_from_slice(&available[..count]);
+            self.stream.consume(count);
+            if newline.is_some() {
+                return Ok(());
+            }
+        }
+    }
+
+    async fn read_status(&mut self, deadline: Instant) -> Result<(), Pop3Error> {
         let mut line = Vec::new();
-        let read = timeout(
-            Pop3Provider::op_timeout(),
-            self.stream.read_until(b'\n', &mut line),
-        )
-        .await
-        .map_err(|_| "pop3 read timed out".to_string())?
-        .map_err(|err| format!("pop3 read failed: {err}"))?;
-        if read == 0 {
-            return Err("pop3 connection closed by server".to_string());
+        self.read_response_line(&mut line, PROTOCOL_LINE_BYTES, deadline)
+            .await?;
+        // Avoid relaying server-supplied status text, including any credentials
+        // it may echo. RFC 3206 marks a temporary system failure as [SYS/TEMP].
+        let mut words = line
+            .split(|byte| byte.is_ascii_whitespace())
+            .filter(|word| !word.is_empty());
+        match words.next() {
+            Some(b"+OK") => Ok(()),
+            Some(b"-ERR") if words.next() == Some(b"[SYS/TEMP]") => {
+                Err(Pop3Error::TemporarilyRefused)
+            }
+            Some(b"-ERR") => Err(Pop3Error::Refused),
+            _ => Err(Pop3Error::UnexpectedStatus),
         }
-        while matches!(line.last(), Some(b'\r' | b'\n')) {
-            line.pop();
-        }
-        Ok(line)
     }
 
-    /// Read a status line, mapping `-ERR` onto a Rust error.
-    ///
-    /// The only lossy conversion in this session: RFC 1939 status lines are ASCII.
-    async fn read_status(&mut self) -> Result<String, String> {
-        let line = String::from_utf8_lossy(&self.read_response_line().await?).into_owned();
-        if line.split_whitespace().next() == Some("+OK") {
-            return Ok(line[3..].trim().to_string());
+    async fn write_line(&mut self, line: &str) -> Result<(), Pop3Error> {
+        if contains_command_control(line) {
+            return Err(Pop3Error::InvalidCommand);
         }
-        Err(line
-            .strip_prefix("-ERR")
-            .map(|rest| rest.trim().to_string())
-            .unwrap_or(line))
-    }
-
-    async fn write_line(&mut self, line: &str) -> Result<(), String> {
         let payload = format!("{line}\r\n");
         timeout(
-            Pop3Provider::op_timeout(),
+            self.op_timeout,
             self.stream.get_mut().write_all(payload.as_bytes()),
         )
         .await
-        .map_err(|_| "pop3 write timed out".to_string())?
-        .map_err(|err| format!("pop3 write failed: {err}"))?;
-        Ok(())
+        .map_err(|_| Pop3Error::WriteTimeout)?
+        .map_err(Pop3Error::Write)
     }
 
-    async fn command(&mut self, line: &str) -> Result<String, String> {
+    async fn command(&mut self, line: &str) -> Result<(), Pop3Error> {
         self.write_line(line).await?;
-        self.read_status().await
+        self.read_status(Instant::now() + self.op_timeout).await
     }
 
-    /// Read a dot-terminated multi-line response, undoing byte-stuffing.
-    async fn read_multiline(&mut self) -> Result<Vec<Vec<u8>>, String> {
-        let mut lines = Vec::new();
+    async fn multiline_command(
+        &mut self,
+        command: &str,
+        limits: MultilineLimits,
+    ) -> Result<Vec<u8>, Pop3Error> {
+        self.write_line(command).await?;
+        let deadline = Instant::now() + self.op_timeout.saturating_mul(limits.timeout_multiplier);
+        self.read_status(deadline).await?;
+
+        let mut body = Vec::new();
+        let mut line = Vec::new();
         loop {
-            let mut line = self.read_response_line().await?;
-            if line == b"." {
-                return Ok(lines);
+            let remaining = limits.body_bytes - body.len();
+            // Leave room for the terminator or one stuffed dot, and normalize
+            // LF-only responses to CRLF for compatibility.
+            let line_limit = limits.line_bytes.min(remaining + b".\r\n".len());
+            match self
+                .read_response_line(&mut line, line_limit, deadline)
+                .await
+            {
+                Err(Pop3Error::LineTooLong) if line_limit < limits.line_bytes => {
+                    return Err(Pop3Error::BodyTooLarge);
+                }
+                result => result?,
             }
-            // RFC 1939 §3: a leading dot in the payload is doubled on the wire.
-            if line.first() == Some(&b'.') {
-                line.remove(0);
+            let content = line
+                .strip_suffix(b"\r\n")
+                .unwrap_or(&line[..line.len() - 1]);
+            if content == b"." {
+                return Ok(body);
             }
-            lines.push(line);
+            // RFC 1939 §3 removes one leading dot from each stuffed line.
+            let content = content.strip_prefix(b".").unwrap_or(content);
+            if content.len() + 2 > remaining {
+                return Err(Pop3Error::BodyTooLarge);
+            }
+            body.extend_from_slice(content);
+            body.extend_from_slice(b"\r\n");
         }
     }
 
-    async fn multiline_command(&mut self, line: &str) -> Result<Vec<Vec<u8>>, String> {
-        self.command(line).await?;
-        self.read_multiline().await
+    async fn uidls(&mut self) -> Result<Vec<(u32, String)>, String> {
+        let listing = self
+            .multiline_command("UIDL", UIDL_LIMITS)
+            .await
+            .map_err(|err| format!("pop3 UIDL failed: {err}"))?;
+        Ok(parse_uidl_listing(&listing))
     }
 
-    /// `RETR` split into its two failure modes. A `-ERR` status arrives on a
-    /// stream that is still in step, so the caller can skip that message and
-    /// keep the run going. Anything else means the response was not consumed
-    /// to its terminating dot and the session has to be dropped.
-    async fn retr(&mut self, number: u32) -> Result<Retrieved, String> {
-        self.write_line(&format!("RETR {number}")).await?;
-        let status = String::from_utf8_lossy(&self.read_response_line().await?).into_owned();
-        if let Some(reason) = status.strip_prefix("-ERR") {
-            return Ok(Retrieved::Rejected(reason.trim().to_string()));
+    async fn retr(&mut self, number: u32) -> Result<Retrieved, Pop3Error> {
+        match self
+            .multiline_command(&format!("RETR {number}"), RETR_LIMITS)
+            .await
+        {
+            Ok(raw) => Ok(Retrieved::Body(raw)),
+            Err(Pop3Error::Refused) => Ok(Retrieved::Refused),
+            Err(err @ (Pop3Error::LineTooLong | Pop3Error::BodyTooLarge)) => {
+                Ok(Retrieved::Oversized(err))
+            }
+            Err(err) => Err(err),
         }
-        if !status.starts_with("+OK") {
-            return Err(format!("pop3 unexpected RETR status: {status}"));
-        }
-        self.read_multiline().await.map(Retrieved::Body)
     }
 
-    async fn quit(mut self) -> Result<(), String> {
-        self.command("QUIT").await.map(|_| ())
+    async fn quit(mut self) -> Result<(), Pop3Error> {
+        self.command("QUIT").await
     }
 }
 
-/// Outcome of a `RETR`. Separating the server's refusal from a broken stream
-/// is what keeps one unreadable message from blocking a mailbox for good.
+/// A refused message leaves the session usable. An oversized response must
+/// be abandoned with its connection before issuing another command.
 enum Retrieved {
-    Body(Vec<Vec<u8>>),
-    Rejected(String),
+    Body(Vec<u8>),
+    Refused,
+    Oversized(Pop3Error),
 }
 
-/// `UIDL` returns "<number> <unique-id>" per line, both ASCII per RFC 1939.
-fn parse_uidl_listing<L: AsRef<[u8]>>(lines: &[L]) -> Vec<(u32, String)> {
-    lines
-        .iter()
+/// UIDL returns one "<number> <unique-id>" pair per line.
+fn parse_uidl_listing(listing: &[u8]) -> Vec<(u32, String)> {
+    listing
+        .split(|&byte| byte == b'\n')
         .filter_map(|line| {
-            let line = String::from_utf8_lossy(line.as_ref());
+            let line = String::from_utf8_lossy(line);
             let mut parts = line.split_whitespace();
             let number = parts.next()?.parse::<u32>().ok()?;
             let uidl = parts.next()?.to_string();
-            (!uidl.is_empty()).then_some((number, uidl))
+            Some((number, uidl))
         })
         .collect()
-}
-
-/// Join a multi-line response back into one raw message.
-fn join_crlf(lines: &[Vec<u8>]) -> Vec<u8> {
-    let mut raw = lines.join(&b"\r\n"[..]);
-    if !lines.is_empty() {
-        raw.extend_from_slice(b"\r\n");
-    }
-    raw
 }
 
 /// Split a raw message into its header block and the body offset.
@@ -452,8 +584,8 @@ fn split_headers(raw: &[u8]) -> (String, usize) {
     (String::from_utf8_lossy(raw).into_owned(), raw.len())
 }
 
-fn envelope_from_raw(uidl: &str, raw: &[u8], receiver: &str) -> MessageEnvelope {
-    let (header, body_offset) = split_headers(raw);
+fn envelope_from_raw(uidl: &str, raw: Vec<u8>, receiver: &str) -> MessageEnvelope {
+    let (header, body_offset) = split_headers(&raw);
     let parsed_body = parse_message_body(&header, Some(&raw[body_offset..]));
     let subject = parse_header_value(&header, "Subject").unwrap_or_else(|| "(no subject)".into());
     let snippet = build_snippet(
@@ -469,7 +601,7 @@ fn envelope_from_raw(uidl: &str, raw: &[u8], receiver: &str) -> MessageEnvelope 
         remote_id: uidl.to_string(),
         remote_uidvalidity: None,
         remote_thread_id: None,
-        original_source: Some(raw.to_vec()),
+        original_source: Some(raw),
         mailbox_ids: vec![POP3_FOLDER.to_string()],
         message_id_header: parse_header_value(&header, "Message-ID"),
         in_reply_to: parse_header_value(&header, "In-Reply-To"),
@@ -529,85 +661,113 @@ fn fetch_limit() -> usize {
         .unwrap_or(200)
 }
 
-#[async_trait]
-impl MailProvider for Pop3Provider {
-    async fn sync_folders(&self) -> crate::sync::errors::SyncResult<Vec<RemoteFolder>> {
-        // POP3 has exactly one mailbox and no way to name it.
-        Ok(vec![RemoteFolder {
-            id: POP3_FOLDER.to_string(),
-            name: POP3_FOLDER.to_string(),
-            kind: Some("inbox".to_string()),
-        }])
-    }
-
+impl Pop3Provider {
     /// Download what the cursor has not seen yet. Never deletes: the sync run
     /// queues the removal of the UIDLs it managed to commit, so nothing leaves
     /// the server that is not stored locally.
-    async fn sync_messages(
+    async fn sync_batch(
         &self,
-        _folder: &str,
         since: SyncCheckpoint,
+        limit: usize,
     ) -> crate::sync::errors::SyncResult<SyncBatch> {
         let mut state = Pop3CursorState::from_checkpoint(&since);
-        let seen: HashSet<String> = state.seen_uidls.iter().cloned().collect();
-
-        let mut session = self.connect().await?;
-        let listing = parse_uidl_listing(&session.multiline_command("UIDL").await?);
-
-        let pending: Vec<(u32, String)> = listing
+        let mut handled: HashSet<String> = state
+            .seen_uidls
             .iter()
-            .filter(|(_, uidl)| !seen.contains(uidl))
+            .chain(&state.rejected_uidls)
             .cloned()
             .collect();
 
+        let (mut session, mut listing) = self.connect_with_uidls().await?;
+        let receiver = self.cfg()?.host.as_str();
         let mut messages = Vec::new();
-        let mut fetched_uidls = Vec::new();
-        let mut source_bytes = 0usize;
-        for (number, uidl) in pending.iter().take(fetch_limit()) {
-            let raw = match session.retr(*number).await {
-                Ok(Retrieved::Body(lines)) => join_crlf(&lines),
-                // The server answered on a stream that is still in step. Skip
-                // this message instead of ending the run: a single permanently
-                // unreadable mail would otherwise stall every later sync for
-                // this account. Its UIDL stays unseen, so a later run retries.
-                Ok(Retrieved::Rejected(reason)) => {
-                    tracing::warn!(uidl = %uidl, %reason, "pop3 server refused RETR, skipping");
+        let mut source_bytes = 0;
+        let mut rejected = 0;
+        let mut oversized = 0;
+        let mut interruption = None;
+
+        'sessions: loop {
+            for (number, uidl) in &listing {
+                if handled.contains(uidl) {
                     continue;
                 }
-                // A response we did not read to its terminating dot leaves the
-                // stream out of step, so every later RETR would return the
-                // previous message's bytes under the wrong UIDL. Drop the
-                // session rather than carry on with a desynchronised one.
-                Err(err) => {
-                    tracing::warn!(uidl = %uidl, %err, "pop3 RETR failed, aborting run");
-                    return Err(format!("pop3 RETR failed for {uidl}: {err}").into());
+                let outcome = session.retr(*number).await;
+                match outcome {
+                    Ok(Retrieved::Body(raw)) => {
+                        if source_bytes + raw.len() > MAX_BATCH_BYTES {
+                            break;
+                        }
+                        source_bytes += raw.len();
+                        handled.insert(uidl.clone());
+                        state.seen_uidls.push(uidl.clone());
+                        messages.push(envelope_from_raw(uidl, raw, receiver));
+                        if messages.len() >= limit || source_bytes == MAX_BATCH_BYTES {
+                            break;
+                        }
+                    }
+                    Ok(Retrieved::Refused) | Err(Pop3Error::TemporarilyRefused) => {
+                        handled.insert(uidl.clone());
+                        if matches!(outcome, Ok(Retrieved::Refused)) {
+                            tracing::warn!(%uidl, "pop3 server refused RETR, skipping message");
+                            state.rejected_uidls.push(uidl.clone());
+                        } else {
+                            interruption =
+                                Some(format!("pop3 RETR temporarily refused for {uidl}"));
+                        }
+                        rejected += 1;
+                        if rejected >= MAX_REJECTED_PER_BATCH {
+                            break;
+                        }
+                    }
+                    Ok(Retrieved::Oversized(err)) => {
+                        tracing::warn!(%uidl, %err, "pop3 RETR exceeded the response budget, skipping message");
+                        handled.insert(uidl.clone());
+                        state.rejected_uidls.push(uidl.clone());
+                        rejected += 1;
+                        oversized += 1;
+                        // A partial RETR cannot be followed by another command.
+                        // New sessions must resolve message numbers again by UIDL.
+                        drop(session);
+                        if oversized >= MAX_OVERSIZED_PER_BATCH
+                            || rejected >= MAX_REJECTED_PER_BATCH
+                        {
+                            break 'sessions;
+                        }
+                        match self.connect_with_uidls().await {
+                            Ok((next_session, next_listing)) => {
+                                session = next_session;
+                                listing = next_listing;
+                                continue 'sessions;
+                            }
+                            Err(err) => {
+                                interruption = Some(err);
+                                break 'sessions;
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        drop(session);
+                        let error = format!("pop3 RETR failed for {uidl}: {err}");
+                        if messages.is_empty() && rejected == 0 {
+                            return Err(error.into());
+                        }
+                        interruption = Some(error);
+                        break 'sessions;
+                    }
                 }
-            };
-            source_bytes = source_bytes.saturating_add(raw.len());
-            messages.push(envelope_from_raw(
-                uidl,
-                &raw,
-                self.config
-                    .as_ref()
-                    .map(|config| config.host.as_str())
-                    .unwrap_or_default(),
-            ));
-            fetched_uidls.push(uidl.clone());
-            // Originals now live until the batch commits. Bound the batch by
-            // bytes too; 200 large attachments must not accumulate in RAM.
-            if source_bytes >= 64 * 1024 * 1024 {
-                break;
             }
+            let _ = session.quit().await;
+            break;
         }
 
-        let _ = session.quit().await;
-
-        state.seen_uidls.extend(fetched_uidls);
         // A UIDL that remains on the server must remain in the cursor. Evicting
         // old entries redownloads them before newer mail on every sync run.
         let listed: HashSet<&str> = listing.iter().map(|(_, uidl)| uidl.as_str()).collect();
         state
             .seen_uidls
+            .retain(|uidl| listed.contains(uidl.as_str()));
+        state
+            .rejected_uidls
             .retain(|uidl| listed.contains(uidl.as_str()));
 
         Ok(SyncBatch {
@@ -619,10 +779,31 @@ impl MailProvider for Pop3Provider {
             remote_uidvalidity: None,
             reset_folder: false,
             snapshot_required: false,
+            interruption,
             next: SyncCheckpoint {
                 cursor: state.to_cursor(),
             },
         })
+    }
+}
+
+#[async_trait]
+impl MailProvider for Pop3Provider {
+    async fn sync_folders(&self) -> crate::sync::errors::SyncResult<Vec<RemoteFolder>> {
+        // POP3 has exactly one mailbox and no way to name it.
+        Ok(vec![RemoteFolder {
+            id: POP3_FOLDER.to_string(),
+            name: POP3_FOLDER.to_string(),
+            kind: Some("inbox".to_string()),
+        }])
+    }
+
+    async fn sync_messages(
+        &self,
+        _folder: &str,
+        since: SyncCheckpoint,
+    ) -> crate::sync::errors::SyncResult<SyncBatch> {
+        self.sync_batch(since, fetch_limit()).await
     }
 
     async fn send(&self, message: OutgoingMessage) -> crate::sync::errors::SyncResult<()> {
@@ -658,8 +839,7 @@ impl MailProvider for Pop3Provider {
 
         // DELE addresses messages by their per-session number, which is not
         // stable, so map UIDLs to numbers within this connection.
-        let mut session = self.connect().await?;
-        let listing = parse_uidl_listing(&session.multiline_command("UIDL").await?);
+        let (mut session, listing) = self.connect_with_uidls().await?;
         let wanted: HashSet<&str> = messages
             .iter()
             .map(|message| message.remote_id.as_str())
@@ -667,7 +847,10 @@ impl MailProvider for Pop3Provider {
 
         for (number, uidl) in listing {
             if wanted.contains(uidl.as_str()) {
-                session.command(&format!("DELE {number}")).await?;
+                session
+                    .command(&format!("DELE {number}"))
+                    .await
+                    .map_err(|err| err.to_string())?;
             }
         }
 
@@ -675,7 +858,7 @@ impl MailProvider for Pop3Provider {
         session
             .quit()
             .await
-            .map_err(crate::sync::errors::SyncError::Transient)
+            .map_err(|err| crate::sync::errors::SyncError::Transient(err.to_string()))
     }
 }
 
@@ -741,7 +924,7 @@ mod tests {
     #[test]
     fn a_refused_signed_structure_arrives_unsigned_not_blank() {
         let raw = include_bytes!("../../tests/corpus/pgp-mime/forged-quoted-boundary.eml");
-        let envelope = super::envelope_from_raw("x", raw, "unknown");
+        let envelope = super::envelope_from_raw("x", raw.to_vec(), "unknown");
         assert!(envelope.pgp_signed.is_none());
         assert!(!envelope.trust.root_crypto);
         assert!(
@@ -757,7 +940,7 @@ mod tests {
     #[test]
     fn rejects_markup_in_attachment_mime_types() {
         let raw = b"Content-Type: multipart/related; boundary=x\r\n\r\n--x\r\nContent-Type: image/png\"><link rel=preconnect href=https://u1.t.example>\r\nContent-ID: <x>\r\nContent-Disposition: inline; filename=logo.png\r\n\r\nAAAA\r\n--x--\r\n";
-        let envelope = super::envelope_from_raw("x", raw, "unknown");
+        let envelope = super::envelope_from_raw("x", raw.to_vec(), "unknown");
         assert_eq!(
             envelope.attachments[0].content_type,
             "application/octet-stream"
@@ -874,15 +1057,9 @@ mod tests {
 
     #[test]
     fn parses_uidl_listings_and_ignores_malformed_lines() {
-        let lines = vec![
-            "1 abc123".to_string(),
-            "2 def456".to_string(),
-            "garbage".to_string(),
-            "3".to_string(),
-            "4 ghi789 extra".to_string(),
-        ];
+        let listing = b"1 abc123\r\n2 def456\r\ngarbage\r\n3\r\n4 ghi789 extra\r\n";
         assert_eq!(
-            parse_uidl_listing(&lines),
+            parse_uidl_listing(listing),
             vec![
                 (1, "abc123".to_string()),
                 (2, "def456".to_string()),
@@ -895,11 +1072,18 @@ mod tests {
     fn a_cursor_round_trips_through_the_checkpoint() {
         let state = Pop3CursorState {
             seen_uidls: vec!["a".into(), "b".into()],
+            rejected_uidls: vec!["c".into()],
         };
         let restored = Pop3CursorState::from_checkpoint(&SyncCheckpoint {
             cursor: state.to_cursor(),
         });
         assert_eq!(restored.seen_uidls, vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(restored.rejected_uidls, vec!["c"]);
+        let older = Pop3CursorState::from_checkpoint(&SyncCheckpoint {
+            cursor: Some(r#"{"seen_uidls":["a"]}"#.into()),
+        });
+        assert_eq!(older.seen_uidls, vec!["a"]);
+        assert!(older.rejected_uidls.is_empty());
     }
 
     #[tokio::test]
@@ -908,6 +1092,7 @@ mod tests {
         let port = spawn_fake_server(messages, None, None).await;
         let previous = Pop3CursorState {
             seen_uidls: (1..=50_000).map(|n| format!("UIDL-{n}")).collect(),
+            rejected_uidls: Vec::new(),
         };
         let batch = provider_on(port)
             .sync_messages(
@@ -947,7 +1132,7 @@ mod tests {
     #[test]
     fn builds_an_envelope_from_a_raw_message() {
         let raw = "From: Alice <alice@example.test>\r\nTo: me@example.test\r\nSubject: Angebot\r\nMessage-ID: <m1@example.test>\r\nDate: Wed, 15 Jul 2026 10:00:00 +0000\r\n\r\nHallo Welt\r\n";
-        let envelope = envelope_from_raw("uidl-1", raw.as_bytes(), "unknown");
+        let envelope = envelope_from_raw("uidl-1", raw.as_bytes().to_vec(), "unknown");
 
         assert_eq!(envelope.remote_id, "uidl-1");
         assert_eq!(envelope.original_source.as_deref(), Some(raw.as_bytes()));
@@ -980,7 +1165,7 @@ Content-Type: application/pgp-signature\r\n\
 -----END PGP SIGNATURE-----\r\n\
 --pgp--\r\n";
 
-        let envelope = envelope_from_raw("uidl-pgp", raw.as_bytes(), "unknown");
+        let envelope = envelope_from_raw("uidl-pgp", raw.as_bytes().to_vec(), "unknown");
         let signed = String::from_utf8(envelope.pgp_signed.expect("PGP signed MIME"))
             .expect("ASCII fixture");
 
@@ -1002,7 +1187,7 @@ Content-Type: application/pgp-signature\r\n\
 
     #[test]
     fn a_message_without_a_body_still_parses() {
-        let envelope = envelope_from_raw("uidl-2", b"Subject: Nur Kopf\r\n", "unknown");
+        let envelope = envelope_from_raw("uidl-2", b"Subject: Nur Kopf\r\n".to_vec(), "unknown");
         assert_eq!(envelope.subject, "Nur Kopf");
     }
 
@@ -1102,7 +1287,12 @@ BODY-OF-MSG-{index} Gr"
                         match number.checked_sub(1).and_then(|index| messages.get(index)) {
                             Some(message) => {
                                 response.extend_from_slice(b"+OK message follows\r\n");
-                                response.extend_from_slice(message);
+                                for line in message.split_inclusive(|&byte| byte == b'\n') {
+                                    if line.starts_with(b".") {
+                                        response.push(b'.');
+                                    }
+                                    response.extend_from_slice(line);
+                                }
                                 response.extend_from_slice(b"\r\n.\r\n");
                             }
                             None => response.extend_from_slice(b"-ERR no such message\r\n"),
@@ -1136,8 +1326,170 @@ BODY-OF-MSG-{index} Gr"
     }
 
     #[tokio::test]
+    async fn rejects_control_bytes_before_writing_a_command() {
+        let (client, mut server) = tokio::io::duplex(64);
+        let mut session = Pop3Session::new(Box::new(client));
+        for line in ["NOOP\r", "NOOP\n", "NOOP\0"] {
+            assert!(session.write_line(line).await.is_err());
+        }
+        drop(session);
+
+        use tokio::io::AsyncReadExt;
+        let mut sent = Vec::new();
+        server.read_to_end(&mut sent).await.unwrap();
+        assert!(sent.is_empty());
+    }
+
+    #[tokio::test]
+    async fn invalid_credentials_are_rejected_before_connecting() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        for field in ["username", "password"] {
+            for value in ["test-value\r", "test-value\n", "test-value\0"] {
+                let mut config = serde_json::json!({
+                    "pop3": {
+                        "host": "127.0.0.1",
+                        "port": port,
+                        "tls": false,
+                        "username": "me@example.test",
+                        "password": "secret",
+                    }
+                });
+                config["pop3"][field] = value.into();
+                let provider =
+                    Pop3Provider::from_account_config(&config.to_string(), "me@example.test")
+                        .unwrap();
+                let error = timeout(Duration::from_secs(1), provider.verify_credentials())
+                    .await
+                    .expect("validation must return without waiting for the greeting")
+                    .unwrap_err();
+                assert!(error.contains(field));
+                assert!(!error.contains("test-value"));
+                assert_eq!(
+                    listener.accept().unwrap_err().kind(),
+                    std::io::ErrorKind::WouldBlock
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn oversized_status_is_rejected_without_waiting_for_the_line_ending() {
+        let (client, mut server) = tokio::io::duplex(PROTOCOL_LINE_BYTES);
+        let mut session = Pop3Session::new(Box::new(client));
+        server
+            .write_all(&[b'x'; PROTOCOL_LINE_BYTES])
+            .await
+            .unwrap();
+        assert!(matches!(
+            session
+                .read_status(Instant::now() + Duration::from_secs(1))
+                .await,
+            Err(Pop3Error::LineTooLong)
+        ));
+    }
+
+    #[tokio::test]
+    async fn multiline_limits_allow_an_exact_fit_and_reject_an_unfinished_overflow() {
+        for (command, limits) in [("UIDL", UIDL_LIMITS), ("RETR 1", RETR_LIMITS)] {
+            for (tail, fits) in [(b".\r\n".as_slice(), true), (b"xxxx".as_slice(), false)] {
+                let (client, mut server) = tokio::io::duplex(128);
+                let mut session = Pop3Session::new(Box::new(client));
+                // Two complete lines fit exactly after undoing byte-stuffing.
+                server.write_all(b"+OK\r\n1 a\r\n..b\r\n").await.unwrap();
+                server.write_all(tail).await.unwrap();
+                let result = timeout(
+                    Duration::from_secs(1),
+                    session.multiline_command(
+                        command,
+                        MultilineLimits {
+                            body_bytes: 9,
+                            line_bytes: limits.line_bytes,
+                            timeout_multiplier: limits.timeout_multiplier,
+                        },
+                    ),
+                )
+                .await
+                .expect("response must finish at the byte limit");
+                if fits {
+                    assert_eq!(result.unwrap(), b"1 a\r\n.b\r\n");
+                } else {
+                    assert!(matches!(result, Err(Pop3Error::BodyTooLarge)));
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn uidl_and_retr_stop_at_their_production_body_budgets() {
+        for (is_uidl, limits) in [(true, UIDL_LIMITS), (false, RETR_LIMITS)] {
+            let (client, mut server) = tokio::io::duplex(8192);
+            let mut session = Pop3Session::new(Box::new(client));
+            let writer = tokio::spawn(async move {
+                let line_bytes = limits.line_bytes.min(8192);
+                let mut line = vec![b'x'; line_bytes - 2];
+                line.extend_from_slice(b"\r\n");
+                let chunk = line.repeat(64 * 1024 / line_bytes);
+                server.write_all(b"+OK\r\n").await.unwrap();
+                for _ in 0..limits.body_bytes / chunk.len() {
+                    server.write_all(&chunk).await.unwrap();
+                }
+                server.write_all(b"xxxx").await.unwrap();
+                // Keep the stream open with no line ending or terminator.
+                std::future::pending::<()>().await;
+            });
+            timeout(Duration::from_secs(10), async {
+                if is_uidl {
+                    assert!(session
+                        .uidls()
+                        .await
+                        .unwrap_err()
+                        .contains("response size limit"));
+                } else {
+                    assert!(matches!(
+                        session.retr(1).await,
+                        Ok(Retrieved::Oversized(Pop3Error::BodyTooLarge))
+                    ));
+                }
+            })
+            .await
+            .expect("must reject the over-budget response before EOF");
+            writer.abort();
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn multiline_deadline_includes_status_and_every_body_line() {
+        for (command, limits) in [("UIDL", UIDL_LIMITS), ("RETR 1", RETR_LIMITS)] {
+            let (client, mut server) = tokio::io::duplex(128);
+            let mut session = Pop3Session::new(Box::new(client));
+            session.op_timeout = Duration::from_secs(3);
+            let response_budget = session.op_timeout * limits.timeout_multiplier;
+            let writer = tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                server.write_all(b"+OK\r\n").await.unwrap();
+                loop {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    if server.write_all(b"1 uidl\r\n").await.is_err() {
+                        break;
+                    }
+                }
+            });
+            let start = Instant::now();
+            assert!(matches!(
+                session.multiline_command(command, limits).await,
+                Err(Pop3Error::ReadTimeout)
+            ));
+            assert_eq!(Instant::now() - start, response_budget);
+            writer.abort();
+        }
+    }
+
+    #[tokio::test]
     async fn retrieves_original_bytes_by_uidl_instead_of_sequence_position() {
-        let expected = latin1_message(2);
+        let mut expected = latin1_message(2);
+        expected.extend_from_slice(b"\r\n.\r\n..two dots\r\n.\xe4\r\r\nlast");
         let port = spawn_fake_server(vec![plain_message(1), expected.clone()], None, None).await;
         let raw = provider_on(port).fetch_raw_message("UIDL-2").await.unwrap();
         assert_eq!(raw, [expected.as_slice(), b"\r\n"].concat());
@@ -1185,10 +1537,8 @@ BODY-OF-MSG-{index} Gr"
         );
     }
 
-    /// A response cut short leaves the connection unusable, not just that one
-    /// message: the run must end without recording any further UIDL.
     #[tokio::test]
-    async fn a_truncated_retr_response_aborts_the_run() {
+    async fn a_truncated_retr_preserves_the_batch_and_leaves_the_uidl_retryable() {
         let messages = vec![
             plain_message(1),
             plain_message(2),
@@ -1196,15 +1546,17 @@ BODY-OF-MSG-{index} Gr"
             plain_message(4),
         ];
         let port = spawn_fake_server(messages, Some(2), None).await;
-        let error = provider_on(port)
+        let batch = provider_on(port)
             .sync_messages(POP3_FOLDER, SyncCheckpoint { cursor: None })
             .await
-            .expect_err("a truncated RETR must fail the run");
-
-        assert!(
-            error.to_string().contains("UIDL-2"),
-            "unexpected error: {error}"
-        );
+            .expect("the message fetched before the disconnect must survive");
+        assert_eq!(batch.messages.len(), 1);
+        assert_eq!(batch.messages[0].remote_id, "UIDL-1");
+        assert_eq!(seen_uidls(&batch), vec!["UIDL-1"]);
+        assert!(Pop3CursorState::from_checkpoint(&batch.next)
+            .rejected_uidls
+            .is_empty());
+        assert!(batch.interruption.as_deref().unwrap().contains("UIDL-2"));
     }
 
     /// `-ERR` is answered on a stream that is still in step. One message the
@@ -1219,7 +1571,7 @@ BODY-OF-MSG-{index} Gr"
         ];
         let port = spawn_fake_server(messages, None, Some(2)).await;
         let batch = provider_on(port)
-            .sync_messages(POP3_FOLDER, SyncCheckpoint { cursor: None })
+            .sync_batch(SyncCheckpoint { cursor: None }, 3)
             .await
             .expect("a refused RETR must not fail the run");
 
@@ -1239,16 +1591,9 @@ BODY-OF-MSG-{index} Gr"
             );
         }
 
-        // Left unseen on purpose: a later run tries it again rather than
-        // writing it off.
-        let seen = seen_uidls(&batch);
-        assert!(
-            !seen.iter().any(|uidl| uidl == "UIDL-2"),
-            "refused UIDL must stay unseen"
-        );
-        assert!(
-            seen.iter().any(|uidl| uidl == "UIDL-4"),
-            "later messages must be recorded"
-        );
+        let state = Pop3CursorState::from_checkpoint(&batch.next);
+        assert_eq!(state.seen_uidls, fetched);
+        assert_eq!(state.rejected_uidls, vec!["UIDL-2"]);
+        assert!(batch.interruption.is_none());
     }
 }

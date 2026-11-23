@@ -1040,14 +1040,14 @@ async fn ingest_messages_into_folder(
     .await?;
     for (message, result) in messages.iter().zip(results) {
         match result {
-            Ok(()) => {
+            Ok(was_stored) => {
                 outcome.ingested += 1;
                 if quarantine.contains(&message.remote_id) {
                     repository
                         .clear(&account.id, folder_id, &message.remote_id)
                         .await
                         .map_err(|error| error.to_string())?;
-                } else {
+                } else if was_stored {
                     outcome.persisted.push(message.remote_id.clone());
                 }
             }
@@ -1762,6 +1762,11 @@ pub(crate) async fn sync_mailboxes(
                         skipped = ingest.skipped,
                         "quarantined messages were not ingested again"
                     );
+                }
+                if let Some(error) = batch.interruption {
+                    let failure = encoded_folder_sync_failure(&account.email, &folder.name, error);
+                    folder_fetch_failures.push(failure.clone());
+                    summary.failures.push(failure);
                 }
 
                 folders_synced += 1;
@@ -2936,9 +2941,19 @@ mod tests {
             let commands = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
             let log = commands.clone();
             tokio::spawn(async move {
+                let mut first_connection = true;
                 while let Ok((socket, _)) = listener.accept().await {
                     let log = log.clone();
-                    let messages = messages.clone();
+                    let mut messages = messages.clone();
+                    if !first_connection && messages.iter().any(|(_, uidl)| *uidl == "oversized") {
+                        // POP3 numbers belong to the session, so a reconnect
+                        // must use the latest mapping for the same UIDLs.
+                        messages.reverse();
+                        for (index, (number, _)) in messages.iter_mut().enumerate() {
+                            *number = index as u32 + 1;
+                        }
+                    }
+                    first_connection = false;
                     tokio::spawn(async move { serve_pop3(socket, messages, log).await });
                 }
             });
@@ -2988,6 +3003,14 @@ mod tests {
                         .find(|(candidate, _)| *candidate == number)
                         .map(|(_, uidl)| *uidl)
                 }) {
+                    Some("refused") => "-ERR message unavailable\r\n".to_string(),
+                    // Leave the line and response open. A client waiting to
+                    // drain either will stall this sync.
+                    Some("oversized") => format!("+OK message\r\n{}", "x".repeat(1024 * 1024)),
+                    Some("truncated") => {
+                        let _ = writer.write_all(b"+OK message\r\nSubject: partial").await;
+                        return;
+                    }
                     Some(uidl) => format!(
                         "+OK message\r\nMessage-ID: <{uidl}@example.test>\r\n\
                          From: Sender <sender@example.test>\r\n\
@@ -3111,6 +3134,77 @@ mod tests {
             .await
             .expect("quarantine");
         assert_eq!(quarantined, vec!["broken-2".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn pop3_reconnects_and_never_retries_or_deletes_rejected_messages() {
+        let server = Pop3Fake::spawn(vec![
+            (1, "uidl-1"),
+            (2, "oversized"),
+            (3, "refused"),
+            (4, "uidl-4"),
+            (5, "uidl-5"),
+        ])
+        .await;
+        let pool = pop3_pool(server.port, false).await;
+
+        let first =
+            tokio::time::timeout(std::time::Duration::from_secs(5), sync_pop3_account(&pool))
+                .await
+                .expect("sync must progress without draining the oversized response");
+        assert_eq!(first.messages_synced, 3);
+        assert!(first.failures.is_empty());
+        assert_eq!(sync_pop3_account(&pool).await.messages_synced, 0);
+        let commands = server.commands();
+        let retrievals: Vec<_> = commands
+            .iter()
+            .filter(|cmd| cmd.starts_with("RETR"))
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            retrievals,
+            ["RETR 1", "RETR 2", "RETR 1", "RETR 2", "RETR 3"]
+        );
+        let aborted = commands.iter().position(|cmd| cmd == "RETR 2").unwrap();
+        assert!(commands[aborted + 1].starts_with("USER "));
+        assert!(!commands.iter().any(|cmd| cmd.starts_with("DELE")));
+        assert_eq!(
+            sqlx::query_scalar::<_, String>("SELECT remote_id FROM messages ORDER BY remote_id")
+                .fetch_all(&pool)
+                .await
+                .unwrap(),
+            ["uidl-1", "uidl-4", "uidl-5"]
+        );
+        assert_eq!(
+            queued_delete_refs(&pool).await,
+            vec![vec!["uidl-1", "uidl-5", "uidl-4"]]
+        );
+    }
+
+    #[tokio::test]
+    async fn pop3_commits_the_partial_batch_before_reporting_a_disconnect() {
+        let server = Pop3Fake::spawn(vec![(1, "uidl-1"), (2, "truncated")]).await;
+        let pool = pop3_pool(server.port, false).await;
+
+        let first = sync_pop3_account(&pool).await;
+        assert!(first
+            .failures
+            .iter()
+            .any(|error| error.contains("truncated")));
+        assert_eq!(
+            sqlx::query_scalar::<_, String>("SELECT remote_id FROM messages")
+                .fetch_all(&pool)
+                .await
+                .unwrap(),
+            ["uidl-1"]
+        );
+        assert_eq!(queued_delete_refs(&pool).await, vec![vec!["uidl-1"]]);
+
+        let second = sync_pop3_account(&pool).await;
+        assert!(!second.failures.is_empty());
+        let commands = server.commands();
+        assert_eq!(commands.iter().filter(|cmd| *cmd == "RETR 1").count(), 1);
+        assert_eq!(commands.iter().filter(|cmd| *cmd == "RETR 2").count(), 2);
     }
 
     #[tokio::test]

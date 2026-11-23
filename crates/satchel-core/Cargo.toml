@@ -113,5 +113,6 @@ libc = "0.2"
 
 [dev-dependencies]
 proptest = "1"
+tokio = { version = "1", features = ["test-util"] }
 # This crate's own integration tests turn the test knobs.
 satchel-core = { path = ".", features = ["test-hooks"] }

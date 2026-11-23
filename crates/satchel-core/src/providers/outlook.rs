@@ -1073,6 +1073,7 @@ impl MailProvider for OutlookProvider {
             remote_uidvalidity: None,
             reset_folder: false,
             snapshot_required,
+            interruption: None,
             next: SyncCheckpoint {
                 cursor: Self::finalize_cursor(cursor_state),
             },

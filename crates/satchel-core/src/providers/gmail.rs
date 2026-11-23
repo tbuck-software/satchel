@@ -1757,6 +1757,7 @@ impl MailProvider for GmailProvider {
                 remote_uidvalidity: None,
                 reset_folder: false,
                 snapshot_required: true,
+                interruption: None,
                 next: since,
             });
         }
@@ -1989,6 +1990,7 @@ impl MailProvider for GmailProvider {
             remote_uidvalidity: None,
             reset_folder: false,
             snapshot_required,
+            interruption: None,
             next: SyncCheckpoint {
                 cursor: Self::finalize_cursor(cursor_state),
             },
