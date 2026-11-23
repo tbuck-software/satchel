@@ -215,7 +215,12 @@ onBeforeUnmount(() => {
   position: fixed;
   z-index: 1000;
   display: grid;
+  /* One column no wider than the menu: an implicit track sizes to its widest
+     row's nowrap label and pushes every row past the edge, which made the
+     menu scroll sideways. Long labels ellipsize instead. */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-2xs);
+  overflow-x: hidden;
   overflow-y: auto;
   padding: var(--space-1-5);
   border: var(--border-default);

@@ -306,7 +306,7 @@ function runExport(format: ExportFormat) {
     :open="menuOpen"
     :anchor="menuAnchor"
     :label="$t('thread.toolbar.moreActions')"
-    :width="282"
+    :width="312"
     @close="closeMenu"
   >
     <div v-if="canReply" class="menu-group" @mouseenter="closeSubmenu">
