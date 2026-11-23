@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { defineComponent } from 'vue';
-import { mount } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BackendRuntimeCapabilities } from '@/services/backend';
 
@@ -150,6 +150,29 @@ describe('settings section visibility', () => {
     expect(sections).not.toContain('tray');
     expect(sections).not.toContain('shortcuts');
     resolveCapabilities(DESKTOP);
+  });
+
+  it('shares an in-flight request and retries after a transient failure', async () => {
+    vi.resetModules();
+    let rejectFirst!: (error: Error) => void;
+    const first = new Promise<BackendRuntimeCapabilities>((_, reject) => { rejectFirst = reject; });
+    backend.backendRuntimeCapabilities.mockReset()
+      .mockReturnValueOnce(first)
+      .mockResolvedValue(DESKTOP);
+    const { availableSettingsSections } = await import('./settingsSections');
+    const sections = () => availableSettingsSections().flatMap(({ items }) => items);
+
+    expect(sections()).not.toContain('shortcuts');
+    expect(sections()).not.toContain('plugins');
+    expect(backend.backendRuntimeCapabilities).toHaveBeenCalledTimes(1);
+
+    rejectFirst(new Error('Could not reach the shell'));
+    await flushPromises();
+    expect(sections()).not.toContain('shortcuts');
+    await flushPromises();
+
+    expect(sections()).toEqual(expect.arrayContaining(['shortcuts', 'plugins']));
+    expect(backend.backendRuntimeCapabilities).toHaveBeenCalledTimes(2);
   });
 });
 

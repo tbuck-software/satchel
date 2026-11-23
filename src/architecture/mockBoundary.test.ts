@@ -103,6 +103,8 @@ const NATIVE_FACILITIES = new Map([
   ['src/composables/useMailEvents.ts', 'useMailEvents'],
   // Subscribes to `tasks:changed`, a Rust event; the mock emits none.
   ['src/composables/taskEvents.ts', 'followTaskSyncs'],
+  // Hides the native window. Snapshot and action commands use the transport.
+  ['src/tray/TrayPopover.vue', 'hidePopover'],
 ]);
 
 function nativeCommandGates(path: string, source: string): string[] {
@@ -144,10 +146,10 @@ describe('mock boundary', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('uses command availability for stores and command composables', () => {
+  it('uses command availability for stores, composables, the tray and viewer', () => {
     const offenders = sourceFiles()
       .filter((path) => !path.endsWith('.test.ts'))
-      .filter((path) => /src\/(stores|composables)\//.test(path))
+      .filter((path) => /src\/(stores|composables|tray|viewer)\//.test(path))
       .flatMap((path) => nativeCommandGates(relative(REPOSITORY_ROOT, path), readFileSync(path, 'utf8')));
     expect(offenders).toEqual([]);
   });
@@ -165,6 +167,15 @@ describe('mock boundary', () => {
     expect(nativeCommandGates('src/stores/outbox.ts',
       'function start() { if (backendSupportsNativeCommands()) listen(); }',
     )).toEqual([]);
+    expect(nativeCommandGates('src/tray/TrayPopover.vue',
+      '<script setup>const native = backendSupportsNativeCommands();</script>',
+    )).toEqual(['src/tray/TrayPopover.vue']);
+    expect(nativeCommandGates('src/tray/TrayPopover.vue',
+      '<script setup>function hidePopover() { if (backendSupportsNativeCommands()) hide(); }</script>',
+    )).toEqual([]);
+    expect(nativeCommandGates('src/viewer/MessageFileViewer.vue',
+      '<script setup>const preview = backendSupportsNativeCommands() ? load() : fixture;</script>',
+    )).toEqual(['src/viewer/MessageFileViewer.vue']);
   });
 
   it('reports a store that reaches for a build-mode flag', () => {

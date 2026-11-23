@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
-import { mount } from '@vue/test-utils';
-import { describe, expect, it } from 'vitest';
+import { enableAutoUnmount, mount } from '@vue/test-utils';
+import { createPinia, setActivePinia } from 'pinia';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useUiStore } from '@/stores/ui';
 import SafeMarkdownBody from './SafeMarkdownBody.vue';
+
+enableAutoUnmount(afterEach);
+beforeEach(() => setActivePinia(createPinia()));
 
 describe('SafeMarkdownBody', () => {
   it('renders declared image dimensions as a responsive blocked placeholder', () => {
@@ -74,7 +79,10 @@ describe('SafeMarkdownBody', () => {
       .toBe('https://git.example/replacement.png');
   });
 
-  it('opens loaded Markdown images in a dismissible lightbox', async () => {
+  it('traps Tab and restores opener focus after Escape dismisses the lightbox', async () => {
+    const ui = useUiStore();
+    const backgroundDismiss = vi.fn();
+    ui.registerOverlay({ isOpen: () => true, dismiss: backgroundDismiss });
     const wrapper = mount(SafeMarkdownBody, {
       attachTo: document.body,
       props: {
@@ -83,19 +91,50 @@ describe('SafeMarkdownBody', () => {
       },
     });
 
-    await wrapper.get('button.md-image-button').trigger('click');
+    const opener = wrapper.get('button.md-image-button');
+    await opener.trigger('click');
+    await wrapper.vm.$nextTick();
 
-    const lightbox = document.body.querySelector<HTMLElement>('[role="dialog"][aria-label="Image preview"]');
-    expect(lightbox).not.toBeNull();
-    expect(lightbox?.querySelector('img')?.getAttribute('src'))
+    const lightbox = document.body.querySelector<HTMLElement>('[role="dialog"][aria-label="Image preview"]')!;
+    const closeButton = lightbox.querySelector<HTMLButtonElement>('button')!;
+    expect(lightbox.querySelector('img')?.getAttribute('src'))
       .toBe('https://images.example/architecture.png');
+    expect(ui.overlayDepth).toBe(2);
     expect(document.activeElement).toBe(lightbox);
 
-    lightbox?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    for (const shiftKey of [false, true, false]) {
+      const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true, shiftKey });
+      document.activeElement?.dispatchEvent(tab);
+      expect(tab.defaultPrevented).toBe(true);
+      expect(document.activeElement).toBe(closeButton);
+    }
+
+    const onWindowEscape = vi.fn();
+    const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    window.addEventListener('keydown', onWindowEscape);
+    try {
+      closeButton.dispatchEvent(escape);
+      expect(escape.defaultPrevented).toBe(true);
+      expect(onWindowEscape).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener('keydown', onWindowEscape);
+    }
     await wrapper.vm.$nextTick();
     expect(document.body.querySelector('[role="dialog"][aria-label="Image preview"]')).toBeNull();
+    expect(document.activeElement).toBe(opener.element);
+    expect(ui.overlayDepth).toBe(1);
+    expect(backgroundDismiss).not.toHaveBeenCalled();
 
+    // Android Back uses the same stack. Unmounting an open preview removes its entry too.
+    await opener.trigger('click');
+    expect(ui.dismissTopmostOverlay()).toBe(true);
+    await wrapper.vm.$nextTick();
+    expect(document.body.querySelector('[role="dialog"][aria-label="Image preview"]')).toBeNull();
+    expect(document.activeElement).toBe(opener.element);
+    await opener.trigger('click');
+    expect(ui.overlayDepth).toBe(2);
     wrapper.unmount();
+    expect(ui.overlayDepth).toBe(1);
   });
 
   it('loads a same-instance GitLab upload after remote images are allowed', () => {

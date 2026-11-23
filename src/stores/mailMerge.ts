@@ -22,11 +22,14 @@ export const MAIL_MERGE_POLL_MS = 5000;
 export const useMailMergeStore = defineStore('mailMerge', () => {
   const jobs = ref<BackendMergeJob[]>([]);
   const detail = ref<BackendMergeJobDetail | null>(null);
+  const detailJobId = ref<string | null>(null);
   const loadedOnce = ref(false);
   const error = ref<string | null>(null);
   const active = computed(() => jobs.value.some((job) => job.status === 'running'));
 
   let loadRequest = 0;
+  let detailRequest = 0;
+
   async function load() {
     if (!backendCommandsAvailable()) return;
     const request = ++loadRequest;
@@ -36,10 +39,10 @@ export const useMailMergeStore = defineStore('mailMerge', () => {
       jobs.value = next;
       loadedOnce.value = true;
       error.value = null;
-      const open = detail.value?.job.id;
+      const open = detailJobId.value;
       if (open) {
-        if (next.some((job) => job.id === open)) await openDetail(open);
-        else detail.value = null;
+        if (!next.some((job) => job.id === open)) closeDetail();
+        else if (detail.value) await openDetail(open);
       }
     } catch (err) {
       if (request !== loadRequest) return;
@@ -48,10 +51,23 @@ export const useMailMergeStore = defineStore('mailMerge', () => {
   }
 
   async function openDetail(id: string) {
-    detail.value = await backendGetMailMergeJob(id);
+    const request = ++detailRequest;
+    if (detailJobId.value !== id) detail.value = null;
+    detailJobId.value = id;
+    try {
+      const next = await backendGetMailMergeJob(id);
+      if (request !== detailRequest) return;
+      detail.value = next;
+    } catch (err) {
+      if (request !== detailRequest) return;
+      if (!detail.value) closeDetail();
+      throw err;
+    }
   }
 
   function closeDetail() {
+    detailRequest += 1;
+    detailJobId.value = null;
     detail.value = null;
   }
 
@@ -61,7 +77,7 @@ export const useMailMergeStore = defineStore('mailMerge', () => {
       jobs.value = jobs.value.map((job) => (job.id === id ? updated : job));
     } else {
       jobs.value = jobs.value.filter((job) => job.id !== id);
-      if (detail.value?.job.id === id) detail.value = null;
+      if (detailJobId.value === id) closeDetail();
     }
     await load();
   }
@@ -91,7 +107,7 @@ export const useMailMergeStore = defineStore('mailMerge', () => {
   }
 
   return {
-    jobs, detail, loadedOnce, error, active, load, openDetail, closeDetail, control, watch, unwatch,
+    jobs, detail, detailJobId, loadedOnce, error, active, load, openDetail, closeDetail, control, watch, unwatch,
     parseCsv: backendParseMailMergeCsv,
     preview: backendPreviewMailMerge,
     createJob: backendCreateMailMergeJob,

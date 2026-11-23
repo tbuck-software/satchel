@@ -989,7 +989,7 @@ function finish() {
   border: 1px solid var(--border-color-muted);
   border-radius: var(--radius-sm);
   color: var(--text-tertiary);
-  background: color-mix(in srgb, var(--bg-raised) 86%, transparent);
+  background: var(--bg-raised);
   cursor: pointer;
   transition: color var(--duration-normal) var(--ease-out), background var(--duration-normal) var(--ease-out), border-color var(--duration-normal) var(--ease-out);
 }

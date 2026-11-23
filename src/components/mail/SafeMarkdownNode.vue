@@ -76,8 +76,10 @@ const blockedImageStyle = computed(() => {
   };
 });
 
-function requestImagePreview() {
+function requestImagePreview(event: MouseEvent) {
   if (props.node.kind !== 'blocked_image' || !props.node.src) return;
+  // WebKit may leave a clicked button unfocused. Remember it as the opener.
+  if (event.currentTarget instanceof HTMLElement) event.currentTarget.focus({ preventScroll: true });
   openImage({ src: props.node.src, alt: props.node.alt });
 }
 </script>
@@ -161,7 +163,7 @@ function requestImagePreview() {
     class="md-image-button"
     :style="markdownImageStyle"
     :aria-label="imageDescription ? $t('mail.markdown.enlargeImageNamed', { description: imageDescription }) : $t('mail.markdown.enlargeImage')"
-    @click="requestImagePreview"
+    @click.stop="requestImagePreview"
   >
     <img
       class="md-image"

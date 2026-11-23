@@ -265,7 +265,7 @@ kbd {
 .table-head {
   min-height: 38px;
   padding: 0 16px;
-  background: color-mix(in srgb, var(--bg-raised) 66%, transparent);
+  background: var(--bg-raised);
   color: var(--text-tertiary);
   font-size: var(--font-size-3xs);
   font-weight: var(--weight-bold);

@@ -928,7 +928,7 @@ const hasPgpSegments = computed(() =>
   margin: 10px;
   padding: 10px;
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--bg-overlay) 55%, transparent);
+  background: var(--bg-overlay);
   color: var(--text-tertiary);
   white-space: pre-wrap;
   font-size: var(--font-size-xs);
