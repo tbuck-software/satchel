@@ -81,6 +81,7 @@ describe('install-mac script', () => {
 describe('release-check script', () => {
   it('runs the complete release gate for both Rust crates and the production frontend', () => {
     for (const command of [
+      "['scripts/check-release-features.mjs']",
       "['run', 'i18n:check']",
       "['exec', 'vue-tsc', '-b']",
       "['fmt', '--all', '--check']",

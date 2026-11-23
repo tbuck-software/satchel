@@ -75,8 +75,6 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Audit JavaScript dependencies
-        # package.json ignores GHSA-vfj7-8cjw-p6xm (braces <=3.0.3, no patched release):
-        # build-time only, via @intlify/unplugin-vue-i18n. Review by 2026-11-13.
         run: pnpm audit --audit-level=moderate
 
       # Catches hard-coded UI copy: every user-visible string goes through t().
@@ -273,6 +271,9 @@ jobs:
 
       - name: Generated IPC contract
         run: node scripts/ipc-generate.mjs --check
+
+      - name: Release feature graph
+        run: node scripts/check-release-features.mjs
 
       - name: Formatting
         run: cargo fmt --all --check

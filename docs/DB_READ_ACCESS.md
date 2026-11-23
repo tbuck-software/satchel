@@ -2,7 +2,7 @@
 
 Status: gültig ab 2026-08-28
 Grundlage: `docs/adr/0005-api-cli-relay-entfernen.md`
-Schema: `src-tauri/src/db/migrations/0059_ai_read_views.sql`
+Schema: `crates/satchel-core/src/db/migrations/0059_ai_read_views.sql`
 
 Satchel hat keine API. KI-Werkzeuge und Skripte lesen die SQLite-Datei direkt.
 Damit das nicht bei jeder Schema-Änderung bricht, gibt es einen schmalen
@@ -18,13 +18,13 @@ Die Views sind die Abstraktionsschicht, die es sonst nicht gibt. `threads`,
 `messages` und `accounts` sind seit `0001_init` stetig gewachsen und wachsen
 weiter; die View entkoppelt den Leser davon. Umbenennen einer Tabellenspalte
 heißt: View im selben Commit nachziehen, damit der Spaltenname draußen gleich
-bleibt. `src-tauri/tests/db_views.rs` fängt ab, dass eine View still nicht mehr
-auflöst.
+bleibt. Der Test in `crates/satchel-core/tests/db_views.rs` prüft, dass die Views
+weiterhin abfragbar sind.
 
 ## Wo die Datei liegt
 
 Pro Kanal ein eigenes Verzeichnis unter Application Support, abgeleitet aus der
-Bundle-ID (siehe `app_support_dir` in `src-tauri/src/bin/satchel-cli.rs`):
+Bundle-ID (siehe `profile_dir` in `src-tauri/src/utils/mod.rs`):
 
 | Kanal  | Pfad                                                                  |
 | ------ | --------------------------------------------------------------------- |

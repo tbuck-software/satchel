@@ -77,6 +77,7 @@ if (process.env.SATCHEL_ALLOW_DIRTY_RELEASE !== '1') {
   }
 }
 
+run(process.execPath, ['scripts/check-release-features.mjs']);
 run('pnpm', ['run', 'i18n:check']);
 run('pnpm', ['exec', 'vue-tsc', '-b']);
 run('pnpm', ['exec', 'vitest', 'run', '--maxWorkers=3']);

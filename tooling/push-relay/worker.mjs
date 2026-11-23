@@ -8,6 +8,24 @@ const validSecret = value => typeof value === 'string' && /^[\w-]{43}$/.test(val
 const reply = (status, body) => Response.json(body ?? {}, { status, headers: { 'cache-control': 'no-store' } });
 const offerLifetime = 5 * 60_000;
 
+function sameSecret(value, expected) {
+  if (typeof value !== 'string' || typeof expected !== 'string') return false;
+  const input = encoder.encode(value);
+  const secret = encoder.encode(expected);
+  // The protocol fixes the lengths of auth digests, requests and challenges.
+  return input.length === secret.length && crypto.subtle.timingSafeEqual(input, secret);
+}
+
+function pairingCode() {
+  const range = 1_000_000;
+  const limit = Math.floor(2 ** 32 / range) * range;
+  const sample = new Uint32Array(1);
+  do {
+    crypto.getRandomValues(sample);
+  } while (sample[0] >= limit);
+  return String(sample[0] % range).padStart(6, '0');
+}
+
 async function body(request) {
   if (!request.body) return {};
   const reader = request.body.getReader();
@@ -26,31 +44,39 @@ async function body(request) {
   return data;
 }
 
-let cachedToken;
-async function accessToken(credentials) {
-  if (cachedToken?.email === credentials.client_email && cachedToken.until > Date.now()) return cachedToken.value;
+const cachedFcmSenders = new WeakMap();
+function fcmSender(env) {
+  const cached = cachedFcmSenders.get(env);
+  if (cached) return cached;
+  const { client_email, project_id, private_key } = JSON.parse(env.FCM_CREDENTIAL);
+  const pem = private_key.replace(/-----[^-]+-----|\s/g, '');
+  const key = crypto.subtle.importKey('pkcs8', Uint8Array.from(atob(pem), c => c.charCodeAt(0)),
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign']);
+  const sender = { email: client_email, project: project_id, key, token: null };
+  cachedFcmSenders.set(env, sender);
+  return sender;
+}
+
+async function accessToken(sender) {
+  if (sender.token?.until > Date.now()) return sender.token.value;
   const now = Math.floor(Date.now() / 1000);
   const encode = obj => base64url(encoder.encode(JSON.stringify(obj)));
-  const claims = { iss: credentials.client_email, scope: 'https://www.googleapis.com/auth/firebase.messaging',
+  const claims = { iss: sender.email, scope: 'https://www.googleapis.com/auth/firebase.messaging',
     aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600 };
   const jwt = encode({ alg: 'RS256', typ: 'JWT' }) + '.' + encode(claims);
-  const pem = credentials.private_key.replace(/-----[^-]+-----|\s/g, '');
-  const key = await crypto.subtle.importKey('pkcs8', Uint8Array.from(atob(pem), c => c.charCodeAt(0)),
-    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign']);
-  const signature = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, encoder.encode(jwt));
+  const signature = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', await sender.key, encoder.encode(jwt));
   const res = await fetch(claims.aud, { method: 'POST', signal: AbortSignal.timeout(8000),
     body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
       assertion: jwt + '.' + base64url(new Uint8Array(signature)) }) });
   if (!res.ok) throw new Error('sender');
   const token = await res.json();
-  cachedToken = { email: credentials.client_email, value: token.access_token,
-    until: Date.now() + (token.expires_in - 60) * 1000 };
-  return cachedToken.value;
+  sender.token = { value: token.access_token, until: Date.now() + (token.expires_in - 60) * 1000 };
+  return sender.token.value;
 }
 
 async function sendWake(env, link, challenge) {
-  const credentials = JSON.parse(env.FCM_CREDENTIAL);
-  const token = await accessToken(credentials);
+  const sender = fcmSender(env);
+  const token = await accessToken(sender);
   const stamp = String(Math.floor(Date.now() / 1000));
   const proofKey = await crypto.subtle.importKey('raw',
     Uint8Array.from(atob(link.key.replaceAll('-', '+').replaceAll('_', '/') + '='), c => c.charCodeAt(0)),
@@ -58,14 +84,15 @@ async function sendWake(env, link, challenge) {
   const proof = base64url(new Uint8Array(await crypto.subtle.sign('HMAC', proofKey, encoder.encode(link.id + ':' + stamp))));
   const data = { device: link.id, time: stamp, proof };
   if (challenge) data.verify = challenge;
-  const send = target => fetch('https://fcm.googleapis.com/v1/projects/' + credentials.project_id + '/messages:send',
+  const send = target => fetch('https://fcm.googleapis.com/v1/projects/' + sender.project + '/messages:send',
     { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' },
       signal: AbortSignal.timeout(8000), body: JSON.stringify({ message: { ...target, data,
         android: { priority: 'high', ttl: '3600s', collapse_key: 'satchel-mail' } } }) });
   let res = await send(link.token ? { token: link.token } : { topic: link.topic });
   if (!challenge && link.token && res.status === 404) {
-    const details = (await res.json()).error?.details;
-    if (details?.some(d => d.errorCode === 'UNREGISTERED')) {
+    const error = await res.json().catch(() => null);
+    const details = error?.error?.details;
+    if (Array.isArray(details) && details.some(d => d?.errorCode === 'UNREGISTERED')) {
       res = await send({ topic: link.topic });
       if (res.ok) link.token = null;
     }
@@ -110,22 +137,24 @@ export class PushLink {
     const auth = req.headers.get('authorization')?.replace(/^Bearer /, '');
     if (!validSecret(auth)) return reply(403);
     const who = await digest(auth);
-    const sender = who === link.sender, receiver = who === link.receiver;
+    const sender = sameSecret(who, link.sender);
+    let receiver = sameSecret(who, link.receiver);
     if (op === 'join' && link.phase === 'visible') {
       if (sender || !validSecret(payload.key) || typeof payload.token !== 'string' ||
           !/^[\w:-]{16,4096}$/.test(payload.token)) return reply(400);
       Object.assign(link, { receiver: who, phone: String(payload.phone ?? 'Android').replace(/[\x00-\x1f\x7f]/g, '').slice(0, 60), key: payload.key, token: payload.token,
-        code: String(crypto.getRandomValues(new Uint32Array(1))[0] % 1000000).padStart(6, '0'),
+        code: pairingCode(),
         request: id(), topic: 'satchel_' + random(32), phase: 'requested' });
       await store.put('link', link);
+      receiver = true;
     } else if (!sender && !receiver) return reply(403);
     if (op === 'join' || op === 'status') {
-      if (op === 'join' && who !== link.receiver) return reply(403);
+      if (op === 'join' && !receiver) return reply(403);
       return reply(200, { phase: link.phase, code: link.code, request: link.request, phone: link.phone,
-        ...(who === link.receiver ? { topic: link.topic } : {}) });
+        ...(receiver ? { topic: link.topic } : {}) });
     }
     if (op === 'remove') { await store.deleteAlarm(); await store.deleteAll(); return reply(200); }
-    if (op === 'approve' && sender && typeof payload.request === 'string' && payload.request === link.request) {
+    if (op === 'approve' && sender && sameSecret(payload.request, link.request)) {
       if (link.phase === 'verifying') return reply(200);
       if (link.phase !== 'requested') return reply(409);
       link.challenge = random(32);
@@ -135,7 +164,7 @@ export class PushLink {
       return reply(200);
     }
     if (op === 'received' && receiver && link.phase === 'active') return reply(200);
-    if (op === 'received' && receiver && link.phase === 'verifying' && payload.challenge === link.challenge) {
+    if (op === 'received' && receiver && link.phase === 'verifying' && sameSecret(payload.challenge, link.challenge)) {
       link.phase = 'active';
       delete link.challenge; delete link.code; delete link.request;
       await store.put('link', link);
